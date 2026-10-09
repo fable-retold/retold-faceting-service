@@ -1,0 +1,1402 @@
+{
+	"Relations": {
+		"MSSQL": {
+			"ParamTypes": {
+				"p_FacetSoftDelete_w8": "TinyInt",
+				"p_TestTenancy_w9": "Int",
+				"p_c1_PaymentMethod_w1_0": "VarChar",
+				"p_c1_PaymentMethod_w1_1": "VarChar",
+				"p_c2_TotalAmount_w2": "Decimal",
+				"p_c3_SaleDate_w5": "DateTime"
+			},
+			"Params": {
+				"p_FacetSoftDelete_w8": 0,
+				"p_TestTenancy_w9": 1,
+				"p_c1_PaymentMethod_w1_0": "Credit",
+				"p_c1_PaymentMethod_w1_1": "Cash",
+				"p_c2_TotalAmount_w2": 10,
+				"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+			},
+			"SQL": "SELECT [IDBookStoreSale], [IDBookStore], [PaymentMethod], [SaleDate], [TotalAmount] FROM [BookStoreSale] WHERE ( [PaymentMethod] IN ( @p_c1_PaymentMethod_w1_0, @p_c1_PaymentMethod_w1_1 ) AND [TotalAmount] >= @p_c2_TotalAmount_w2 AND ( [SaleDate] IS NULL OR [SaleDate] < @p_c3_SaleDate_w5 ) ) AND [Deleted] = @p_FacetSoftDelete_w8 AND [IDTenant] = @p_TestTenancy_w9"
+		},
+		"MySQL": {
+			"ParamTypes": {},
+			"Params": {
+				"p_FacetSoftDelete_w8": 0,
+				"p_TestTenancy_w9": 1,
+				"p_c1_PaymentMethod_w1": [
+					"Credit",
+					"Cash"
+				],
+				"p_c2_TotalAmount_w2": 10,
+				"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+			},
+			"SQL": "SELECT `IDBookStoreSale`, `IDBookStore`, `PaymentMethod`, `SaleDate`, `TotalAmount` FROM `BookStoreSale` WHERE ( PaymentMethod IN ( :p_c1_PaymentMethod_w1 ) AND TotalAmount >= :p_c2_TotalAmount_w2 AND ( SaleDate IS NULL OR SaleDate < :p_c3_SaleDate_w5 ) ) AND Deleted = :p_FacetSoftDelete_w8 AND IDTenant = :p_TestTenancy_w9"
+		},
+		"PostgreSQL": {
+			"ParamTypes": {},
+			"Params": {
+				"p_FacetSoftDelete_w8": 0,
+				"p_TestTenancy_w9": 1,
+				"p_c1_PaymentMethod_w1": [
+					"Credit",
+					"Cash"
+				],
+				"p_c2_TotalAmount_w2": 10,
+				"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+			},
+			"SQL": "SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM \"BookStoreSale\" WHERE ( \"PaymentMethod\" IN ( :p_c1_PaymentMethod_w1 ) AND \"TotalAmount\" >= :p_c2_TotalAmount_w2 AND ( \"SaleDate\" IS NULL OR \"SaleDate\" < :p_c3_SaleDate_w5 ) ) AND \"Deleted\" = :p_FacetSoftDelete_w8 AND \"IDTenant\" = :p_TestTenancy_w9"
+		},
+		"SQLite": {
+			"ParamTypes": {},
+			"Params": {
+				"p_FacetSoftDelete_w8": 0,
+				"p_TestTenancy_w9": 1,
+				"p_c1_PaymentMethod_w1_0": "Credit",
+				"p_c1_PaymentMethod_w1_1": "Cash",
+				"p_c2_TotalAmount_w2": 10,
+				"p_c3_SaleDate_w4": null,
+				"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+			},
+			"SQL": "SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM BookStoreSale WHERE ( `PaymentMethod` IN ( :p_c1_PaymentMethod_w1_0, :p_c1_PaymentMethod_w1_1 ) AND `TotalAmount` >= :p_c2_TotalAmount_w2 AND ( `SaleDate` IS :p_c3_SaleDate_w4 OR `SaleDate` < :p_c3_SaleDate_w5 ) ) AND `Deleted` = :p_FacetSoftDelete_w8 AND `IDTenant` = :p_TestTenancy_w9"
+		}
+	},
+	"Statements": {
+		"MSSQL": {
+			"Count": [
+				{
+					"Name": "Count",
+					"ParamTypes": {
+						"p_FacetSoftDelete_w8": "TinyInt",
+						"p_TestTenancy_w9": "Int",
+						"p_c1_PaymentMethod_w1_0": "VarChar",
+						"p_c1_PaymentMethod_w1_1": "VarChar",
+						"p_c2_TotalAmount_w2": "Decimal",
+						"p_c3_SaleDate_w5": "DateTime"
+					},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS [Total] FROM (SELECT [IDBookStoreSale], [IDBookStore], [PaymentMethod], [SaleDate], [TotalAmount] FROM [BookStoreSale] WHERE ( [PaymentMethod] IN ( @p_c1_PaymentMethod_w1_0, @p_c1_PaymentMethod_w1_1 ) AND [TotalAmount] >= @p_c2_TotalAmount_w2 AND ( [SaleDate] IS NULL OR [SaleDate] < @p_c3_SaleDate_w5 ) ) AND [Deleted] = @p_FacetSoftDelete_w8 AND [IDTenant] = @p_TestTenancy_w9) [p]"
+				}
+			],
+			"DateHistogramMonth": [
+				{
+					"Name": "DateHistogram",
+					"ParamTypes": {
+						"fMaxGroups": "Int",
+						"p_FacetSoftDelete_w8": "TinyInt",
+						"p_TestTenancy_w9": "Int",
+						"p_c1_PaymentMethod_w1_0": "VarChar",
+						"p_c1_PaymentMethod_w1_1": "VarChar",
+						"p_c2_TotalAmount_w2": "Decimal",
+						"p_c3_SaleDate_w5": "DateTime"
+					},
+					"Params": {
+						"fMaxGroups": 402,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT [g].[Key] AS [Key], [g].[Count] AS [Count], [g].[Lo] AS [Lo], [g].[Hi] AS [Hi] FROM (SELECT [k].[Key] AS [Key], count(*) AS [Count], CONVERT(varchar(19), min([k].[Value]), 120) AS [Lo], CONVERT(varchar(19), max([k].[Value]), 120) AS [Hi], ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS [RowNumber] FROM (SELECT CONVERT(varchar(19), CAST(DATEFROMPARTS(YEAR([v].[Value]), MONTH([v].[Value]), 1) AS datetime2(0)), 120) AS [Key], [v].[Value] AS [Value] FROM (SELECT [p].[SaleDate] AS [Value] FROM (SELECT [IDBookStoreSale], [IDBookStore], [PaymentMethod], [SaleDate], [TotalAmount] FROM [BookStoreSale] WHERE ( [PaymentMethod] IN ( @p_c1_PaymentMethod_w1_0, @p_c1_PaymentMethod_w1_1 ) AND [TotalAmount] >= @p_c2_TotalAmount_w2 AND ( [SaleDate] IS NULL OR [SaleDate] < @p_c3_SaleDate_w5 ) ) AND [Deleted] = @p_FacetSoftDelete_w8 AND [IDTenant] = @p_TestTenancy_w9) [p]) [v]) [k] GROUP BY [k].[Key]) [g] WHERE [g].[RowNumber] <= @fMaxGroups"
+				}
+			],
+			"DateHistogramQuarter": [
+				{
+					"Name": "DateHistogram",
+					"ParamTypes": {
+						"fMaxGroups": "Int",
+						"p_FacetSoftDelete_w8": "TinyInt",
+						"p_TestTenancy_w9": "Int",
+						"p_c1_PaymentMethod_w1_0": "VarChar",
+						"p_c1_PaymentMethod_w1_1": "VarChar",
+						"p_c2_TotalAmount_w2": "Decimal",
+						"p_c3_SaleDate_w5": "DateTime"
+					},
+					"Params": {
+						"fMaxGroups": 402,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT [g].[Key] AS [Key], [g].[Count] AS [Count], [g].[Lo] AS [Lo], [g].[Hi] AS [Hi] FROM (SELECT [k].[Key] AS [Key], count(*) AS [Count], CONVERT(varchar(19), min([k].[Value]), 120) AS [Lo], CONVERT(varchar(19), max([k].[Value]), 120) AS [Hi], ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS [RowNumber] FROM (SELECT CONVERT(varchar(19), CAST(DATEFROMPARTS(YEAR([v].[Value]), (DATEPART(quarter, [v].[Value]) - 1) * 3 + 1, 1) AS datetime2(0)), 120) AS [Key], [v].[Value] AS [Value] FROM (SELECT [p].[SaleDate] AS [Value] FROM (SELECT [IDBookStoreSale], [IDBookStore], [PaymentMethod], [SaleDate], [TotalAmount] FROM [BookStoreSale] WHERE ( [PaymentMethod] IN ( @p_c1_PaymentMethod_w1_0, @p_c1_PaymentMethod_w1_1 ) AND [TotalAmount] >= @p_c2_TotalAmount_w2 AND ( [SaleDate] IS NULL OR [SaleDate] < @p_c3_SaleDate_w5 ) ) AND [Deleted] = @p_FacetSoftDelete_w8 AND [IDTenant] = @p_TestTenancy_w9) [p]) [v]) [k] GROUP BY [k].[Key]) [g] WHERE [g].[RowNumber] <= @fMaxGroups"
+				}
+			],
+			"DateHistogramWeek": [
+				{
+					"Name": "DateHistogram",
+					"ParamTypes": {
+						"fMaxGroups": "Int",
+						"p_FacetSoftDelete_w8": "TinyInt",
+						"p_TestTenancy_w9": "Int",
+						"p_c1_PaymentMethod_w1_0": "VarChar",
+						"p_c1_PaymentMethod_w1_1": "VarChar",
+						"p_c2_TotalAmount_w2": "Decimal",
+						"p_c3_SaleDate_w5": "DateTime"
+					},
+					"Params": {
+						"fMaxGroups": 402,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT [g].[Key] AS [Key], [g].[Count] AS [Count], [g].[Lo] AS [Lo], [g].[Hi] AS [Hi] FROM (SELECT [k].[Key] AS [Key], count(*) AS [Count], CONVERT(varchar(19), min([k].[Value]), 120) AS [Lo], CONVERT(varchar(19), max([k].[Value]), 120) AS [Hi], ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS [RowNumber] FROM (SELECT CONVERT(varchar(19), CAST(DATEADD(day, -((DATEPART(weekday, [v].[Value]) + @@DATEFIRST - 2) % 7), CAST([v].[Value] AS date)) AS datetime2(0)), 120) AS [Key], [v].[Value] AS [Value] FROM (SELECT [p].[SaleDate] AS [Value] FROM (SELECT [IDBookStoreSale], [IDBookStore], [PaymentMethod], [SaleDate], [TotalAmount] FROM [BookStoreSale] WHERE ( [PaymentMethod] IN ( @p_c1_PaymentMethod_w1_0, @p_c1_PaymentMethod_w1_1 ) AND [TotalAmount] >= @p_c2_TotalAmount_w2 AND ( [SaleDate] IS NULL OR [SaleDate] < @p_c3_SaleDate_w5 ) ) AND [Deleted] = @p_FacetSoftDelete_w8 AND [IDTenant] = @p_TestTenancy_w9) [p]) [v]) [k] GROUP BY [k].[Key]) [g] WHERE [g].[RowNumber] <= @fMaxGroups"
+				}
+			],
+			"DistinctCount": [
+				{
+					"Name": "DistinctCount",
+					"ParamTypes": {
+						"p_FacetSoftDelete_w8": "TinyInt",
+						"p_TestTenancy_w9": "Int",
+						"p_c1_PaymentMethod_w1_0": "VarChar",
+						"p_c1_PaymentMethod_w1_1": "VarChar",
+						"p_c2_TotalAmount_w2": "Decimal",
+						"p_c3_SaleDate_w5": "DateTime"
+					},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS [Rows], count([p].[PaymentMethod] COLLATE Latin1_General_BIN2) AS [NonNull], count(DISTINCT [p].[PaymentMethod] COLLATE Latin1_General_BIN2) AS [Distinct] FROM (SELECT [IDBookStoreSale], [IDBookStore], [PaymentMethod], [SaleDate], [TotalAmount] FROM [BookStoreSale] WHERE ( [PaymentMethod] IN ( @p_c1_PaymentMethod_w1_0, @p_c1_PaymentMethod_w1_1 ) AND [TotalAmount] >= @p_c2_TotalAmount_w2 AND ( [SaleDate] IS NULL OR [SaleDate] < @p_c3_SaleDate_w5 ) ) AND [Deleted] = @p_FacetSoftDelete_w8 AND [IDTenant] = @p_TestTenancy_w9) [p]"
+				}
+			],
+			"MissingDate": [
+				{
+					"Name": "Missing",
+					"ParamTypes": {
+						"p_FacetSoftDelete_w8": "TinyInt",
+						"p_TestTenancy_w9": "Int",
+						"p_c1_PaymentMethod_w1_0": "VarChar",
+						"p_c1_PaymentMethod_w1_1": "VarChar",
+						"p_c2_TotalAmount_w2": "Decimal",
+						"p_c3_SaleDate_w5": "DateTime"
+					},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS [Rows], count(CONVERT(varchar(19), [p].[SaleDate], 120)) AS [NonNull] FROM (SELECT [IDBookStoreSale], [IDBookStore], [PaymentMethod], [SaleDate], [TotalAmount] FROM [BookStoreSale] WHERE ( [PaymentMethod] IN ( @p_c1_PaymentMethod_w1_0, @p_c1_PaymentMethod_w1_1 ) AND [TotalAmount] >= @p_c2_TotalAmount_w2 AND ( [SaleDate] IS NULL OR [SaleDate] < @p_c3_SaleDate_w5 ) ) AND [Deleted] = @p_FacetSoftDelete_w8 AND [IDTenant] = @p_TestTenancy_w9) [p]"
+				}
+			],
+			"NumericHistogramEdges": [
+				{
+					"Name": "NumericBounds",
+					"ParamTypes": {
+						"p_FacetSoftDelete_w8": "TinyInt",
+						"p_TestTenancy_w9": "Int",
+						"p_c1_PaymentMethod_w1_0": "VarChar",
+						"p_c1_PaymentMethod_w1_1": "VarChar",
+						"p_c2_TotalAmount_w2": "Decimal",
+						"p_c3_SaleDate_w5": "DateTime"
+					},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS [Rows], count([p].[TotalAmount]) AS [NonNull], min([p].[TotalAmount]) AS [Lo], max([p].[TotalAmount]) AS [Hi] FROM (SELECT [IDBookStoreSale], [IDBookStore], [PaymentMethod], [SaleDate], [TotalAmount] FROM [BookStoreSale] WHERE ( [PaymentMethod] IN ( @p_c1_PaymentMethod_w1_0, @p_c1_PaymentMethod_w1_1 ) AND [TotalAmount] >= @p_c2_TotalAmount_w2 AND ( [SaleDate] IS NULL OR [SaleDate] < @p_c3_SaleDate_w5 ) ) AND [Deleted] = @p_FacetSoftDelete_w8 AND [IDTenant] = @p_TestTenancy_w9) [p]"
+				},
+				{
+					"Name": "NumericHistogram",
+					"ParamTypes": {
+						"fE0": "Float",
+						"fE1": "Float",
+						"fE2": "Float",
+						"fE3": "Float",
+						"p_FacetSoftDelete_w8": "TinyInt",
+						"p_TestTenancy_w9": "Int",
+						"p_c1_PaymentMethod_w1_0": "VarChar",
+						"p_c1_PaymentMethod_w1_1": "VarChar",
+						"p_c2_TotalAmount_w2": "Decimal",
+						"p_c3_SaleDate_w5": "DateTime"
+					},
+					"Params": {
+						"fE0": 0,
+						"fE1": 25,
+						"fE2": 100,
+						"fE3": 1000,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT [d].[Key] AS [Key], count(*) AS [Count] FROM (SELECT CASE WHEN [p].[TotalAmount] >= @fE0 AND [p].[TotalAmount] < @fE1 THEN 0 WHEN [p].[TotalAmount] >= @fE1 AND [p].[TotalAmount] < @fE2 THEN 1 WHEN [p].[TotalAmount] >= @fE2 AND [p].[TotalAmount] < @fE3 THEN 2 WHEN [p].[TotalAmount] >= @fE3 THEN 3 ELSE NULL END AS [Key] FROM (SELECT [IDBookStoreSale], [IDBookStore], [PaymentMethod], [SaleDate], [TotalAmount] FROM [BookStoreSale] WHERE ( [PaymentMethod] IN ( @p_c1_PaymentMethod_w1_0, @p_c1_PaymentMethod_w1_1 ) AND [TotalAmount] >= @p_c2_TotalAmount_w2 AND ( [SaleDate] IS NULL OR [SaleDate] < @p_c3_SaleDate_w5 ) ) AND [Deleted] = @p_FacetSoftDelete_w8 AND [IDTenant] = @p_TestTenancy_w9) [p] WHERE [p].[TotalAmount] IS NOT NULL) [d] GROUP BY [d].[Key]"
+				}
+			],
+			"NumericHistogramNice": [
+				{
+					"Name": "NumericBounds",
+					"ParamTypes": {
+						"p_FacetSoftDelete_w8": "TinyInt",
+						"p_TestTenancy_w9": "Int",
+						"p_c1_PaymentMethod_w1_0": "VarChar",
+						"p_c1_PaymentMethod_w1_1": "VarChar",
+						"p_c2_TotalAmount_w2": "Decimal",
+						"p_c3_SaleDate_w5": "DateTime"
+					},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS [Rows], count([p].[TotalAmount]) AS [NonNull], min([p].[TotalAmount]) AS [Lo], max([p].[TotalAmount]) AS [Hi] FROM (SELECT [IDBookStoreSale], [IDBookStore], [PaymentMethod], [SaleDate], [TotalAmount] FROM [BookStoreSale] WHERE ( [PaymentMethod] IN ( @p_c1_PaymentMethod_w1_0, @p_c1_PaymentMethod_w1_1 ) AND [TotalAmount] >= @p_c2_TotalAmount_w2 AND ( [SaleDate] IS NULL OR [SaleDate] < @p_c3_SaleDate_w5 ) ) AND [Deleted] = @p_FacetSoftDelete_w8 AND [IDTenant] = @p_TestTenancy_w9) [p]"
+				},
+				{
+					"Name": "NumericHistogram",
+					"ParamTypes": {
+						"fFactor": "BigInt",
+						"fLastIndex": "Int",
+						"fLoUnits": "BigInt",
+						"fWidthUnits": "BigInt",
+						"p_FacetSoftDelete_w8": "TinyInt",
+						"p_TestTenancy_w9": "Int",
+						"p_c1_PaymentMethod_w1_0": "VarChar",
+						"p_c1_PaymentMethod_w1_1": "VarChar",
+						"p_c2_TotalAmount_w2": "Decimal",
+						"p_c3_SaleDate_w5": "DateTime"
+					},
+					"Params": {
+						"fFactor": 100,
+						"fLastIndex": 9,
+						"fLoUnits": 0,
+						"fWidthUnits": 50000,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT [d].[Key] AS [Key], count(*) AS [Count] FROM (SELECT CASE WHEN [p].[TotalAmount] < ((@fLoUnits + ((CASE WHEN FLOOR((ROUND([p].[TotalAmount] * @fFactor, 0) - @fLoUnits) / @fWidthUnits) > @fLastIndex THEN @fLastIndex ELSE FLOOR((ROUND([p].[TotalAmount] * @fFactor, 0) - @fLoUnits) / @fWidthUnits) END)) * @fWidthUnits) / @fFactor) THEN (CASE WHEN FLOOR((ROUND([p].[TotalAmount] * @fFactor, 0) - @fLoUnits) / @fWidthUnits) > @fLastIndex THEN @fLastIndex ELSE FLOOR((ROUND([p].[TotalAmount] * @fFactor, 0) - @fLoUnits) / @fWidthUnits) END) - 1 WHEN (CASE WHEN FLOOR((ROUND([p].[TotalAmount] * @fFactor, 0) - @fLoUnits) / @fWidthUnits) > @fLastIndex THEN @fLastIndex ELSE FLOOR((ROUND([p].[TotalAmount] * @fFactor, 0) - @fLoUnits) / @fWidthUnits) END) < @fLastIndex AND [p].[TotalAmount] >= ((@fLoUnits + ((CASE WHEN FLOOR((ROUND([p].[TotalAmount] * @fFactor, 0) - @fLoUnits) / @fWidthUnits) > @fLastIndex THEN @fLastIndex ELSE FLOOR((ROUND([p].[TotalAmount] * @fFactor, 0) - @fLoUnits) / @fWidthUnits) END) + 1) * @fWidthUnits) / @fFactor) THEN (CASE WHEN FLOOR((ROUND([p].[TotalAmount] * @fFactor, 0) - @fLoUnits) / @fWidthUnits) > @fLastIndex THEN @fLastIndex ELSE FLOOR((ROUND([p].[TotalAmount] * @fFactor, 0) - @fLoUnits) / @fWidthUnits) END) + 1 ELSE (CASE WHEN FLOOR((ROUND([p].[TotalAmount] * @fFactor, 0) - @fLoUnits) / @fWidthUnits) > @fLastIndex THEN @fLastIndex ELSE FLOOR((ROUND([p].[TotalAmount] * @fFactor, 0) - @fLoUnits) / @fWidthUnits) END) END AS [Key] FROM (SELECT [IDBookStoreSale], [IDBookStore], [PaymentMethod], [SaleDate], [TotalAmount] FROM [BookStoreSale] WHERE ( [PaymentMethod] IN ( @p_c1_PaymentMethod_w1_0, @p_c1_PaymentMethod_w1_1 ) AND [TotalAmount] >= @p_c2_TotalAmount_w2 AND ( [SaleDate] IS NULL OR [SaleDate] < @p_c3_SaleDate_w5 ) ) AND [Deleted] = @p_FacetSoftDelete_w8 AND [IDTenant] = @p_TestTenancy_w9) [p] WHERE [p].[TotalAmount] IS NOT NULL) [d] GROUP BY [d].[Key]"
+				}
+			],
+			"PivotColumnDate": [
+				{
+					"Name": "Pivot",
+					"ParamTypes": {
+						"fMaxGroups": "Int",
+						"p_FacetSoftDelete_w8": "TinyInt",
+						"p_TestTenancy_w9": "Int",
+						"p_c1_PaymentMethod_w1_0": "VarChar",
+						"p_c1_PaymentMethod_w1_1": "VarChar",
+						"p_c2_TotalAmount_w2": "Decimal",
+						"p_c3_SaleDate_w5": "DateTime"
+					},
+					"Params": {
+						"fMaxGroups": 100001,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT [c].[K1] AS [K1], [c].[K2] AS [K2], [c].[Count] AS [Count] FROM (SELECT [d].[K1] AS [K1], [d].[K2] AS [K2], count(*) AS [Count], ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS [RowNumber] FROM (SELECT [p].[PaymentMethod] COLLATE Latin1_General_BIN2 AS [K1], CONVERT(varchar(19), CAST(DATEFROMPARTS(YEAR([p].[SaleDate]), 1, 1) AS datetime2(0)), 120) AS [K2] FROM (SELECT [IDBookStoreSale], [IDBookStore], [PaymentMethod], [SaleDate], [TotalAmount] FROM [BookStoreSale] WHERE ( [PaymentMethod] IN ( @p_c1_PaymentMethod_w1_0, @p_c1_PaymentMethod_w1_1 ) AND [TotalAmount] >= @p_c2_TotalAmount_w2 AND ( [SaleDate] IS NULL OR [SaleDate] < @p_c3_SaleDate_w5 ) ) AND [Deleted] = @p_FacetSoftDelete_w8 AND [IDTenant] = @p_TestTenancy_w9) [p]) [d] GROUP BY [d].[K1], [d].[K2]) [c] WHERE [c].[RowNumber] <= @fMaxGroups"
+				}
+			],
+			"PivotRangeColumn": [
+				{
+					"Name": "Pivot",
+					"ParamTypes": {
+						"fMaxGroups": "Int",
+						"fR0To": "Float",
+						"fR1From": "Float",
+						"p_FacetSoftDelete_w8": "TinyInt",
+						"p_TestTenancy_w9": "Int",
+						"p_c1_PaymentMethod_w1_0": "VarChar",
+						"p_c1_PaymentMethod_w1_1": "VarChar",
+						"p_c2_TotalAmount_w2": "Decimal",
+						"p_c3_SaleDate_w5": "DateTime"
+					},
+					"Params": {
+						"fMaxGroups": 100001,
+						"fR0To": 25,
+						"fR1From": 25,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT [c].[K1] AS [K1], [c].[K2] AS [K2], [c].[Count] AS [Count] FROM (SELECT [d].[K1] AS [K1], [d].[K2] AS [K2], count(*) AS [Count], ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS [RowNumber] FROM (SELECT CASE WHEN [p].[TotalAmount] IS NULL THEN -1 WHEN [p].[TotalAmount] < @fR0To THEN 0 WHEN [p].[TotalAmount] >= @fR1From THEN 1 ELSE -2 END AS [K1], [p].[IDBookStore] AS [K2] FROM (SELECT [IDBookStoreSale], [IDBookStore], [PaymentMethod], [SaleDate], [TotalAmount] FROM [BookStoreSale] WHERE ( [PaymentMethod] IN ( @p_c1_PaymentMethod_w1_0, @p_c1_PaymentMethod_w1_1 ) AND [TotalAmount] >= @p_c2_TotalAmount_w2 AND ( [SaleDate] IS NULL OR [SaleDate] < @p_c3_SaleDate_w5 ) ) AND [Deleted] = @p_FacetSoftDelete_w8 AND [IDTenant] = @p_TestTenancy_w9) [p]) [d] GROUP BY [d].[K1], [d].[K2]) [c] WHERE [c].[RowNumber] <= @fMaxGroups"
+				}
+			],
+			"Ranges": [
+				{
+					"Name": "Ranges",
+					"ParamTypes": {
+						"fR0To": "Float",
+						"fR1From": "Float",
+						"fR1To": "Float",
+						"fR2From": "Float",
+						"p_FacetSoftDelete_w8": "TinyInt",
+						"p_TestTenancy_w9": "Int",
+						"p_c1_PaymentMethod_w1_0": "VarChar",
+						"p_c1_PaymentMethod_w1_1": "VarChar",
+						"p_c2_TotalAmount_w2": "Decimal",
+						"p_c3_SaleDate_w5": "DateTime"
+					},
+					"Params": {
+						"fR0To": 25,
+						"fR1From": 25,
+						"fR1To": 250,
+						"fR2From": 250,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT [d].[Key] AS [Key], count(*) AS [Count] FROM (SELECT CASE WHEN [p].[TotalAmount] IS NULL THEN -1 WHEN [p].[TotalAmount] < @fR0To THEN 0 WHEN [p].[TotalAmount] >= @fR1From AND [p].[TotalAmount] < @fR1To THEN 1 WHEN [p].[TotalAmount] >= @fR2From THEN 2 ELSE -2 END AS [Key] FROM (SELECT [IDBookStoreSale], [IDBookStore], [PaymentMethod], [SaleDate], [TotalAmount] FROM [BookStoreSale] WHERE ( [PaymentMethod] IN ( @p_c1_PaymentMethod_w1_0, @p_c1_PaymentMethod_w1_1 ) AND [TotalAmount] >= @p_c2_TotalAmount_w2 AND ( [SaleDate] IS NULL OR [SaleDate] < @p_c3_SaleDate_w5 ) ) AND [Deleted] = @p_FacetSoftDelete_w8 AND [IDTenant] = @p_TestTenancy_w9) [p]) [d] GROUP BY [d].[Key]"
+				}
+			],
+			"StatsDate": [
+				{
+					"Name": "Stats",
+					"ParamTypes": {
+						"p_FacetSoftDelete_w8": "TinyInt",
+						"p_TestTenancy_w9": "Int",
+						"p_c1_PaymentMethod_w1_0": "VarChar",
+						"p_c1_PaymentMethod_w1_1": "VarChar",
+						"p_c2_TotalAmount_w2": "Decimal",
+						"p_c3_SaleDate_w5": "DateTime"
+					},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS [Rows], count(CONVERT(varchar(19), [p].[SaleDate], 120)) AS [NonNull], min(CONVERT(varchar(19), [p].[SaleDate], 120)) AS [Min], max(CONVERT(varchar(19), [p].[SaleDate], 120)) AS [Max], NULL AS [SumUnits] FROM (SELECT [IDBookStoreSale], [IDBookStore], [PaymentMethod], [SaleDate], [TotalAmount] FROM [BookStoreSale] WHERE ( [PaymentMethod] IN ( @p_c1_PaymentMethod_w1_0, @p_c1_PaymentMethod_w1_1 ) AND [TotalAmount] >= @p_c2_TotalAmount_w2 AND ( [SaleDate] IS NULL OR [SaleDate] < @p_c3_SaleDate_w5 ) ) AND [Deleted] = @p_FacetSoftDelete_w8 AND [IDTenant] = @p_TestTenancy_w9) [p]"
+				}
+			],
+			"StatsDecimal": [
+				{
+					"Name": "Stats",
+					"ParamTypes": {
+						"fFactor": "BigInt",
+						"p_FacetSoftDelete_w8": "TinyInt",
+						"p_TestTenancy_w9": "Int",
+						"p_c1_PaymentMethod_w1_0": "VarChar",
+						"p_c1_PaymentMethod_w1_1": "VarChar",
+						"p_c2_TotalAmount_w2": "Decimal",
+						"p_c3_SaleDate_w5": "DateTime"
+					},
+					"Params": {
+						"fFactor": 100,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS [Rows], count([p].[TotalAmount]) AS [NonNull], min([p].[TotalAmount]) AS [Min], max([p].[TotalAmount]) AS [Max], sum(CAST(ROUND([p].[TotalAmount] * @fFactor, 0) AS bigint)) AS [SumUnits] FROM (SELECT [IDBookStoreSale], [IDBookStore], [PaymentMethod], [SaleDate], [TotalAmount] FROM [BookStoreSale] WHERE ( [PaymentMethod] IN ( @p_c1_PaymentMethod_w1_0, @p_c1_PaymentMethod_w1_1 ) AND [TotalAmount] >= @p_c2_TotalAmount_w2 AND ( [SaleDate] IS NULL OR [SaleDate] < @p_c3_SaleDate_w5 ) ) AND [Deleted] = @p_FacetSoftDelete_w8 AND [IDTenant] = @p_TestTenancy_w9) [p]"
+				}
+			],
+			"Terms": [
+				{
+					"Name": "Terms",
+					"ParamTypes": {
+						"fMaxGroups": "Int",
+						"fTopPlusOne": "Int",
+						"p_FacetSoftDelete_w8": "TinyInt",
+						"p_TestTenancy_w9": "Int",
+						"p_c1_PaymentMethod_w1_0": "VarChar",
+						"p_c1_PaymentMethod_w1_1": "VarChar",
+						"p_c2_TotalAmount_w2": "Decimal",
+						"p_c3_SaleDate_w5": "DateTime"
+					},
+					"Params": {
+						"fMaxGroups": 10000,
+						"fTopPlusOne": 6,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT [r].[Key] AS [Key], [r].[Count] AS [Count], [r].[FacetTotal] AS [FacetTotal], [r].[FacetMissing] AS [FacetMissing], [r].[FacetDistinct] AS [FacetDistinct] FROM (SELECT [t].[Key] AS [Key], [t].[Count] AS [Count], sum([t].[Count]) OVER () AS [FacetTotal], sum(CASE WHEN [t].[Key] IS NULL THEN [t].[Count] ELSE 0 END) OVER () AS [FacetMissing], count([t].[Key]) OVER () AS [FacetDistinct], rank() OVER (ORDER BY CASE WHEN [t].[Key] IS NULL THEN 1 ELSE 0 END, [t].[Count] DESC) AS [RowRank], ROW_NUMBER() OVER (ORDER BY CASE WHEN [t].[Key] IS NULL THEN 1 ELSE 0 END, [t].[Count] DESC, [t].[Key]) AS [RowNumber] FROM (SELECT [d].[Key] AS [Key], count(*) AS [Count] FROM (SELECT [p].[PaymentMethod] COLLATE Latin1_General_BIN2 AS [Key] FROM (SELECT [IDBookStoreSale], [IDBookStore], [PaymentMethod], [SaleDate], [TotalAmount] FROM [BookStoreSale] WHERE ( [PaymentMethod] IN ( @p_c1_PaymentMethod_w1_0, @p_c1_PaymentMethod_w1_1 ) AND [TotalAmount] >= @p_c2_TotalAmount_w2 AND ( [SaleDate] IS NULL OR [SaleDate] < @p_c3_SaleDate_w5 ) ) AND [Deleted] = @p_FacetSoftDelete_w8 AND [IDTenant] = @p_TestTenancy_w9) [p]) [d] GROUP BY [d].[Key]) [t]) [r] WHERE ([r].[RowRank] <= @fTopPlusOne AND [r].[RowNumber] <= @fMaxGroups)"
+				}
+			],
+			"TermsKeyAsc": [
+				{
+					"Name": "Terms",
+					"ParamTypes": {
+						"fMaxGroups": "Int",
+						"fTopPlusOne": "Int",
+						"p_FacetSoftDelete_w8": "TinyInt",
+						"p_TestTenancy_w9": "Int",
+						"p_c1_PaymentMethod_w1_0": "VarChar",
+						"p_c1_PaymentMethod_w1_1": "VarChar",
+						"p_c2_TotalAmount_w2": "Decimal",
+						"p_c3_SaleDate_w5": "DateTime"
+					},
+					"Params": {
+						"fMaxGroups": 10000,
+						"fTopPlusOne": 6,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT [r].[Key] AS [Key], [r].[Count] AS [Count], [r].[FacetTotal] AS [FacetTotal], [r].[FacetMissing] AS [FacetMissing], [r].[FacetDistinct] AS [FacetDistinct] FROM (SELECT [t].[Key] AS [Key], [t].[Count] AS [Count], sum([t].[Count]) OVER () AS [FacetTotal], sum(CASE WHEN [t].[Key] IS NULL THEN [t].[Count] ELSE 0 END) OVER () AS [FacetMissing], count([t].[Key]) OVER () AS [FacetDistinct], rank() OVER (ORDER BY CASE WHEN [t].[Key] IS NULL THEN 1 ELSE 0 END, [t].[Count] DESC) AS [RowRank], ROW_NUMBER() OVER (ORDER BY CASE WHEN [t].[Key] IS NULL THEN 1 ELSE 0 END, [t].[Count] DESC, [t].[Key]) AS [RowNumber] FROM (SELECT [d].[Key] AS [Key], count(*) AS [Count] FROM (SELECT [p].[IDBookStore] AS [Key] FROM (SELECT [IDBookStoreSale], [IDBookStore], [PaymentMethod], [SaleDate], [TotalAmount] FROM [BookStoreSale] WHERE ( [PaymentMethod] IN ( @p_c1_PaymentMethod_w1_0, @p_c1_PaymentMethod_w1_1 ) AND [TotalAmount] >= @p_c2_TotalAmount_w2 AND ( [SaleDate] IS NULL OR [SaleDate] < @p_c3_SaleDate_w5 ) ) AND [Deleted] = @p_FacetSoftDelete_w8 AND [IDTenant] = @p_TestTenancy_w9) [p]) [d] GROUP BY [d].[Key]) [t]) [r] WHERE ([r].[RowRank] <= @fTopPlusOne AND [r].[RowNumber] <= @fMaxGroups)"
+				}
+			]
+		},
+		"MySQL": {
+			"Count": [
+				{
+					"Name": "Count",
+					"ParamTypes": {},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS `Total` FROM (SELECT `IDBookStoreSale`, `IDBookStore`, `PaymentMethod`, `SaleDate`, `TotalAmount` FROM `BookStoreSale` WHERE ( PaymentMethod IN ( :p_c1_PaymentMethod_w1 ) AND TotalAmount >= :p_c2_TotalAmount_w2 AND ( SaleDate IS NULL OR SaleDate < :p_c3_SaleDate_w5 ) ) AND Deleted = :p_FacetSoftDelete_w8 AND IDTenant = :p_TestTenancy_w9) `p`"
+				}
+			],
+			"DateHistogramMonth": [
+				{
+					"Name": "DateHistogram",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 402,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT `g`.`Key` AS `Key`, `g`.`Count` AS `Count`, `g`.`Lo` AS `Lo`, `g`.`Hi` AS `Hi` FROM (SELECT `k`.`Key` AS `Key`, count(*) AS `Count`, DATE_FORMAT(min(`k`.`Value`), '%Y-%m-%d %H:%i:%s') AS `Lo`, DATE_FORMAT(max(`k`.`Value`), '%Y-%m-%d %H:%i:%s') AS `Hi`, row_number() OVER () AS `RowNumber` FROM (SELECT DATE_FORMAT(`v`.`Value`, '%Y-%m-01 00:00:00') AS `Key`, `v`.`Value` AS `Value` FROM (SELECT `p`.`SaleDate` AS `Value` FROM (SELECT `IDBookStoreSale`, `IDBookStore`, `PaymentMethod`, `SaleDate`, `TotalAmount` FROM `BookStoreSale` WHERE ( PaymentMethod IN ( :p_c1_PaymentMethod_w1 ) AND TotalAmount >= :p_c2_TotalAmount_w2 AND ( SaleDate IS NULL OR SaleDate < :p_c3_SaleDate_w5 ) ) AND Deleted = :p_FacetSoftDelete_w8 AND IDTenant = :p_TestTenancy_w9) `p`) `v`) `k` GROUP BY `k`.`Key`) `g` WHERE `g`.`RowNumber` <= :fMaxGroups"
+				}
+			],
+			"DateHistogramQuarter": [
+				{
+					"Name": "DateHistogram",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 402,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT `g`.`Key` AS `Key`, `g`.`Count` AS `Count`, `g`.`Lo` AS `Lo`, `g`.`Hi` AS `Hi` FROM (SELECT `k`.`Key` AS `Key`, count(*) AS `Count`, DATE_FORMAT(min(`k`.`Value`), '%Y-%m-%d %H:%i:%s') AS `Lo`, DATE_FORMAT(max(`k`.`Value`), '%Y-%m-%d %H:%i:%s') AS `Hi`, row_number() OVER () AS `RowNumber` FROM (SELECT CONCAT(YEAR(`v`.`Value`), '-', LPAD((QUARTER(`v`.`Value`) - 1) * 3 + 1, 2, '0'), '-01 00:00:00') AS `Key`, `v`.`Value` AS `Value` FROM (SELECT `p`.`SaleDate` AS `Value` FROM (SELECT `IDBookStoreSale`, `IDBookStore`, `PaymentMethod`, `SaleDate`, `TotalAmount` FROM `BookStoreSale` WHERE ( PaymentMethod IN ( :p_c1_PaymentMethod_w1 ) AND TotalAmount >= :p_c2_TotalAmount_w2 AND ( SaleDate IS NULL OR SaleDate < :p_c3_SaleDate_w5 ) ) AND Deleted = :p_FacetSoftDelete_w8 AND IDTenant = :p_TestTenancy_w9) `p`) `v`) `k` GROUP BY `k`.`Key`) `g` WHERE `g`.`RowNumber` <= :fMaxGroups"
+				}
+			],
+			"DateHistogramWeek": [
+				{
+					"Name": "DateHistogram",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 402,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT `g`.`Key` AS `Key`, `g`.`Count` AS `Count`, `g`.`Lo` AS `Lo`, `g`.`Hi` AS `Hi` FROM (SELECT `k`.`Key` AS `Key`, count(*) AS `Count`, DATE_FORMAT(min(`k`.`Value`), '%Y-%m-%d %H:%i:%s') AS `Lo`, DATE_FORMAT(max(`k`.`Value`), '%Y-%m-%d %H:%i:%s') AS `Hi`, row_number() OVER () AS `RowNumber` FROM (SELECT DATE_FORMAT(DATE_SUB(DATE(`v`.`Value`), INTERVAL WEEKDAY(`v`.`Value`) DAY), '%Y-%m-%d 00:00:00') AS `Key`, `v`.`Value` AS `Value` FROM (SELECT `p`.`SaleDate` AS `Value` FROM (SELECT `IDBookStoreSale`, `IDBookStore`, `PaymentMethod`, `SaleDate`, `TotalAmount` FROM `BookStoreSale` WHERE ( PaymentMethod IN ( :p_c1_PaymentMethod_w1 ) AND TotalAmount >= :p_c2_TotalAmount_w2 AND ( SaleDate IS NULL OR SaleDate < :p_c3_SaleDate_w5 ) ) AND Deleted = :p_FacetSoftDelete_w8 AND IDTenant = :p_TestTenancy_w9) `p`) `v`) `k` GROUP BY `k`.`Key`) `g` WHERE `g`.`RowNumber` <= :fMaxGroups"
+				}
+			],
+			"DistinctCount": [
+				{
+					"Name": "DistinctCount",
+					"ParamTypes": {},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS `Rows`, count(CONVERT(`p`.`PaymentMethod` USING utf8mb4) COLLATE utf8mb4_bin) AS `NonNull`, count(DISTINCT CONVERT(`p`.`PaymentMethod` USING utf8mb4) COLLATE utf8mb4_bin) AS `Distinct` FROM (SELECT `IDBookStoreSale`, `IDBookStore`, `PaymentMethod`, `SaleDate`, `TotalAmount` FROM `BookStoreSale` WHERE ( PaymentMethod IN ( :p_c1_PaymentMethod_w1 ) AND TotalAmount >= :p_c2_TotalAmount_w2 AND ( SaleDate IS NULL OR SaleDate < :p_c3_SaleDate_w5 ) ) AND Deleted = :p_FacetSoftDelete_w8 AND IDTenant = :p_TestTenancy_w9) `p`"
+				}
+			],
+			"MissingDate": [
+				{
+					"Name": "Missing",
+					"ParamTypes": {},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS `Rows`, count(DATE_FORMAT(`p`.`SaleDate`, '%Y-%m-%d %H:%i:%s')) AS `NonNull` FROM (SELECT `IDBookStoreSale`, `IDBookStore`, `PaymentMethod`, `SaleDate`, `TotalAmount` FROM `BookStoreSale` WHERE ( PaymentMethod IN ( :p_c1_PaymentMethod_w1 ) AND TotalAmount >= :p_c2_TotalAmount_w2 AND ( SaleDate IS NULL OR SaleDate < :p_c3_SaleDate_w5 ) ) AND Deleted = :p_FacetSoftDelete_w8 AND IDTenant = :p_TestTenancy_w9) `p`"
+				}
+			],
+			"NumericHistogramEdges": [
+				{
+					"Name": "NumericBounds",
+					"ParamTypes": {},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS `Rows`, count(`p`.`TotalAmount`) AS `NonNull`, min(`p`.`TotalAmount`) AS `Lo`, max(`p`.`TotalAmount`) AS `Hi` FROM (SELECT `IDBookStoreSale`, `IDBookStore`, `PaymentMethod`, `SaleDate`, `TotalAmount` FROM `BookStoreSale` WHERE ( PaymentMethod IN ( :p_c1_PaymentMethod_w1 ) AND TotalAmount >= :p_c2_TotalAmount_w2 AND ( SaleDate IS NULL OR SaleDate < :p_c3_SaleDate_w5 ) ) AND Deleted = :p_FacetSoftDelete_w8 AND IDTenant = :p_TestTenancy_w9) `p`"
+				},
+				{
+					"Name": "NumericHistogram",
+					"ParamTypes": {},
+					"Params": {
+						"fE0": 0,
+						"fE1": 25,
+						"fE2": 100,
+						"fE3": 1000,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT `d`.`Key` AS `Key`, count(*) AS `Count` FROM (SELECT CASE WHEN `p`.`TotalAmount` >= :fE0 AND `p`.`TotalAmount` < :fE1 THEN 0 WHEN `p`.`TotalAmount` >= :fE1 AND `p`.`TotalAmount` < :fE2 THEN 1 WHEN `p`.`TotalAmount` >= :fE2 AND `p`.`TotalAmount` < :fE3 THEN 2 WHEN `p`.`TotalAmount` >= :fE3 THEN 3 ELSE NULL END AS `Key` FROM (SELECT `IDBookStoreSale`, `IDBookStore`, `PaymentMethod`, `SaleDate`, `TotalAmount` FROM `BookStoreSale` WHERE ( PaymentMethod IN ( :p_c1_PaymentMethod_w1 ) AND TotalAmount >= :p_c2_TotalAmount_w2 AND ( SaleDate IS NULL OR SaleDate < :p_c3_SaleDate_w5 ) ) AND Deleted = :p_FacetSoftDelete_w8 AND IDTenant = :p_TestTenancy_w9) `p` WHERE `p`.`TotalAmount` IS NOT NULL) `d` GROUP BY `d`.`Key`"
+				}
+			],
+			"NumericHistogramNice": [
+				{
+					"Name": "NumericBounds",
+					"ParamTypes": {},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS `Rows`, count(`p`.`TotalAmount`) AS `NonNull`, min(`p`.`TotalAmount`) AS `Lo`, max(`p`.`TotalAmount`) AS `Hi` FROM (SELECT `IDBookStoreSale`, `IDBookStore`, `PaymentMethod`, `SaleDate`, `TotalAmount` FROM `BookStoreSale` WHERE ( PaymentMethod IN ( :p_c1_PaymentMethod_w1 ) AND TotalAmount >= :p_c2_TotalAmount_w2 AND ( SaleDate IS NULL OR SaleDate < :p_c3_SaleDate_w5 ) ) AND Deleted = :p_FacetSoftDelete_w8 AND IDTenant = :p_TestTenancy_w9) `p`"
+				},
+				{
+					"Name": "NumericHistogram",
+					"ParamTypes": {},
+					"Params": {
+						"fFactor": 100,
+						"fLastIndex": 9,
+						"fLoUnits": 0,
+						"fWidthUnits": 50000,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT `d`.`Key` AS `Key`, count(*) AS `Count` FROM (SELECT CASE WHEN `p`.`TotalAmount` < ((:fLoUnits + (LEAST(FLOOR((ROUND(`p`.`TotalAmount` * :fFactor) - :fLoUnits) / :fWidthUnits), :fLastIndex)) * :fWidthUnits) / :fFactor) THEN LEAST(FLOOR((ROUND(`p`.`TotalAmount` * :fFactor) - :fLoUnits) / :fWidthUnits), :fLastIndex) - 1 WHEN LEAST(FLOOR((ROUND(`p`.`TotalAmount` * :fFactor) - :fLoUnits) / :fWidthUnits), :fLastIndex) < :fLastIndex AND `p`.`TotalAmount` >= ((:fLoUnits + (LEAST(FLOOR((ROUND(`p`.`TotalAmount` * :fFactor) - :fLoUnits) / :fWidthUnits), :fLastIndex) + 1) * :fWidthUnits) / :fFactor) THEN LEAST(FLOOR((ROUND(`p`.`TotalAmount` * :fFactor) - :fLoUnits) / :fWidthUnits), :fLastIndex) + 1 ELSE LEAST(FLOOR((ROUND(`p`.`TotalAmount` * :fFactor) - :fLoUnits) / :fWidthUnits), :fLastIndex) END AS `Key` FROM (SELECT `IDBookStoreSale`, `IDBookStore`, `PaymentMethod`, `SaleDate`, `TotalAmount` FROM `BookStoreSale` WHERE ( PaymentMethod IN ( :p_c1_PaymentMethod_w1 ) AND TotalAmount >= :p_c2_TotalAmount_w2 AND ( SaleDate IS NULL OR SaleDate < :p_c3_SaleDate_w5 ) ) AND Deleted = :p_FacetSoftDelete_w8 AND IDTenant = :p_TestTenancy_w9) `p` WHERE `p`.`TotalAmount` IS NOT NULL) `d` GROUP BY `d`.`Key`"
+				}
+			],
+			"PivotColumnDate": [
+				{
+					"Name": "Pivot",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 100001,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT `c`.`K1` AS `K1`, `c`.`K2` AS `K2`, `c`.`Count` AS `Count` FROM (SELECT `d`.`K1` AS `K1`, `d`.`K2` AS `K2`, count(*) AS `Count`, row_number() OVER () AS `RowNumber` FROM (SELECT CONVERT(`p`.`PaymentMethod` USING utf8mb4) COLLATE utf8mb4_bin AS `K1`, DATE_FORMAT(`p`.`SaleDate`, '%Y-01-01 00:00:00') AS `K2` FROM (SELECT `IDBookStoreSale`, `IDBookStore`, `PaymentMethod`, `SaleDate`, `TotalAmount` FROM `BookStoreSale` WHERE ( PaymentMethod IN ( :p_c1_PaymentMethod_w1 ) AND TotalAmount >= :p_c2_TotalAmount_w2 AND ( SaleDate IS NULL OR SaleDate < :p_c3_SaleDate_w5 ) ) AND Deleted = :p_FacetSoftDelete_w8 AND IDTenant = :p_TestTenancy_w9) `p`) `d` GROUP BY `d`.`K1`, `d`.`K2`) `c` WHERE `c`.`RowNumber` <= :fMaxGroups"
+				}
+			],
+			"PivotRangeColumn": [
+				{
+					"Name": "Pivot",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 100001,
+						"fR0To": 25,
+						"fR1From": 25,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT `c`.`K1` AS `K1`, `c`.`K2` AS `K2`, `c`.`Count` AS `Count` FROM (SELECT `d`.`K1` AS `K1`, `d`.`K2` AS `K2`, count(*) AS `Count`, row_number() OVER () AS `RowNumber` FROM (SELECT CASE WHEN `p`.`TotalAmount` IS NULL THEN -1 WHEN `p`.`TotalAmount` < :fR0To THEN 0 WHEN `p`.`TotalAmount` >= :fR1From THEN 1 ELSE -2 END AS `K1`, `p`.`IDBookStore` AS `K2` FROM (SELECT `IDBookStoreSale`, `IDBookStore`, `PaymentMethod`, `SaleDate`, `TotalAmount` FROM `BookStoreSale` WHERE ( PaymentMethod IN ( :p_c1_PaymentMethod_w1 ) AND TotalAmount >= :p_c2_TotalAmount_w2 AND ( SaleDate IS NULL OR SaleDate < :p_c3_SaleDate_w5 ) ) AND Deleted = :p_FacetSoftDelete_w8 AND IDTenant = :p_TestTenancy_w9) `p`) `d` GROUP BY `d`.`K1`, `d`.`K2`) `c` WHERE `c`.`RowNumber` <= :fMaxGroups"
+				}
+			],
+			"Ranges": [
+				{
+					"Name": "Ranges",
+					"ParamTypes": {},
+					"Params": {
+						"fR0To": 25,
+						"fR1From": 25,
+						"fR1To": 250,
+						"fR2From": 250,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT `d`.`Key` AS `Key`, count(*) AS `Count` FROM (SELECT CASE WHEN `p`.`TotalAmount` IS NULL THEN -1 WHEN `p`.`TotalAmount` < :fR0To THEN 0 WHEN `p`.`TotalAmount` >= :fR1From AND `p`.`TotalAmount` < :fR1To THEN 1 WHEN `p`.`TotalAmount` >= :fR2From THEN 2 ELSE -2 END AS `Key` FROM (SELECT `IDBookStoreSale`, `IDBookStore`, `PaymentMethod`, `SaleDate`, `TotalAmount` FROM `BookStoreSale` WHERE ( PaymentMethod IN ( :p_c1_PaymentMethod_w1 ) AND TotalAmount >= :p_c2_TotalAmount_w2 AND ( SaleDate IS NULL OR SaleDate < :p_c3_SaleDate_w5 ) ) AND Deleted = :p_FacetSoftDelete_w8 AND IDTenant = :p_TestTenancy_w9) `p`) `d` GROUP BY `d`.`Key`"
+				}
+			],
+			"StatsDate": [
+				{
+					"Name": "Stats",
+					"ParamTypes": {},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS `Rows`, count(DATE_FORMAT(`p`.`SaleDate`, '%Y-%m-%d %H:%i:%s')) AS `NonNull`, min(DATE_FORMAT(`p`.`SaleDate`, '%Y-%m-%d %H:%i:%s')) AS `Min`, max(DATE_FORMAT(`p`.`SaleDate`, '%Y-%m-%d %H:%i:%s')) AS `Max`, NULL AS `SumUnits` FROM (SELECT `IDBookStoreSale`, `IDBookStore`, `PaymentMethod`, `SaleDate`, `TotalAmount` FROM `BookStoreSale` WHERE ( PaymentMethod IN ( :p_c1_PaymentMethod_w1 ) AND TotalAmount >= :p_c2_TotalAmount_w2 AND ( SaleDate IS NULL OR SaleDate < :p_c3_SaleDate_w5 ) ) AND Deleted = :p_FacetSoftDelete_w8 AND IDTenant = :p_TestTenancy_w9) `p`"
+				}
+			],
+			"StatsDecimal": [
+				{
+					"Name": "Stats",
+					"ParamTypes": {},
+					"Params": {
+						"fFactor": 100,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS `Rows`, count(`p`.`TotalAmount`) AS `NonNull`, min(`p`.`TotalAmount`) AS `Min`, max(`p`.`TotalAmount`) AS `Max`, sum(ROUND(`p`.`TotalAmount` * :fFactor)) AS `SumUnits` FROM (SELECT `IDBookStoreSale`, `IDBookStore`, `PaymentMethod`, `SaleDate`, `TotalAmount` FROM `BookStoreSale` WHERE ( PaymentMethod IN ( :p_c1_PaymentMethod_w1 ) AND TotalAmount >= :p_c2_TotalAmount_w2 AND ( SaleDate IS NULL OR SaleDate < :p_c3_SaleDate_w5 ) ) AND Deleted = :p_FacetSoftDelete_w8 AND IDTenant = :p_TestTenancy_w9) `p`"
+				}
+			],
+			"Terms": [
+				{
+					"Name": "Terms",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 10000,
+						"fTopPlusOne": 6,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT `r`.`Key` AS `Key`, `r`.`Count` AS `Count`, `r`.`FacetTotal` AS `FacetTotal`, `r`.`FacetMissing` AS `FacetMissing`, `r`.`FacetDistinct` AS `FacetDistinct` FROM (SELECT `t`.`Key` AS `Key`, `t`.`Count` AS `Count`, sum(`t`.`Count`) OVER () AS `FacetTotal`, sum(CASE WHEN `t`.`Key` IS NULL THEN `t`.`Count` ELSE 0 END) OVER () AS `FacetMissing`, count(`t`.`Key`) OVER () AS `FacetDistinct`, rank() OVER (ORDER BY CASE WHEN `t`.`Key` IS NULL THEN 1 ELSE 0 END, `t`.`Count` DESC) AS `RowRank`, row_number() OVER (ORDER BY CASE WHEN `t`.`Key` IS NULL THEN 1 ELSE 0 END, `t`.`Count` DESC, `t`.`Key`) AS `RowNumber` FROM (SELECT `d`.`Key` AS `Key`, count(*) AS `Count` FROM (SELECT CONVERT(`p`.`PaymentMethod` USING utf8mb4) COLLATE utf8mb4_bin AS `Key` FROM (SELECT `IDBookStoreSale`, `IDBookStore`, `PaymentMethod`, `SaleDate`, `TotalAmount` FROM `BookStoreSale` WHERE ( PaymentMethod IN ( :p_c1_PaymentMethod_w1 ) AND TotalAmount >= :p_c2_TotalAmount_w2 AND ( SaleDate IS NULL OR SaleDate < :p_c3_SaleDate_w5 ) ) AND Deleted = :p_FacetSoftDelete_w8 AND IDTenant = :p_TestTenancy_w9) `p`) `d` GROUP BY `d`.`Key`) `t`) `r` WHERE (`r`.`RowRank` <= :fTopPlusOne AND `r`.`RowNumber` <= :fMaxGroups)"
+				}
+			],
+			"TermsKeyAsc": [
+				{
+					"Name": "Terms",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 10000,
+						"fTopPlusOne": 6,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT `r`.`Key` AS `Key`, `r`.`Count` AS `Count`, `r`.`FacetTotal` AS `FacetTotal`, `r`.`FacetMissing` AS `FacetMissing`, `r`.`FacetDistinct` AS `FacetDistinct` FROM (SELECT `t`.`Key` AS `Key`, `t`.`Count` AS `Count`, sum(`t`.`Count`) OVER () AS `FacetTotal`, sum(CASE WHEN `t`.`Key` IS NULL THEN `t`.`Count` ELSE 0 END) OVER () AS `FacetMissing`, count(`t`.`Key`) OVER () AS `FacetDistinct`, rank() OVER (ORDER BY CASE WHEN `t`.`Key` IS NULL THEN 1 ELSE 0 END, `t`.`Count` DESC) AS `RowRank`, row_number() OVER (ORDER BY CASE WHEN `t`.`Key` IS NULL THEN 1 ELSE 0 END, `t`.`Count` DESC, `t`.`Key`) AS `RowNumber` FROM (SELECT `d`.`Key` AS `Key`, count(*) AS `Count` FROM (SELECT `p`.`IDBookStore` AS `Key` FROM (SELECT `IDBookStoreSale`, `IDBookStore`, `PaymentMethod`, `SaleDate`, `TotalAmount` FROM `BookStoreSale` WHERE ( PaymentMethod IN ( :p_c1_PaymentMethod_w1 ) AND TotalAmount >= :p_c2_TotalAmount_w2 AND ( SaleDate IS NULL OR SaleDate < :p_c3_SaleDate_w5 ) ) AND Deleted = :p_FacetSoftDelete_w8 AND IDTenant = :p_TestTenancy_w9) `p`) `d` GROUP BY `d`.`Key`) `t`) `r` WHERE (`r`.`RowRank` <= :fTopPlusOne AND `r`.`RowNumber` <= :fMaxGroups)"
+				}
+			]
+		},
+		"PostgreSQL": {
+			"Count": [
+				{
+					"Name": "Count",
+					"ParamTypes": {},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS \"Total\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM \"BookStoreSale\" WHERE ( \"PaymentMethod\" IN ( :p_c1_PaymentMethod_w1 ) AND \"TotalAmount\" >= :p_c2_TotalAmount_w2 AND ( \"SaleDate\" IS NULL OR \"SaleDate\" < :p_c3_SaleDate_w5 ) ) AND \"Deleted\" = :p_FacetSoftDelete_w8 AND \"IDTenant\" = :p_TestTenancy_w9) \"p\""
+				}
+			],
+			"DateHistogramMonth": [
+				{
+					"Name": "DateHistogram",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 402,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT to_char(\"g\".\"Key\", 'YYYY-MM-DD HH24:MI:SS') AS \"Key\", \"g\".\"Count\" AS \"Count\", to_char(\"g\".\"Lo\", 'YYYY-MM-DD HH24:MI:SS') AS \"Lo\", to_char(\"g\".\"Hi\", 'YYYY-MM-DD HH24:MI:SS') AS \"Hi\" FROM (SELECT \"k\".\"Key\" AS \"Key\", count(*) AS \"Count\", min(\"k\".\"Value\") AS \"Lo\", max(\"k\".\"Value\") AS \"Hi\", row_number() OVER () AS \"RowNumber\" FROM (SELECT date_trunc('month', \"v\".\"Value\") AS \"Key\", \"v\".\"Value\" AS \"Value\" FROM (SELECT \"p\".\"SaleDate\" AS \"Value\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM \"BookStoreSale\" WHERE ( \"PaymentMethod\" IN ( :p_c1_PaymentMethod_w1 ) AND \"TotalAmount\" >= :p_c2_TotalAmount_w2 AND ( \"SaleDate\" IS NULL OR \"SaleDate\" < :p_c3_SaleDate_w5 ) ) AND \"Deleted\" = :p_FacetSoftDelete_w8 AND \"IDTenant\" = :p_TestTenancy_w9) \"p\") \"v\") \"k\" GROUP BY \"k\".\"Key\") \"g\" WHERE \"g\".\"RowNumber\" <= CAST(:fMaxGroups AS bigint)"
+				}
+			],
+			"DateHistogramQuarter": [
+				{
+					"Name": "DateHistogram",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 402,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT to_char(\"g\".\"Key\", 'YYYY-MM-DD HH24:MI:SS') AS \"Key\", \"g\".\"Count\" AS \"Count\", to_char(\"g\".\"Lo\", 'YYYY-MM-DD HH24:MI:SS') AS \"Lo\", to_char(\"g\".\"Hi\", 'YYYY-MM-DD HH24:MI:SS') AS \"Hi\" FROM (SELECT \"k\".\"Key\" AS \"Key\", count(*) AS \"Count\", min(\"k\".\"Value\") AS \"Lo\", max(\"k\".\"Value\") AS \"Hi\", row_number() OVER () AS \"RowNumber\" FROM (SELECT date_trunc('quarter', \"v\".\"Value\") AS \"Key\", \"v\".\"Value\" AS \"Value\" FROM (SELECT \"p\".\"SaleDate\" AS \"Value\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM \"BookStoreSale\" WHERE ( \"PaymentMethod\" IN ( :p_c1_PaymentMethod_w1 ) AND \"TotalAmount\" >= :p_c2_TotalAmount_w2 AND ( \"SaleDate\" IS NULL OR \"SaleDate\" < :p_c3_SaleDate_w5 ) ) AND \"Deleted\" = :p_FacetSoftDelete_w8 AND \"IDTenant\" = :p_TestTenancy_w9) \"p\") \"v\") \"k\" GROUP BY \"k\".\"Key\") \"g\" WHERE \"g\".\"RowNumber\" <= CAST(:fMaxGroups AS bigint)"
+				}
+			],
+			"DateHistogramWeek": [
+				{
+					"Name": "DateHistogram",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 402,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT to_char(\"g\".\"Key\", 'YYYY-MM-DD HH24:MI:SS') AS \"Key\", \"g\".\"Count\" AS \"Count\", to_char(\"g\".\"Lo\", 'YYYY-MM-DD HH24:MI:SS') AS \"Lo\", to_char(\"g\".\"Hi\", 'YYYY-MM-DD HH24:MI:SS') AS \"Hi\" FROM (SELECT \"k\".\"Key\" AS \"Key\", count(*) AS \"Count\", min(\"k\".\"Value\") AS \"Lo\", max(\"k\".\"Value\") AS \"Hi\", row_number() OVER () AS \"RowNumber\" FROM (SELECT date_trunc('week', \"v\".\"Value\") AS \"Key\", \"v\".\"Value\" AS \"Value\" FROM (SELECT \"p\".\"SaleDate\" AS \"Value\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM \"BookStoreSale\" WHERE ( \"PaymentMethod\" IN ( :p_c1_PaymentMethod_w1 ) AND \"TotalAmount\" >= :p_c2_TotalAmount_w2 AND ( \"SaleDate\" IS NULL OR \"SaleDate\" < :p_c3_SaleDate_w5 ) ) AND \"Deleted\" = :p_FacetSoftDelete_w8 AND \"IDTenant\" = :p_TestTenancy_w9) \"p\") \"v\") \"k\" GROUP BY \"k\".\"Key\") \"g\" WHERE \"g\".\"RowNumber\" <= CAST(:fMaxGroups AS bigint)"
+				}
+			],
+			"DistinctCount": [
+				{
+					"Name": "DistinctCount",
+					"ParamTypes": {},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS \"Rows\", count(\"p\".\"PaymentMethod\") AS \"NonNull\", count(DISTINCT \"p\".\"PaymentMethod\") AS \"Distinct\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM \"BookStoreSale\" WHERE ( \"PaymentMethod\" IN ( :p_c1_PaymentMethod_w1 ) AND \"TotalAmount\" >= :p_c2_TotalAmount_w2 AND ( \"SaleDate\" IS NULL OR \"SaleDate\" < :p_c3_SaleDate_w5 ) ) AND \"Deleted\" = :p_FacetSoftDelete_w8 AND \"IDTenant\" = :p_TestTenancy_w9) \"p\""
+				}
+			],
+			"MissingDate": [
+				{
+					"Name": "Missing",
+					"ParamTypes": {},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS \"Rows\", count(to_char(\"p\".\"SaleDate\", 'YYYY-MM-DD HH24:MI:SS')) AS \"NonNull\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM \"BookStoreSale\" WHERE ( \"PaymentMethod\" IN ( :p_c1_PaymentMethod_w1 ) AND \"TotalAmount\" >= :p_c2_TotalAmount_w2 AND ( \"SaleDate\" IS NULL OR \"SaleDate\" < :p_c3_SaleDate_w5 ) ) AND \"Deleted\" = :p_FacetSoftDelete_w8 AND \"IDTenant\" = :p_TestTenancy_w9) \"p\""
+				}
+			],
+			"NumericHistogramEdges": [
+				{
+					"Name": "NumericBounds",
+					"ParamTypes": {},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS \"Rows\", count(\"p\".\"TotalAmount\") AS \"NonNull\", min(\"p\".\"TotalAmount\") AS \"Lo\", max(\"p\".\"TotalAmount\") AS \"Hi\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM \"BookStoreSale\" WHERE ( \"PaymentMethod\" IN ( :p_c1_PaymentMethod_w1 ) AND \"TotalAmount\" >= :p_c2_TotalAmount_w2 AND ( \"SaleDate\" IS NULL OR \"SaleDate\" < :p_c3_SaleDate_w5 ) ) AND \"Deleted\" = :p_FacetSoftDelete_w8 AND \"IDTenant\" = :p_TestTenancy_w9) \"p\""
+				},
+				{
+					"Name": "NumericHistogram",
+					"ParamTypes": {},
+					"Params": {
+						"fE0": 0,
+						"fE1": 25,
+						"fE2": 100,
+						"fE3": 1000,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT \"d\".\"Key\" AS \"Key\", count(*) AS \"Count\" FROM (SELECT CASE WHEN \"p\".\"TotalAmount\" >= CAST(:fE0 AS numeric) AND \"p\".\"TotalAmount\" < CAST(:fE1 AS numeric) THEN 0 WHEN \"p\".\"TotalAmount\" >= CAST(:fE1 AS numeric) AND \"p\".\"TotalAmount\" < CAST(:fE2 AS numeric) THEN 1 WHEN \"p\".\"TotalAmount\" >= CAST(:fE2 AS numeric) AND \"p\".\"TotalAmount\" < CAST(:fE3 AS numeric) THEN 2 WHEN \"p\".\"TotalAmount\" >= CAST(:fE3 AS numeric) THEN 3 ELSE NULL END AS \"Key\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM \"BookStoreSale\" WHERE ( \"PaymentMethod\" IN ( :p_c1_PaymentMethod_w1 ) AND \"TotalAmount\" >= :p_c2_TotalAmount_w2 AND ( \"SaleDate\" IS NULL OR \"SaleDate\" < :p_c3_SaleDate_w5 ) ) AND \"Deleted\" = :p_FacetSoftDelete_w8 AND \"IDTenant\" = :p_TestTenancy_w9) \"p\" WHERE \"p\".\"TotalAmount\" IS NOT NULL) \"d\" GROUP BY \"d\".\"Key\""
+				}
+			],
+			"NumericHistogramNice": [
+				{
+					"Name": "NumericBounds",
+					"ParamTypes": {},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS \"Rows\", count(\"p\".\"TotalAmount\") AS \"NonNull\", min(\"p\".\"TotalAmount\") AS \"Lo\", max(\"p\".\"TotalAmount\") AS \"Hi\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM \"BookStoreSale\" WHERE ( \"PaymentMethod\" IN ( :p_c1_PaymentMethod_w1 ) AND \"TotalAmount\" >= :p_c2_TotalAmount_w2 AND ( \"SaleDate\" IS NULL OR \"SaleDate\" < :p_c3_SaleDate_w5 ) ) AND \"Deleted\" = :p_FacetSoftDelete_w8 AND \"IDTenant\" = :p_TestTenancy_w9) \"p\""
+				},
+				{
+					"Name": "NumericHistogram",
+					"ParamTypes": {},
+					"Params": {
+						"fFactor": 100,
+						"fLastIndex": 9,
+						"fLoUnits": 0,
+						"fWidthUnits": 50000,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT \"d\".\"Key\" AS \"Key\", count(*) AS \"Count\" FROM (SELECT CASE WHEN \"p\".\"TotalAmount\" < ((CAST(:fLoUnits AS numeric) + (LEAST(FLOOR((ROUND(\"p\".\"TotalAmount\" * CAST(:fFactor AS numeric)) - CAST(:fLoUnits AS numeric)) / CAST(:fWidthUnits AS numeric)), CAST(:fLastIndex AS numeric))) * CAST(:fWidthUnits AS numeric)) / CAST(:fFactor AS numeric)) THEN LEAST(FLOOR((ROUND(\"p\".\"TotalAmount\" * CAST(:fFactor AS numeric)) - CAST(:fLoUnits AS numeric)) / CAST(:fWidthUnits AS numeric)), CAST(:fLastIndex AS numeric)) - 1 WHEN LEAST(FLOOR((ROUND(\"p\".\"TotalAmount\" * CAST(:fFactor AS numeric)) - CAST(:fLoUnits AS numeric)) / CAST(:fWidthUnits AS numeric)), CAST(:fLastIndex AS numeric)) < CAST(:fLastIndex AS numeric) AND \"p\".\"TotalAmount\" >= ((CAST(:fLoUnits AS numeric) + (LEAST(FLOOR((ROUND(\"p\".\"TotalAmount\" * CAST(:fFactor AS numeric)) - CAST(:fLoUnits AS numeric)) / CAST(:fWidthUnits AS numeric)), CAST(:fLastIndex AS numeric)) + 1) * CAST(:fWidthUnits AS numeric)) / CAST(:fFactor AS numeric)) THEN LEAST(FLOOR((ROUND(\"p\".\"TotalAmount\" * CAST(:fFactor AS numeric)) - CAST(:fLoUnits AS numeric)) / CAST(:fWidthUnits AS numeric)), CAST(:fLastIndex AS numeric)) + 1 ELSE LEAST(FLOOR((ROUND(\"p\".\"TotalAmount\" * CAST(:fFactor AS numeric)) - CAST(:fLoUnits AS numeric)) / CAST(:fWidthUnits AS numeric)), CAST(:fLastIndex AS numeric)) END AS \"Key\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM \"BookStoreSale\" WHERE ( \"PaymentMethod\" IN ( :p_c1_PaymentMethod_w1 ) AND \"TotalAmount\" >= :p_c2_TotalAmount_w2 AND ( \"SaleDate\" IS NULL OR \"SaleDate\" < :p_c3_SaleDate_w5 ) ) AND \"Deleted\" = :p_FacetSoftDelete_w8 AND \"IDTenant\" = :p_TestTenancy_w9) \"p\" WHERE \"p\".\"TotalAmount\" IS NOT NULL) \"d\" GROUP BY \"d\".\"Key\""
+				}
+			],
+			"PivotColumnDate": [
+				{
+					"Name": "Pivot",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 100001,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT \"c\".\"K1\" AS \"K1\", \"c\".\"K2\" AS \"K2\", \"c\".\"Count\" AS \"Count\" FROM (SELECT \"d\".\"K1\" AS \"K1\", \"d\".\"K2\" AS \"K2\", count(*) AS \"Count\", row_number() OVER () AS \"RowNumber\" FROM (SELECT \"p\".\"PaymentMethod\" AS \"K1\", to_char(date_trunc('year', \"p\".\"SaleDate\"), 'YYYY-MM-DD HH24:MI:SS') AS \"K2\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM \"BookStoreSale\" WHERE ( \"PaymentMethod\" IN ( :p_c1_PaymentMethod_w1 ) AND \"TotalAmount\" >= :p_c2_TotalAmount_w2 AND ( \"SaleDate\" IS NULL OR \"SaleDate\" < :p_c3_SaleDate_w5 ) ) AND \"Deleted\" = :p_FacetSoftDelete_w8 AND \"IDTenant\" = :p_TestTenancy_w9) \"p\") \"d\" GROUP BY \"d\".\"K1\", \"d\".\"K2\") \"c\" WHERE \"c\".\"RowNumber\" <= CAST(:fMaxGroups AS bigint)"
+				}
+			],
+			"PivotRangeColumn": [
+				{
+					"Name": "Pivot",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 100001,
+						"fR0To": 25,
+						"fR1From": 25,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT \"c\".\"K1\" AS \"K1\", \"c\".\"K2\" AS \"K2\", \"c\".\"Count\" AS \"Count\" FROM (SELECT \"d\".\"K1\" AS \"K1\", \"d\".\"K2\" AS \"K2\", count(*) AS \"Count\", row_number() OVER () AS \"RowNumber\" FROM (SELECT CASE WHEN \"p\".\"TotalAmount\" IS NULL THEN -1 WHEN \"p\".\"TotalAmount\" < CAST(:fR0To AS numeric) THEN 0 WHEN \"p\".\"TotalAmount\" >= CAST(:fR1From AS numeric) THEN 1 ELSE -2 END AS \"K1\", \"p\".\"IDBookStore\" AS \"K2\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM \"BookStoreSale\" WHERE ( \"PaymentMethod\" IN ( :p_c1_PaymentMethod_w1 ) AND \"TotalAmount\" >= :p_c2_TotalAmount_w2 AND ( \"SaleDate\" IS NULL OR \"SaleDate\" < :p_c3_SaleDate_w5 ) ) AND \"Deleted\" = :p_FacetSoftDelete_w8 AND \"IDTenant\" = :p_TestTenancy_w9) \"p\") \"d\" GROUP BY \"d\".\"K1\", \"d\".\"K2\") \"c\" WHERE \"c\".\"RowNumber\" <= CAST(:fMaxGroups AS bigint)"
+				}
+			],
+			"Ranges": [
+				{
+					"Name": "Ranges",
+					"ParamTypes": {},
+					"Params": {
+						"fR0To": 25,
+						"fR1From": 25,
+						"fR1To": 250,
+						"fR2From": 250,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT \"d\".\"Key\" AS \"Key\", count(*) AS \"Count\" FROM (SELECT CASE WHEN \"p\".\"TotalAmount\" IS NULL THEN -1 WHEN \"p\".\"TotalAmount\" < CAST(:fR0To AS numeric) THEN 0 WHEN \"p\".\"TotalAmount\" >= CAST(:fR1From AS numeric) AND \"p\".\"TotalAmount\" < CAST(:fR1To AS numeric) THEN 1 WHEN \"p\".\"TotalAmount\" >= CAST(:fR2From AS numeric) THEN 2 ELSE -2 END AS \"Key\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM \"BookStoreSale\" WHERE ( \"PaymentMethod\" IN ( :p_c1_PaymentMethod_w1 ) AND \"TotalAmount\" >= :p_c2_TotalAmount_w2 AND ( \"SaleDate\" IS NULL OR \"SaleDate\" < :p_c3_SaleDate_w5 ) ) AND \"Deleted\" = :p_FacetSoftDelete_w8 AND \"IDTenant\" = :p_TestTenancy_w9) \"p\") \"d\" GROUP BY \"d\".\"Key\""
+				}
+			],
+			"StatsDate": [
+				{
+					"Name": "Stats",
+					"ParamTypes": {},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS \"Rows\", count(to_char(\"p\".\"SaleDate\", 'YYYY-MM-DD HH24:MI:SS')) AS \"NonNull\", min(to_char(\"p\".\"SaleDate\", 'YYYY-MM-DD HH24:MI:SS')) AS \"Min\", max(to_char(\"p\".\"SaleDate\", 'YYYY-MM-DD HH24:MI:SS')) AS \"Max\", NULL AS \"SumUnits\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM \"BookStoreSale\" WHERE ( \"PaymentMethod\" IN ( :p_c1_PaymentMethod_w1 ) AND \"TotalAmount\" >= :p_c2_TotalAmount_w2 AND ( \"SaleDate\" IS NULL OR \"SaleDate\" < :p_c3_SaleDate_w5 ) ) AND \"Deleted\" = :p_FacetSoftDelete_w8 AND \"IDTenant\" = :p_TestTenancy_w9) \"p\""
+				}
+			],
+			"StatsDecimal": [
+				{
+					"Name": "Stats",
+					"ParamTypes": {},
+					"Params": {
+						"fFactor": 100,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS \"Rows\", count(\"p\".\"TotalAmount\") AS \"NonNull\", min(\"p\".\"TotalAmount\") AS \"Min\", max(\"p\".\"TotalAmount\") AS \"Max\", sum(ROUND(\"p\".\"TotalAmount\" * CAST(:fFactor AS numeric))) AS \"SumUnits\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM \"BookStoreSale\" WHERE ( \"PaymentMethod\" IN ( :p_c1_PaymentMethod_w1 ) AND \"TotalAmount\" >= :p_c2_TotalAmount_w2 AND ( \"SaleDate\" IS NULL OR \"SaleDate\" < :p_c3_SaleDate_w5 ) ) AND \"Deleted\" = :p_FacetSoftDelete_w8 AND \"IDTenant\" = :p_TestTenancy_w9) \"p\""
+				}
+			],
+			"Terms": [
+				{
+					"Name": "Terms",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 10000,
+						"fTopPlusOne": 6,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT \"r\".\"Key\" AS \"Key\", \"r\".\"Count\" AS \"Count\", \"r\".\"FacetTotal\" AS \"FacetTotal\", \"r\".\"FacetMissing\" AS \"FacetMissing\", \"r\".\"FacetDistinct\" AS \"FacetDistinct\" FROM (SELECT \"t\".\"Key\" AS \"Key\", \"t\".\"Count\" AS \"Count\", sum(\"t\".\"Count\") OVER () AS \"FacetTotal\", sum(CASE WHEN \"t\".\"Key\" IS NULL THEN \"t\".\"Count\" ELSE 0 END) OVER () AS \"FacetMissing\", count(\"t\".\"Key\") OVER () AS \"FacetDistinct\", rank() OVER (ORDER BY CASE WHEN \"t\".\"Key\" IS NULL THEN 1 ELSE 0 END, \"t\".\"Count\" DESC) AS \"RowRank\", row_number() OVER (ORDER BY CASE WHEN \"t\".\"Key\" IS NULL THEN 1 ELSE 0 END, \"t\".\"Count\" DESC, \"t\".\"Key\") AS \"RowNumber\" FROM (SELECT \"d\".\"Key\" AS \"Key\", count(*) AS \"Count\" FROM (SELECT \"p\".\"PaymentMethod\" AS \"Key\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM \"BookStoreSale\" WHERE ( \"PaymentMethod\" IN ( :p_c1_PaymentMethod_w1 ) AND \"TotalAmount\" >= :p_c2_TotalAmount_w2 AND ( \"SaleDate\" IS NULL OR \"SaleDate\" < :p_c3_SaleDate_w5 ) ) AND \"Deleted\" = :p_FacetSoftDelete_w8 AND \"IDTenant\" = :p_TestTenancy_w9) \"p\") \"d\" GROUP BY \"d\".\"Key\") \"t\") \"r\" WHERE (\"r\".\"RowRank\" <= CAST(:fTopPlusOne AS bigint) AND \"r\".\"RowNumber\" <= CAST(:fMaxGroups AS bigint))"
+				}
+			],
+			"TermsKeyAsc": [
+				{
+					"Name": "Terms",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 10000,
+						"fTopPlusOne": 6,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1": [
+							"Credit",
+							"Cash"
+						],
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT \"r\".\"Key\" AS \"Key\", \"r\".\"Count\" AS \"Count\", \"r\".\"FacetTotal\" AS \"FacetTotal\", \"r\".\"FacetMissing\" AS \"FacetMissing\", \"r\".\"FacetDistinct\" AS \"FacetDistinct\" FROM (SELECT \"t\".\"Key\" AS \"Key\", \"t\".\"Count\" AS \"Count\", sum(\"t\".\"Count\") OVER () AS \"FacetTotal\", sum(CASE WHEN \"t\".\"Key\" IS NULL THEN \"t\".\"Count\" ELSE 0 END) OVER () AS \"FacetMissing\", count(\"t\".\"Key\") OVER () AS \"FacetDistinct\", rank() OVER (ORDER BY CASE WHEN \"t\".\"Key\" IS NULL THEN 1 ELSE 0 END, \"t\".\"Count\" DESC) AS \"RowRank\", row_number() OVER (ORDER BY CASE WHEN \"t\".\"Key\" IS NULL THEN 1 ELSE 0 END, \"t\".\"Count\" DESC, \"t\".\"Key\") AS \"RowNumber\" FROM (SELECT \"d\".\"Key\" AS \"Key\", count(*) AS \"Count\" FROM (SELECT \"p\".\"IDBookStore\" AS \"Key\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM \"BookStoreSale\" WHERE ( \"PaymentMethod\" IN ( :p_c1_PaymentMethod_w1 ) AND \"TotalAmount\" >= :p_c2_TotalAmount_w2 AND ( \"SaleDate\" IS NULL OR \"SaleDate\" < :p_c3_SaleDate_w5 ) ) AND \"Deleted\" = :p_FacetSoftDelete_w8 AND \"IDTenant\" = :p_TestTenancy_w9) \"p\") \"d\" GROUP BY \"d\".\"Key\") \"t\") \"r\" WHERE (\"r\".\"RowRank\" <= CAST(:fTopPlusOne AS bigint) AND \"r\".\"RowNumber\" <= CAST(:fMaxGroups AS bigint))"
+				}
+			]
+		},
+		"SQLite": {
+			"Count": [
+				{
+					"Name": "Count",
+					"ParamTypes": {},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w4": null,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS \"Total\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM BookStoreSale WHERE ( `PaymentMethod` IN ( :p_c1_PaymentMethod_w1_0, :p_c1_PaymentMethod_w1_1 ) AND `TotalAmount` >= :p_c2_TotalAmount_w2 AND ( `SaleDate` IS :p_c3_SaleDate_w4 OR `SaleDate` < :p_c3_SaleDate_w5 ) ) AND `Deleted` = :p_FacetSoftDelete_w8 AND `IDTenant` = :p_TestTenancy_w9) \"p\""
+				}
+			],
+			"DateHistogramMonth": [
+				{
+					"Name": "DateHistogram",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 402,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w4": null,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT \"g\".\"Key\" AS \"Key\", \"g\".\"Count\" AS \"Count\", \"g\".\"Lo\" AS \"Lo\", \"g\".\"Hi\" AS \"Hi\" FROM (SELECT \"k\".\"Key\" AS \"Key\", count(*) AS \"Count\", min(\"k\".\"Value\") AS \"Lo\", max(\"k\".\"Value\") AS \"Hi\", row_number() OVER () AS \"RowNumber\" FROM (SELECT strftime('%Y-%m-01 00:00:00', \"v\".\"Value\") AS \"Key\", \"v\".\"Value\" AS \"Value\" FROM (SELECT CASE WHEN typeof(\"p\".\"SaleDate\") = 'text' AND substr(\"p\".\"SaleDate\", 1, 10) = strftime('%Y-%m-%d', \"p\".\"SaleDate\") AND (length(\"p\".\"SaleDate\") = 10 OR (substr(\"p\".\"SaleDate\", 11, 1) IN (' ', 'T') AND substr(\"p\".\"SaleDate\", 12, 5) = strftime('%H:%M', \"p\".\"SaleDate\") AND substr(\"p\".\"SaleDate\", 12, 2) < '24' AND instr(substr(\"p\".\"SaleDate\", 12), ' ') = 0 AND rtrim(\"p\".\"SaleDate\", char(9, 10, 11, 12, 13)) = \"p\".\"SaleDate\")) THEN strftime('%Y-%m-%d %H:%M:%S', \"p\".\"SaleDate\") END AS \"Value\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM BookStoreSale WHERE ( `PaymentMethod` IN ( :p_c1_PaymentMethod_w1_0, :p_c1_PaymentMethod_w1_1 ) AND `TotalAmount` >= :p_c2_TotalAmount_w2 AND ( `SaleDate` IS :p_c3_SaleDate_w4 OR `SaleDate` < :p_c3_SaleDate_w5 ) ) AND `Deleted` = :p_FacetSoftDelete_w8 AND `IDTenant` = :p_TestTenancy_w9) \"p\") \"v\") \"k\" GROUP BY \"k\".\"Key\") \"g\" WHERE \"g\".\"RowNumber\" <= :fMaxGroups"
+				}
+			],
+			"DateHistogramQuarter": [
+				{
+					"Name": "DateHistogram",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 402,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w4": null,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT \"g\".\"Key\" AS \"Key\", \"g\".\"Count\" AS \"Count\", \"g\".\"Lo\" AS \"Lo\", \"g\".\"Hi\" AS \"Hi\" FROM (SELECT \"k\".\"Key\" AS \"Key\", count(*) AS \"Count\", min(\"k\".\"Value\") AS \"Lo\", max(\"k\".\"Value\") AS \"Hi\", row_number() OVER () AS \"RowNumber\" FROM (SELECT strftime('%Y-', \"v\".\"Value\") || CASE (CAST(strftime('%m', \"v\".\"Value\") AS INTEGER) - 1) / 3 WHEN 0 THEN '01' WHEN 1 THEN '04' WHEN 2 THEN '07' ELSE '10' END || '-01 00:00:00' AS \"Key\", \"v\".\"Value\" AS \"Value\" FROM (SELECT CASE WHEN typeof(\"p\".\"SaleDate\") = 'text' AND substr(\"p\".\"SaleDate\", 1, 10) = strftime('%Y-%m-%d', \"p\".\"SaleDate\") AND (length(\"p\".\"SaleDate\") = 10 OR (substr(\"p\".\"SaleDate\", 11, 1) IN (' ', 'T') AND substr(\"p\".\"SaleDate\", 12, 5) = strftime('%H:%M', \"p\".\"SaleDate\") AND substr(\"p\".\"SaleDate\", 12, 2) < '24' AND instr(substr(\"p\".\"SaleDate\", 12), ' ') = 0 AND rtrim(\"p\".\"SaleDate\", char(9, 10, 11, 12, 13)) = \"p\".\"SaleDate\")) THEN strftime('%Y-%m-%d %H:%M:%S', \"p\".\"SaleDate\") END AS \"Value\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM BookStoreSale WHERE ( `PaymentMethod` IN ( :p_c1_PaymentMethod_w1_0, :p_c1_PaymentMethod_w1_1 ) AND `TotalAmount` >= :p_c2_TotalAmount_w2 AND ( `SaleDate` IS :p_c3_SaleDate_w4 OR `SaleDate` < :p_c3_SaleDate_w5 ) ) AND `Deleted` = :p_FacetSoftDelete_w8 AND `IDTenant` = :p_TestTenancy_w9) \"p\") \"v\") \"k\" GROUP BY \"k\".\"Key\") \"g\" WHERE \"g\".\"RowNumber\" <= :fMaxGroups"
+				}
+			],
+			"DateHistogramWeek": [
+				{
+					"Name": "DateHistogram",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 402,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w4": null,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT \"g\".\"Key\" AS \"Key\", \"g\".\"Count\" AS \"Count\", \"g\".\"Lo\" AS \"Lo\", \"g\".\"Hi\" AS \"Hi\" FROM (SELECT \"k\".\"Key\" AS \"Key\", count(*) AS \"Count\", min(\"k\".\"Value\") AS \"Lo\", max(\"k\".\"Value\") AS \"Hi\", row_number() OVER () AS \"RowNumber\" FROM (SELECT strftime('%Y-%m-%d 00:00:00', \"v\".\"Value\", '-6 days', 'weekday 1') AS \"Key\", \"v\".\"Value\" AS \"Value\" FROM (SELECT CASE WHEN typeof(\"p\".\"SaleDate\") = 'text' AND substr(\"p\".\"SaleDate\", 1, 10) = strftime('%Y-%m-%d', \"p\".\"SaleDate\") AND (length(\"p\".\"SaleDate\") = 10 OR (substr(\"p\".\"SaleDate\", 11, 1) IN (' ', 'T') AND substr(\"p\".\"SaleDate\", 12, 5) = strftime('%H:%M', \"p\".\"SaleDate\") AND substr(\"p\".\"SaleDate\", 12, 2) < '24' AND instr(substr(\"p\".\"SaleDate\", 12), ' ') = 0 AND rtrim(\"p\".\"SaleDate\", char(9, 10, 11, 12, 13)) = \"p\".\"SaleDate\")) THEN strftime('%Y-%m-%d %H:%M:%S', \"p\".\"SaleDate\") END AS \"Value\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM BookStoreSale WHERE ( `PaymentMethod` IN ( :p_c1_PaymentMethod_w1_0, :p_c1_PaymentMethod_w1_1 ) AND `TotalAmount` >= :p_c2_TotalAmount_w2 AND ( `SaleDate` IS :p_c3_SaleDate_w4 OR `SaleDate` < :p_c3_SaleDate_w5 ) ) AND `Deleted` = :p_FacetSoftDelete_w8 AND `IDTenant` = :p_TestTenancy_w9) \"p\") \"v\") \"k\" GROUP BY \"k\".\"Key\") \"g\" WHERE \"g\".\"RowNumber\" <= :fMaxGroups"
+				}
+			],
+			"DistinctCount": [
+				{
+					"Name": "DistinctCount",
+					"ParamTypes": {},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w4": null,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS \"Rows\", count(\"p\".\"PaymentMethod\") AS \"NonNull\", count(DISTINCT \"p\".\"PaymentMethod\") AS \"Distinct\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM BookStoreSale WHERE ( `PaymentMethod` IN ( :p_c1_PaymentMethod_w1_0, :p_c1_PaymentMethod_w1_1 ) AND `TotalAmount` >= :p_c2_TotalAmount_w2 AND ( `SaleDate` IS :p_c3_SaleDate_w4 OR `SaleDate` < :p_c3_SaleDate_w5 ) ) AND `Deleted` = :p_FacetSoftDelete_w8 AND `IDTenant` = :p_TestTenancy_w9) \"p\""
+				}
+			],
+			"MissingDate": [
+				{
+					"Name": "Missing",
+					"ParamTypes": {},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w4": null,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS \"Rows\", count(CASE WHEN typeof(\"p\".\"SaleDate\") = 'text' AND substr(\"p\".\"SaleDate\", 1, 10) = strftime('%Y-%m-%d', \"p\".\"SaleDate\") AND (length(\"p\".\"SaleDate\") = 10 OR (substr(\"p\".\"SaleDate\", 11, 1) IN (' ', 'T') AND substr(\"p\".\"SaleDate\", 12, 5) = strftime('%H:%M', \"p\".\"SaleDate\") AND substr(\"p\".\"SaleDate\", 12, 2) < '24' AND instr(substr(\"p\".\"SaleDate\", 12), ' ') = 0 AND rtrim(\"p\".\"SaleDate\", char(9, 10, 11, 12, 13)) = \"p\".\"SaleDate\")) THEN strftime('%Y-%m-%d %H:%M:%S', \"p\".\"SaleDate\") END) AS \"NonNull\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM BookStoreSale WHERE ( `PaymentMethod` IN ( :p_c1_PaymentMethod_w1_0, :p_c1_PaymentMethod_w1_1 ) AND `TotalAmount` >= :p_c2_TotalAmount_w2 AND ( `SaleDate` IS :p_c3_SaleDate_w4 OR `SaleDate` < :p_c3_SaleDate_w5 ) ) AND `Deleted` = :p_FacetSoftDelete_w8 AND `IDTenant` = :p_TestTenancy_w9) \"p\""
+				}
+			],
+			"NumericHistogramEdges": [
+				{
+					"Name": "NumericBounds",
+					"ParamTypes": {},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w4": null,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS \"Rows\", count(CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END) AS \"NonNull\", min(CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END) AS \"Lo\", max(CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END) AS \"Hi\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM BookStoreSale WHERE ( `PaymentMethod` IN ( :p_c1_PaymentMethod_w1_0, :p_c1_PaymentMethod_w1_1 ) AND `TotalAmount` >= :p_c2_TotalAmount_w2 AND ( `SaleDate` IS :p_c3_SaleDate_w4 OR `SaleDate` < :p_c3_SaleDate_w5 ) ) AND `Deleted` = :p_FacetSoftDelete_w8 AND `IDTenant` = :p_TestTenancy_w9) \"p\""
+				},
+				{
+					"Name": "NumericHistogram",
+					"ParamTypes": {},
+					"Params": {
+						"fE0": 0,
+						"fE1": 25,
+						"fE2": 100,
+						"fE3": 1000,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w4": null,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT \"d\".\"Key\" AS \"Key\", count(*) AS \"Count\" FROM (SELECT CASE WHEN CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END >= :fE0 AND CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END < :fE1 THEN 0 WHEN CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END >= :fE1 AND CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END < :fE2 THEN 1 WHEN CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END >= :fE2 AND CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END < :fE3 THEN 2 WHEN CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END >= :fE3 THEN 3 ELSE NULL END AS \"Key\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM BookStoreSale WHERE ( `PaymentMethod` IN ( :p_c1_PaymentMethod_w1_0, :p_c1_PaymentMethod_w1_1 ) AND `TotalAmount` >= :p_c2_TotalAmount_w2 AND ( `SaleDate` IS :p_c3_SaleDate_w4 OR `SaleDate` < :p_c3_SaleDate_w5 ) ) AND `Deleted` = :p_FacetSoftDelete_w8 AND `IDTenant` = :p_TestTenancy_w9) \"p\" WHERE CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END IS NOT NULL) \"d\" GROUP BY \"d\".\"Key\""
+				}
+			],
+			"NumericHistogramNice": [
+				{
+					"Name": "NumericBounds",
+					"ParamTypes": {},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w4": null,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS \"Rows\", count(CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END) AS \"NonNull\", min(CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END) AS \"Lo\", max(CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END) AS \"Hi\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM BookStoreSale WHERE ( `PaymentMethod` IN ( :p_c1_PaymentMethod_w1_0, :p_c1_PaymentMethod_w1_1 ) AND `TotalAmount` >= :p_c2_TotalAmount_w2 AND ( `SaleDate` IS :p_c3_SaleDate_w4 OR `SaleDate` < :p_c3_SaleDate_w5 ) ) AND `Deleted` = :p_FacetSoftDelete_w8 AND `IDTenant` = :p_TestTenancy_w9) \"p\""
+				},
+				{
+					"Name": "NumericHistogram",
+					"ParamTypes": {},
+					"Params": {
+						"fFactor": 100,
+						"fLastIndex": 9,
+						"fLoUnits": 0,
+						"fWidthUnits": 50000,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w4": null,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT \"d\".\"Key\" AS \"Key\", count(*) AS \"Count\" FROM (SELECT CASE WHEN CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END < ((:fLoUnits + (min(CAST((CAST(ROUND(CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END * :fFactor) AS INTEGER) - :fLoUnits) / :fWidthUnits AS INTEGER), :fLastIndex)) * :fWidthUnits) / :fFactor) THEN min(CAST((CAST(ROUND(CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END * :fFactor) AS INTEGER) - :fLoUnits) / :fWidthUnits AS INTEGER), :fLastIndex) - 1 WHEN min(CAST((CAST(ROUND(CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END * :fFactor) AS INTEGER) - :fLoUnits) / :fWidthUnits AS INTEGER), :fLastIndex) < :fLastIndex AND CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END >= ((:fLoUnits + (min(CAST((CAST(ROUND(CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END * :fFactor) AS INTEGER) - :fLoUnits) / :fWidthUnits AS INTEGER), :fLastIndex) + 1) * :fWidthUnits) / :fFactor) THEN min(CAST((CAST(ROUND(CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END * :fFactor) AS INTEGER) - :fLoUnits) / :fWidthUnits AS INTEGER), :fLastIndex) + 1 ELSE min(CAST((CAST(ROUND(CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END * :fFactor) AS INTEGER) - :fLoUnits) / :fWidthUnits AS INTEGER), :fLastIndex) END AS \"Key\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM BookStoreSale WHERE ( `PaymentMethod` IN ( :p_c1_PaymentMethod_w1_0, :p_c1_PaymentMethod_w1_1 ) AND `TotalAmount` >= :p_c2_TotalAmount_w2 AND ( `SaleDate` IS :p_c3_SaleDate_w4 OR `SaleDate` < :p_c3_SaleDate_w5 ) ) AND `Deleted` = :p_FacetSoftDelete_w8 AND `IDTenant` = :p_TestTenancy_w9) \"p\" WHERE CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END IS NOT NULL) \"d\" GROUP BY \"d\".\"Key\""
+				}
+			],
+			"PivotColumnDate": [
+				{
+					"Name": "Pivot",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 100001,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w4": null,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT \"c\".\"K1\" AS \"K1\", \"c\".\"K2\" AS \"K2\", \"c\".\"Count\" AS \"Count\" FROM (SELECT \"d\".\"K1\" AS \"K1\", \"d\".\"K2\" AS \"K2\", count(*) AS \"Count\", row_number() OVER () AS \"RowNumber\" FROM (SELECT \"p\".\"PaymentMethod\" AS \"K1\", strftime('%Y-01-01 00:00:00', CASE WHEN typeof(\"p\".\"SaleDate\") = 'text' AND substr(\"p\".\"SaleDate\", 1, 10) = strftime('%Y-%m-%d', \"p\".\"SaleDate\") AND (length(\"p\".\"SaleDate\") = 10 OR (substr(\"p\".\"SaleDate\", 11, 1) IN (' ', 'T') AND substr(\"p\".\"SaleDate\", 12, 5) = strftime('%H:%M', \"p\".\"SaleDate\") AND substr(\"p\".\"SaleDate\", 12, 2) < '24' AND instr(substr(\"p\".\"SaleDate\", 12), ' ') = 0 AND rtrim(\"p\".\"SaleDate\", char(9, 10, 11, 12, 13)) = \"p\".\"SaleDate\")) THEN strftime('%Y-%m-%d %H:%M:%S', \"p\".\"SaleDate\") END) AS \"K2\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM BookStoreSale WHERE ( `PaymentMethod` IN ( :p_c1_PaymentMethod_w1_0, :p_c1_PaymentMethod_w1_1 ) AND `TotalAmount` >= :p_c2_TotalAmount_w2 AND ( `SaleDate` IS :p_c3_SaleDate_w4 OR `SaleDate` < :p_c3_SaleDate_w5 ) ) AND `Deleted` = :p_FacetSoftDelete_w8 AND `IDTenant` = :p_TestTenancy_w9) \"p\") \"d\" GROUP BY \"d\".\"K1\", \"d\".\"K2\") \"c\" WHERE \"c\".\"RowNumber\" <= :fMaxGroups"
+				}
+			],
+			"PivotRangeColumn": [
+				{
+					"Name": "Pivot",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 100001,
+						"fR0To": 25,
+						"fR1From": 25,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w4": null,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT \"c\".\"K1\" AS \"K1\", \"c\".\"K2\" AS \"K2\", \"c\".\"Count\" AS \"Count\" FROM (SELECT \"d\".\"K1\" AS \"K1\", \"d\".\"K2\" AS \"K2\", count(*) AS \"Count\", row_number() OVER () AS \"RowNumber\" FROM (SELECT CASE WHEN CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END IS NULL THEN -1 WHEN CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END < :fR0To THEN 0 WHEN CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END >= :fR1From THEN 1 ELSE -2 END AS \"K1\", CASE WHEN typeof(\"p\".\"IDBookStore\") IN ('integer', 'real') THEN \"p\".\"IDBookStore\" END AS \"K2\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM BookStoreSale WHERE ( `PaymentMethod` IN ( :p_c1_PaymentMethod_w1_0, :p_c1_PaymentMethod_w1_1 ) AND `TotalAmount` >= :p_c2_TotalAmount_w2 AND ( `SaleDate` IS :p_c3_SaleDate_w4 OR `SaleDate` < :p_c3_SaleDate_w5 ) ) AND `Deleted` = :p_FacetSoftDelete_w8 AND `IDTenant` = :p_TestTenancy_w9) \"p\") \"d\" GROUP BY \"d\".\"K1\", \"d\".\"K2\") \"c\" WHERE \"c\".\"RowNumber\" <= :fMaxGroups"
+				}
+			],
+			"Ranges": [
+				{
+					"Name": "Ranges",
+					"ParamTypes": {},
+					"Params": {
+						"fR0To": 25,
+						"fR1From": 25,
+						"fR1To": 250,
+						"fR2From": 250,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w4": null,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT \"d\".\"Key\" AS \"Key\", count(*) AS \"Count\" FROM (SELECT CASE WHEN CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END IS NULL THEN -1 WHEN CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END < :fR0To THEN 0 WHEN CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END >= :fR1From AND CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END < :fR1To THEN 1 WHEN CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END >= :fR2From THEN 2 ELSE -2 END AS \"Key\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM BookStoreSale WHERE ( `PaymentMethod` IN ( :p_c1_PaymentMethod_w1_0, :p_c1_PaymentMethod_w1_1 ) AND `TotalAmount` >= :p_c2_TotalAmount_w2 AND ( `SaleDate` IS :p_c3_SaleDate_w4 OR `SaleDate` < :p_c3_SaleDate_w5 ) ) AND `Deleted` = :p_FacetSoftDelete_w8 AND `IDTenant` = :p_TestTenancy_w9) \"p\") \"d\" GROUP BY \"d\".\"Key\""
+				}
+			],
+			"StatsDate": [
+				{
+					"Name": "Stats",
+					"ParamTypes": {},
+					"Params": {
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w4": null,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS \"Rows\", count(CASE WHEN typeof(\"p\".\"SaleDate\") = 'text' AND substr(\"p\".\"SaleDate\", 1, 10) = strftime('%Y-%m-%d', \"p\".\"SaleDate\") AND (length(\"p\".\"SaleDate\") = 10 OR (substr(\"p\".\"SaleDate\", 11, 1) IN (' ', 'T') AND substr(\"p\".\"SaleDate\", 12, 5) = strftime('%H:%M', \"p\".\"SaleDate\") AND substr(\"p\".\"SaleDate\", 12, 2) < '24' AND instr(substr(\"p\".\"SaleDate\", 12), ' ') = 0 AND rtrim(\"p\".\"SaleDate\", char(9, 10, 11, 12, 13)) = \"p\".\"SaleDate\")) THEN strftime('%Y-%m-%d %H:%M:%S', \"p\".\"SaleDate\") END) AS \"NonNull\", min(CASE WHEN typeof(\"p\".\"SaleDate\") = 'text' AND substr(\"p\".\"SaleDate\", 1, 10) = strftime('%Y-%m-%d', \"p\".\"SaleDate\") AND (length(\"p\".\"SaleDate\") = 10 OR (substr(\"p\".\"SaleDate\", 11, 1) IN (' ', 'T') AND substr(\"p\".\"SaleDate\", 12, 5) = strftime('%H:%M', \"p\".\"SaleDate\") AND substr(\"p\".\"SaleDate\", 12, 2) < '24' AND instr(substr(\"p\".\"SaleDate\", 12), ' ') = 0 AND rtrim(\"p\".\"SaleDate\", char(9, 10, 11, 12, 13)) = \"p\".\"SaleDate\")) THEN strftime('%Y-%m-%d %H:%M:%S', \"p\".\"SaleDate\") END) AS \"Min\", max(CASE WHEN typeof(\"p\".\"SaleDate\") = 'text' AND substr(\"p\".\"SaleDate\", 1, 10) = strftime('%Y-%m-%d', \"p\".\"SaleDate\") AND (length(\"p\".\"SaleDate\") = 10 OR (substr(\"p\".\"SaleDate\", 11, 1) IN (' ', 'T') AND substr(\"p\".\"SaleDate\", 12, 5) = strftime('%H:%M', \"p\".\"SaleDate\") AND substr(\"p\".\"SaleDate\", 12, 2) < '24' AND instr(substr(\"p\".\"SaleDate\", 12), ' ') = 0 AND rtrim(\"p\".\"SaleDate\", char(9, 10, 11, 12, 13)) = \"p\".\"SaleDate\")) THEN strftime('%Y-%m-%d %H:%M:%S', \"p\".\"SaleDate\") END) AS \"Max\", NULL AS \"SumUnits\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM BookStoreSale WHERE ( `PaymentMethod` IN ( :p_c1_PaymentMethod_w1_0, :p_c1_PaymentMethod_w1_1 ) AND `TotalAmount` >= :p_c2_TotalAmount_w2 AND ( `SaleDate` IS :p_c3_SaleDate_w4 OR `SaleDate` < :p_c3_SaleDate_w5 ) ) AND `Deleted` = :p_FacetSoftDelete_w8 AND `IDTenant` = :p_TestTenancy_w9) \"p\""
+				}
+			],
+			"StatsDecimal": [
+				{
+					"Name": "Stats",
+					"ParamTypes": {},
+					"Params": {
+						"fFactor": 100,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w4": null,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT count(*) AS \"Rows\", count(CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END) AS \"NonNull\", min(CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END) AS \"Min\", max(CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END) AS \"Max\", sum(CAST(ROUND(CASE WHEN typeof(\"p\".\"TotalAmount\") IN ('integer', 'real') THEN \"p\".\"TotalAmount\" END * :fFactor) AS INTEGER)) AS \"SumUnits\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM BookStoreSale WHERE ( `PaymentMethod` IN ( :p_c1_PaymentMethod_w1_0, :p_c1_PaymentMethod_w1_1 ) AND `TotalAmount` >= :p_c2_TotalAmount_w2 AND ( `SaleDate` IS :p_c3_SaleDate_w4 OR `SaleDate` < :p_c3_SaleDate_w5 ) ) AND `Deleted` = :p_FacetSoftDelete_w8 AND `IDTenant` = :p_TestTenancy_w9) \"p\""
+				}
+			],
+			"Terms": [
+				{
+					"Name": "Terms",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 10000,
+						"fTopPlusOne": 6,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w4": null,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT \"r\".\"Key\" AS \"Key\", \"r\".\"Count\" AS \"Count\", \"r\".\"FacetTotal\" AS \"FacetTotal\", \"r\".\"FacetMissing\" AS \"FacetMissing\", \"r\".\"FacetDistinct\" AS \"FacetDistinct\" FROM (SELECT \"t\".\"Key\" AS \"Key\", \"t\".\"Count\" AS \"Count\", sum(\"t\".\"Count\") OVER () AS \"FacetTotal\", sum(CASE WHEN \"t\".\"Key\" IS NULL THEN \"t\".\"Count\" ELSE 0 END) OVER () AS \"FacetMissing\", count(\"t\".\"Key\") OVER () AS \"FacetDistinct\", rank() OVER (ORDER BY CASE WHEN \"t\".\"Key\" IS NULL THEN 1 ELSE 0 END, \"t\".\"Count\" DESC) AS \"RowRank\", row_number() OVER (ORDER BY CASE WHEN \"t\".\"Key\" IS NULL THEN 1 ELSE 0 END, \"t\".\"Count\" DESC, \"t\".\"Key\") AS \"RowNumber\" FROM (SELECT \"d\".\"Key\" AS \"Key\", count(*) AS \"Count\" FROM (SELECT \"p\".\"PaymentMethod\" AS \"Key\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM BookStoreSale WHERE ( `PaymentMethod` IN ( :p_c1_PaymentMethod_w1_0, :p_c1_PaymentMethod_w1_1 ) AND `TotalAmount` >= :p_c2_TotalAmount_w2 AND ( `SaleDate` IS :p_c3_SaleDate_w4 OR `SaleDate` < :p_c3_SaleDate_w5 ) ) AND `Deleted` = :p_FacetSoftDelete_w8 AND `IDTenant` = :p_TestTenancy_w9) \"p\") \"d\" GROUP BY \"d\".\"Key\") \"t\") \"r\" WHERE (\"r\".\"RowRank\" <= :fTopPlusOne AND \"r\".\"RowNumber\" <= :fMaxGroups)"
+				}
+			],
+			"TermsKeyAsc": [
+				{
+					"Name": "Terms",
+					"ParamTypes": {},
+					"Params": {
+						"fMaxGroups": 10000,
+						"fTopPlusOne": 6,
+						"p_FacetSoftDelete_w8": 0,
+						"p_TestTenancy_w9": 1,
+						"p_c1_PaymentMethod_w1_0": "Credit",
+						"p_c1_PaymentMethod_w1_1": "Cash",
+						"p_c2_TotalAmount_w2": 10,
+						"p_c3_SaleDate_w4": null,
+						"p_c3_SaleDate_w5": "2024-01-01 00:00:00"
+					},
+					"SQL": "SELECT \"r\".\"Key\" AS \"Key\", \"r\".\"Count\" AS \"Count\", \"r\".\"FacetTotal\" AS \"FacetTotal\", \"r\".\"FacetMissing\" AS \"FacetMissing\", \"r\".\"FacetDistinct\" AS \"FacetDistinct\" FROM (SELECT \"t\".\"Key\" AS \"Key\", \"t\".\"Count\" AS \"Count\", sum(\"t\".\"Count\") OVER () AS \"FacetTotal\", sum(CASE WHEN \"t\".\"Key\" IS NULL THEN \"t\".\"Count\" ELSE 0 END) OVER () AS \"FacetMissing\", count(\"t\".\"Key\") OVER () AS \"FacetDistinct\", rank() OVER (ORDER BY CASE WHEN \"t\".\"Key\" IS NULL THEN 1 ELSE 0 END, \"t\".\"Count\" DESC) AS \"RowRank\", row_number() OVER (ORDER BY CASE WHEN \"t\".\"Key\" IS NULL THEN 1 ELSE 0 END, \"t\".\"Count\" DESC, \"t\".\"Key\") AS \"RowNumber\" FROM (SELECT \"d\".\"Key\" AS \"Key\", count(*) AS \"Count\" FROM (SELECT CASE WHEN typeof(\"p\".\"IDBookStore\") IN ('integer', 'real') THEN \"p\".\"IDBookStore\" END AS \"Key\" FROM (SELECT \"IDBookStoreSale\", \"IDBookStore\", \"PaymentMethod\", \"SaleDate\", \"TotalAmount\" FROM BookStoreSale WHERE ( `PaymentMethod` IN ( :p_c1_PaymentMethod_w1_0, :p_c1_PaymentMethod_w1_1 ) AND `TotalAmount` >= :p_c2_TotalAmount_w2 AND ( `SaleDate` IS :p_c3_SaleDate_w4 OR `SaleDate` < :p_c3_SaleDate_w5 ) ) AND `Deleted` = :p_FacetSoftDelete_w8 AND `IDTenant` = :p_TestTenancy_w9) \"p\") \"d\" GROUP BY \"d\".\"Key\") \"t\") \"r\" WHERE (\"r\".\"RowRank\" <= :fTopPlusOne AND \"r\".\"RowNumber\" <= :fMaxGroups)"
+				}
+			]
+		}
+	}
+}

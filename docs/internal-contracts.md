@@ -1,0 +1,2419 @@
+# retold-faceting-service — Internal Contracts (Milestones 1 and 2)
+
+> **Part II (§19–§37) is the Milestone 2 contract and wins over Part I wherever they conflict** (§19.2 lists every Part I rule it changes). Part I (§0–§18) below is the Milestone 1 contract as built.
+
+> **Binding.** This file is the interface spec Milestone 1 is coded against. Every shape, method name, field name and error code here is a contract between modules. If you need to change a contract, change it here first; never silently diverge. Where this file and the design set (`/Users/steven/Documents/retold-faceting-service-design/design/`) disagree, **this file wins for M1** and §16 lists every deliberate deviation.
+
+Design references are written `01 §8.2` (file `01-fold-algebra.md`, section 8.2).
+
+---
+
+## 0. Conventions every file follows
+
+| Topic | Rule |
+|---|---|
+| Style | Plain JS, **tabs**, **Allman braces everywhere** (stubs too), `pParam`, `tmpLocal`, `libRequire`, `CONSTANT`. |
+| Services | Every class extends `fable-serviceproviderbase`, sets `this.serviceType = '<Type>'` in the constructor, and exports `module.exports = Class; module.exports.serviceType = '<Type>';`. The `contract/*` modules and the `Shell-Templates-<Dialect>.js` modules are **not** classes (see below). |
+| Registration | The main service registers every sub-service with `this.fable.addServiceType(Type, Class)` + `this.fable.instantiateServiceProvider(Type, tmpResolvedOptions)`, so each is reachable as `this.fable.<serviceType>` (e.g. `this.fable.RetoldFacetingCatalog`). Services find each other **only** through `this.fable.<serviceType>` or through `pContext` (never by `require`-ing a sibling service and constructing it). |
+| Options | Every service constructor receives the **resolved** `RetoldFaceting` options (`Retold-Faceting-Service-Options.js` → `resolve(pPartial)`) as `pOptions`. Constructors call `libOptions.resolve(pOptions)` themselves, so `new X(pFable)` and `new X(pFable, {})` work (the smoke test relies on this). `resolve()` is idempotent. Read options as `this.options.Limits.MaxTop`, never from `fable.settings` directly. |
+| Async | Node callbacks: `fCallback(pError, pResult)`. Anything that may touch the DB, a behavior, or the host is async. Pure transforms are synchronous. |
+| Errors | Build every client-visible error with `libFacetErrors.create(pCode, pMessage, pDetail)` (`contract/Facet-Contract-Errors.js`). Synchronous request-phase services (Normalizer, FilterValidator, ClauseCompiler, FilterAST, DisjunctivePlanner, Planner.lower, contract builders) **throw** such errors; async services pass them to `fCallback`. Any other `Error` that escapes is mapped to `FACET_INTERNAL` (500) by the route, logged with the plan hash, never echoed. |
+| Restify | Handlers never return a promise and call `fNext` exactly once. Use the fable Orator service server (`post`, `get`). The Query route reads its own body (JSON Content-Type only, counted against `Limits.MaxBodyBytes`); restify's combined `bodyParser` (multipart / urlencoded / temp files) is never used. |
+| Identifiers | No identifier ever comes from the client. Every column/table name used in SQL comes from `RetoldFacetingCatalog` (validated against `^[A-Za-z_][A-Za-z0-9_]{0,63}$` at build) and is quoted by `RetoldFacetingDialects`. Every value is bound. |
+| SQL composition | Scoped Relations only (D-03). **Never** `query.addJoin`. Relations are spliced through `query.parameters.SR<n>` and referenced as `<%= _Params.SR<n> %>`; never concatenated into template text. |
+| Determinism | No `Math.random` / wall-clock in anything an engine compares. `pContext.Now` is pinned once per request. Test fixtures use a fixed PRNG seed. |
+| Logging | `this.fable.log.*`; never log values bound into SQL, session contents or credentials. |
+| Pure modules | `contract/*` may `require` **only** sibling contract modules (`./Facet-Contract-*.js`, including `Facet-Contract-Util.js`: `hasOwn`, `isPlainObject`, `toFiniteNumber`, `toCount`, `keyProblem`, `logSafe`); `Shell-Templates-<Dialect>.js` requires nothing. The smoke test enforces both (they are deep-required by browser code later, design `10 §3.1` "zero requires"). Server-only helpers (`stripColumn`, `normalizeScopeValue`, `isUnsetScopeValue`) live in `source/Retold-Faceting-Util.js`. |
+| Client keys | Facet Keys and range Keys become map keys and log text: every map keyed by client data is a `Map`, a `Set` or `Object.create(null)`, or is read with `hasOwn`; keys with control characters or an `Object.prototype` name (`__proto__`, `constructor`, `prototype`, `hasOwnProperty`) are refused by `normalizeRequest` (400); keys are logged through `logSafe` (JSON-quoted). |
+| fable defaults | `fable.instantiateServiceProvider(Type, …)` makes the **first** instance of a type the default `fable.<Type>`; later instances do not replace it. `RetoldFacetingService.registerServices()` is idempotent for that reason. |
+| Contract aliases | In this document and in code, the pure modules are required as `libFacetRequest` (`contract/Facet-Contract-Request.js`, called `FacetRequest` below), `libFacetEnvelope` (`FacetEnvelope`), `libFacetBuckets` (`FacetBuckets`), `libFacetClauses` (`FacetClauses`), `libFacetErrors` (`FacetErrors`), and the options module as `libOptions`. |
+
+### 0.1 Service hashes (all on `fable`)
+
+```
+RetoldFacetingService
+RetoldFacetingHostDataService            (the active host; also referenced as pContext.Host)
+RetoldFacetingCatalog  RetoldFacetingGraph
+RetoldFacetingRequestNormalizer  RetoldFacetingFilterValidator  RetoldFacetingClauseCompiler
+RetoldFacetingFilterAST  RetoldFacetingDisjunctivePlanner
+RetoldFacetingPlanner  RetoldFacetingFoldIR
+RetoldFacetingPrincipalResolver  RetoldFacetingScopeCapture  RetoldFacetingScopeGuard  RetoldFacetingAuthorizer
+RetoldFacetingRouter  RetoldFacetingEngineLive  RetoldFacetingEngineReference      (EngineBase is abstract, not registered)
+RetoldFacetingLabelResolver                                                       (FK labels, §18.6)
+RetoldFacetingScopedRelationBuilder  RetoldFacetingDialects  RetoldFacetingShellTemplates
+RetoldFacetingRoutes
+RetoldFacetingDefinitionRegistry  RetoldFacetingBinder                             (M2, §19.3)
+RetoldFacetingPredicateCompiler  RetoldFacetingStagedKeys  RetoldFacetingCubeExecutor   (M2, §19.3)
+```
+
+---
+
+## 1. Module map
+
+| Area | Files |
+|---|---|
+| Contract (pure, shared with pict-section-facet) | `source/contract/Facet-Contract-Request.js`, `-Envelope.js`, `-Buckets.js`, `-Clauses.js`, `-Errors.js`, `-Util.js` |
+| Host and catalog | `source/host/Retold-Faceting-Host-Base.js`, `source/host/Retold-Faceting-Host-DataService.js`, `source/catalog/Retold-Faceting-Catalog.js`, `source/catalog/Retold-Faceting-Graph.js`, `source/catalog/Retold-Faceting-LabelResolver.js`, `source/Retold-Faceting-Installers.js` |
+| Request | `source/request/Retold-Faceting-RequestNormalizer.js`, `-FilterValidator.js`, `-ClauseCompiler.js`, `-FilterAST.js`, `-DisjunctivePlanner.js` |
+| Plan | `source/plan/Retold-Faceting-Planner.js`, `-FoldIR.js` |
+| Live engine and scope | `source/engine/live/*` (ScopedRelationBuilder, Dialects, ShellTemplates, `Shell-Templates-<Dialect>.js`), `source/engine/Retold-Faceting-EngineLive.js`, `source/security/Retold-Faceting-ScopeCapture.js`, `-ScopeGuard.js` |
+| Reference engine (O1) | `source/engine/Retold-Faceting-EngineReference.js` |
+| Wiring | `source/Retold-Faceting-Service.js`, `-Service-Options.js`, `-Util.js`, `source/engine/Retold-Faceting-Router.js`, `-EngineBase.js`, `source/security/Retold-Faceting-PrincipalResolver.js`, `-Authorizer.js`, `source/routes/*` |
+| Tests | `test/*_tests.js`, `test/support/Facet-Test-Harness.js`, `test/support/Facet-Test-Builders.js`, `test/fixtures/*` (the bookstore model is a copy in `test/fixtures/Bookstore-Model.json`), `test/goldens/*`; `debug/m1-smoke.js` |
+| M2 additions (§19.3) | `source/catalog/Retold-Faceting-DefinitionRegistry.js`, `source/catalog/Facet-Definition-Schema.json`, `source/plan/Retold-Faceting-Binder.js`, `source/engine/live/Retold-Faceting-PredicateCompiler.js`, `-StagedKeys.js`, `-CubeExecutor.js`; `test/support/Facet-Harness-Providers.js`, `Facet-Docker-Postgres.js`; `test/fixtures/ProjectTrack-*`, `LabTrack-*`, `Bookstore-Conformance-Fixtures.js`; `test/Facet-Review-M2_tests.js` (the M2 review regressions) |
+| Shared server helpers | `source/Retold-Faceting-Util.js` (`stripColumn`, `columnQualifier`, `sha1Hex`, scope-value normalization); the `$`-token grammar and param types live in `Facet-Contract-Request.js` (`TOKEN_PATTERN`, `PARAM_TYPES`), the integer range rule in `Facet-Contract-Buckets.js` (`integerRange`), the value coercion rule is `ClauseCompiler.coerceValue` (a pure module function the registry and the Binder use) |
+
+Test files are named `*_tests.js`; each one that opens a server names a **registry port in 19100–19199** (§14.4) but binds an ephemeral port by default (the harness reads the bound port back), so overlapping runs never collide.
+
+---
+
+## 2. Request pipeline (M1) and the request context
+
+### 2.1 Order (normative; mirrors `03 §2.1`, minus cache/cost/stores)
+
+```
+Route  POST /1.0/Facet/:Entity/Query  (route-local JSON body parser) → RetoldFacetingService.query(Entity, Body, pRequest, cb)
+  0 Context     RetoldFacetingService.newContext(Entity, pRequest, pInternalOptions) → pContext (§2.2)
+  1 Principal   RetoldFacetingPrincipalResolver.resolve(pContext) → pContext.Principal  (401 FACET_UNAUTHENTICATED)
+  2 Shape       RetoldFacetingRequestNormalizer.normalize(pEntity, pBody) → NormalizedRequest   (400 shape/limit errors)
+  3 Gate        RetoldFacetingAuthorizer.check(pContext, [Entity]) — root not facetable/readable → 404 FACET_UNKNOWN_ENTITY
+  4 Filter      FilterAST.build(Entity, NormalizedRequest) (calls FilterValidator + ClauseCompiler) → FilterAST   (400 FACET_FILTER_INVALID / FACET_UNKNOWN_FIELD)
+  5 Facets      Catalog.facet(FacetID) per Facets[] entry; unknown → per-facet error (FACET_UNKNOWN_FACET / FACET_UNKNOWN_FOLD)
+  6 Plan        Planner.plan(pContext) → { Aggs, Variants, DepSet } (DisjunctivePlanner inside)
+  7 Route       Router.route(pAggs, pContext) → Engine (Live, or the forced Reference engine)
+  8 Execute     Engine.execute(pContext, pAggs) → Execution { Results, Errors, Captures }   (ScopeCapture + ScopeGuard inside Live)
+  9 Post        Envelope.buildFacetResult per Agg + Envelope.buildEnvelope (contract, pure)
+ 10 Respond     ETag: W/"fv1:<Version>", Cache-Control: private, no-cache, Vary: Cookie, Authorization, X-Retold-Facet-Contract: 1
+```
+
+Authorization (3) precedes field validation (4) so error codes never reveal the schema of an entity the principal cannot read.
+
+### 2.2 `pContext` (one object per request, created by `RetoldFacetingService.queryInternal`)
+
+```javascript
+{
+	RequestID: 'rfq-000017',            // monotonic per process; for logs only
+	Entity: 'BookStoreSale',            // route :Entity (validated by step 3)
+	Request: pRequest,                  // the restify request, or a synthetic { params: {}, headers: {}, query: {}, UserSession: {…} } for in-process calls
+	Host: <RetoldFacetingHostDataService>,
+	Options: <resolved RetoldFaceting options>,
+	Principal: <Principal>,             // §12.2 (frozen)
+	NormalizedRequest: <NormalizedRequest>,   // §3
+	FilterAST: <FilterAST>,             // §4
+	Variants: { v0: <Variant>, … },     // §6 (set by the Planner)
+	Dialect: 'SQLite',                  // Host.getDialectProfile(Entity).Name
+	Now: '2026-10-08T15:02:11.120Z',    // pinned once (AsOf of every Live result)
+	Deadline: 1791472455120,            // Date.now() + min(Limits.TimeoutMS, request TimeoutMS)
+	ForceEngine: null,                  // 'Reference' only via queryInternal options (tests / fixture CLI); never from the client
+	Memo: { Relations: {}, Captures: {}, VariantRows: {} },   // per-request memoization (SRs, captures, Reference rows)
+	Counters: { Relations: 0, BehaviorRuns: 0, Statements: 0 },
+	Warnings: [ ]                       // { Code, Detail } appended by any stage; surfaced in envelope.Warnings
+}
+```
+
+`Counters.Relations > Limits.MaxRelationsPerRequest` or `Counters.BehaviorRuns > Limits.MaxBehaviorRunsPerRequest` → `422 FACET_TOO_LARGE` (raised by whoever increments). `Date.now() > Deadline` between statements → that facet fails with `504 FACET_TIMEOUT`.
+
+---
+
+## 3. (a) Normalized request — `RetoldFacetingRequestNormalizer.normalize(pEntity, pBody)`
+
+Input: the parsed JSON body (`02 §3`). Output (synchronous; throws a FacetError on rejection):
+
+```javascript
+{
+	Entity: 'BookStoreSale',
+	Clauses: [ <pict clause object, shallow-copied> ],   // shape-checked only (object, Type string); compiled later
+	FilterString: 'FBV~PaymentMethod~EQ~Credit' | null,   // RAW as received (still percent-encoded if the client encoded it); FilterValidator decodes once
+	Facets:
+	[
+		{
+			Key: 'ByMonth',                     // default: the FacetID (or FacetIDs joined with '|' for a pivot); must be unique → else FACET_REQUEST_INVALID
+			FacetIDs: [ 'BookStoreSale.SaleDate' ],   // ALWAYS an array; length 1, or 2 when Fold === 'Pivot'
+			Fold: 'DateHistogram' | null,       // null = the catalog default fold (resolved by the Planner)
+			Interval: 'month' | null,           // day | week | month | quarter | year
+			TimeZone: null,                     // if set and !== Time.StorageTimeZone → 422 FACET_TIMEZONE_UNSUPPORTED (Normalizer)
+			Top: 20 | null,                     // integer ≥ 1; clamped to Limits.MaxTop (clamp is silent; a Warning is added)
+			Order: 'CountDesc' | 'KeyAsc' | 'KeyDesc' | null,
+			Missing: true,                      // default true
+			Buckets: 20 | null,                 // NumericHistogram Nice bucket target, 1..Limits.MaxBuckets
+			Mode: 'Nice' | 'Edges' | null,      // NumericHistogram; 'Edges' requires Edges; 'Log' → 422 FACET_FOLD_UNSUPPORTED in M1
+			Edges: [ 0, 10, 50 ] | null,        // strictly ascending finite numbers, 2..Limits.MaxBuckets+1
+			OpenEnded: false,                   // Edges mode: last bucket open ([e_n, ∞))
+			Ranges: [ { Key: 'low', From: null, To: 3, Label: 'Low' } ] | null,   // Ranges fold; Keys unique strings; From inclusive, To exclusive
+			Exclude: 'Self' | 'None' | [ '<clause Hash or conjunct Id>' … ] | null,   // null = per-fold default (§6.2); 'Group:<n>' → 422 in M1
+			CountMode: null,                    // only 'Rows' is legal in M1; anything else → 422 FACET_FOLD_UNSUPPORTED
+			Labels: null,                       // accepted, ignored in M1 (no FK label reads yet)
+			Chart: false,                       // add the Chart projection
+			EmptyBuckets: true                  // DateHistogram gap fill
+		}
+	],
+	Total: true,                            // default true
+	TimeoutMS: 10000,                       // min(body.TimeoutMS, Limits.TimeoutMS)
+	Freshness: { Mode: 'Exact' },           // accepted and ignored in M1 (Live is always Exact)
+	Warnings: [ { Code: 'FACET_TOP_CLAMPED', Detail: { Key, Requested, Applied } } ]
+}
+```
+
+Rules:
+
+- `Facets` missing or empty → `400 FACET_REQUEST_INVALID`; more than `Limits.MaxFacets` → `400 FACET_TOO_MANY_FACETS`.
+- `Facet` may be a string or an array of exactly two strings; an array requires `Fold: 'Pivot'` (and `Fold: 'Pivot'` requires an array of two) → else `400 FACET_REQUEST_INVALID`.
+- L1 limits (`06 §8`): body ≤ 256 KiB, JSON depth ≤ 8, `Clauses` ≤ 100, any string value ≤ 1 KiB, any value array ≤ 1 000 → `400 FACET_REQUEST_INVALID` with `Detail.Limit`.
+- **Inputs not in M1** (they are later milestones; refuse instead of ignoring, so a client never silently gets an unfiltered answer):
+  - `Scopes` (non-empty) or a `NamedScope` clause → `400 FACET_UNKNOWN_SCOPE` (no scopes are registered in M1);
+  - `Definition` on a facet → `403 FACET_ADHOC_FORBIDDEN`;
+  - `Selections` (non-empty), `FilterExperience` (non-null), `Records`, `Params` (non-empty) → `422 FACET_FOLD_UNSUPPORTED` with `Detail: { Feature: '<field name>', Milestone: 1 }`.
+- The legacy `RecordSetSearchFacetPayload` alias (`02 §3.2`) is **not** accepted in M1 (seam: `normalizeLegacy()` stub).
+- The Normalizer never looks at the catalog; FacetID existence is checked in step 5. It does validate FacetID **syntax** with `FacetRequest.parseFacetID` (§11.2): a syntactically invalid FacetID (`parseFacetID` returns `null`) is a request-level `400 FACET_REQUEST_INVALID`; a well-formed but unknown FacetID is a per-facet `FACET_UNKNOWN_FACET` (step 5).
+- **Pure reference implementation (A):** `FacetRequest.normalizeRequest(pEntity, pBody, pOptions)` (contract, zero requires; shared with the client) implements every rule of this section and returns exactly the shape above; `FacetRequest.normalizeFacetSpec(pSpec, pIndex, pOptions, pWarnings)` and `FacetRequest.checkLimits(pBody, pLimits)` are its parts. The Normalizer service may delegate (`return libFacetRequest.normalizeRequest(pEntity, pBody, this.options);`). Its additions to the rules above: a Fold name that does not exist → `400 FACET_UNKNOWN_FOLD` (request level), a later-milestone fold (`PathTerms`, `BridgeTerms`, `ChildRollup`, `ExistsSplit`, `Computed`, `UnionOfSources`, `TuplePivot`) → `422 FACET_FOLD_UNSUPPORTED`; Keys starting with `#` are reserved (`400`, `Reason: 'ReservedKey'`); `Buckets` above `MaxBuckets` is clamped with warning `FACET_BUCKETS_CLAMPED`; `Edges` without `Mode` imply `Mode: 'Edges'`; filter strings (`FilterString`, a clause's `Filter`, a `RawFilter`'s `Value`) are exempt from the 1 KiB per-string limit (the body limit still applies; the FilterValidator limits each value inside them). Errors carry `Detail: { Field, Index, Reason? }` (`Detail.Limit/Max/Path` for L1).
+- The legacy payload converter exists as a seam: `FacetRequest.isLegacyPayload(pBody)` / `FacetRequest.legacyToRequest(pEntity, pBody)`; `normalizeRequest` applies it only when `pOptions.AcceptLegacy === true` (never in M1), otherwise a legacy body is `400 FACET_REQUEST_INVALID` with `Reason: 'LegacyPayload'`.
+
+---
+
+## 4. (b) FilterAST
+
+### 4.1 Predicate nodes (`Pred`) — the DSL shape of `01 §4.4`, column-only in M1
+
+```javascript
+{ Field: 'Rating', Op: 'GE', Value: 4 }                       // comparison
+{ Field: 'PaymentMethod', Op: 'IN', Value: [ 'Credit', 'Cash' ] }
+{ Field: 'Language', Op: 'NULL' }                             // no Value; meadow-filter 'IN' (IS NULL) maps here
+{ Field: 'Language', Op: 'NOTNULL' }                          // meadow-filter 'NN'
+{ And: [ <Pred>, … ] }
+{ Or:  [ <Pred>, … ] }
+```
+
+- `Op` ∈ `EQ NE GT GE LT LE LK NLK IN NIN NULL NOTNULL`. `IN`/`NIN` values are non-empty arrays of scalars (≤ 1 000); every other op takes one scalar (string | number | boolean); `NULL`/`NOTNULL` take none.
+- `Field` is always a whitelisted column of the conjunct's entity (`Catalog.column(Entity, Field)` non-null). The delete column is legal **only** in conjuncts from `FilterString` or `RawFilter` (§4.4).
+- No `Not` node in M1 (meadow-filter cannot express it; clauses do not need it).
+- Values are **data**: never template-evaluated, never parsed for `$` tokens. A string value containing `~` (or decoding to it) is rejected (`400 FACET_FILTER_INVALID`).
+
+### 4.2 Conjunct
+
+```javascript
+{
+	Id: 'c1',                                // 'c' + 1-based index in FilterAST.Conjuncts order
+	Origin:
+	{
+		Kind: 'Clause' | 'String' | 'RawFilter',
+		Hash: 'PaymentMethod-DistinctSelectedValueList-3b1f' | null,   // the pict clause Hash when present
+		FilterKey: 'PaymentMethod' | null,   // pict clause FilterKey (default: its FilterByColumn when exactly one)
+		ClauseType: 'DistinctSelectedValueList' | null,
+		Index: 0                             // index of the clause in Clauses[], or of the term in the FilterString
+	},
+	Fields: [ 'PaymentMethod' ],             // sorted, unique: every Field referenced anywhere in Pred
+	NeverExclude: false,                     // true for RawFilter (and, later, NamedScope/definition Where)
+	Fence: true,                             // client intent → rendered inside the client fence. Always true in M1.
+	NamesDeleted: false,                     // Pred references the entity's delete column (Show-deleted)
+	Pred: <Pred>
+}
+```
+
+### 4.3 FilterAST
+
+```javascript
+{
+	Entity: 'BookStoreSale',
+	Conjuncts: [ <Conjunct>, … ],            // order: all Clauses (array order), then the FilterString terms (left to right)
+	IncludesDeleted: false,                  // any conjunct NamesDeleted
+	Applied: [ { Hash: '…' } | { String: true } | { RawFilter: '<Hash or index>' } ],   // envelope Filter.Applied
+	Warnings: [ { Code: 'FACET_SORT_IGNORED', Detail: 'FSF stanzas do not affect facets.' } ]
+}
+```
+
+### 4.4 Building conjuncts
+
+**From a meadow-filter string** (`FilterValidator.validate` → stanzas; `FilterAST.fromStanzas` → conjuncts), exactly `01 §8.2`:
+
+- Decode **once** with `decodeURIComponent` (malformed escape → `400 FACET_FILTER_INVALID`), split on `~` into quads; a trailing partial quad is an error.
+- Instruction allowlist: `FBV FBVOR FBL FBLOR FOP FOPOR FCP`. `FSF` is **stripped** with warning `FACET_SORT_IGNORED`. Everything else (`FBD FBDOR FBJ* FSJF FDST`, unknown) → `400 FACET_FILTER_INVALID` with `Detail: { Offset: <quad index>, Token }`.
+- Operators: `EQ NE GT GE LT LE LK NLK IN NN INN NIN` mapped to `EQ NE GT GE LT LE LK NLK NULL NOTNULL IN NIN`. `FBL`/`FBLOR` accept only `INN`/`NIN` (value split on `,`; empty items rejected). `FBV`/`FBVOR` with `INN`/`NIN` → `400` (meadow-filter would bind a string to an `IN`).
+- Field: exact, case-sensitive match of a filterable column (`Catalog.column`); Sensitive and unknown fields → `400 FACET_UNKNOWN_FIELD` with `Detail: { Field }` (the root entity is already authorized, so naming it is safe). The delete column is accepted here.
+- Parens: `FOP`/`FOPOR` open, `FCP` closes; **one nesting level** (a `FOP` inside a group → `400`); unbalanced → `400`. Field/Value of paren quads are ignored.
+- **Precedence (SQL, the way FoxHound renders flat connectors):** scan depth-0 *terms* left to right (a term is one stanza, or one whole `FOP…FCP` group; its connector is the stanza's / the `FOPOR`'s). Split the term sequence at every `OR`-connected term into OR-branches; each branch = AND of its terms. The connector of the **first** term of a sequence (depth 0, or first inside a group) is ignored (FoxHound emits no connector there). One branch → each term is its own conjunct. Two or more branches → the **whole string is one conjunct** `{ Or: [ And(branch₁), And(branch₂), … ] }` (single-term branches are not wrapped in `And`). Inside a group the same rule produces the group's `Pred`.
+- Fixtures (C's tests, also O1): `FBV~A~EQ~1~FBV~B~EQ~2~FBVOR~C~EQ~3` → one conjunct `Or[And(A=1,B=2), C=3]`; `FBV~A~EQ~1~FOP~0~(~0~FBV~B~EQ~2~FBVOR~C~EQ~3~FCP~0~)~0` → two conjuncts `A=1` and `Or[B=2, C=3]`.
+- Origin: `{ Kind: 'String', Hash: null, FilterKey: null, ClauseType: null, Index: <term index> }`.
+
+**From pict clauses** (`ClauseCompiler.compile(pEntity, pClauses)` → conjuncts; one conjunct per clause; M1 clause types):
+
+| Clause `Type` | Conjunct `Pred` |
+|---|---|
+| `DistinctSelectedValueList` (`Values: [...]`, `FilterByColumn` or `FilterByColumns`) | one field: `{ Field, Op: 'IN', Value: [non-null values] }`; several fields: `Or` of those. `null`/`undefined` values skipped (pict does the same). No values left → the clause is **ignored** (no conjunct) and a warning `FACET_CLAUSE_EMPTY` is added. |
+| `DateRange`, `NumericRange`, `StringRange`, `Range` (`Values: { Start, End }`, `StartExclusive`, `EndExclusive`) | per field `And[ {GE|GT Start}, {LE|LT End} ]` (missing bound omitted; one bound → just that comparison); several fields: `And` of all. A bound is absent when `null`, `undefined` or `''` — and for `DateRange` also `'0'`. (Deviation from pict: a numeric `0` **is** a bound.) Both absent → ignored + `FACET_CLAUSE_EMPTY`. |
+| `Match`, `StringMatch`, `DateMatch`, `NumericMatch` (`Values: [...]`, `ExactMatch`) | `Or` over fields × values of `EQ` (ExactMatch, or Numeric/DateMatch when ExactMatch is undefined) else `LK '%v%'` |
+| `RawFilter` (`Filter` or `Value`: a meadow-filter string) | parsed through the FilterString path into **one** conjunct (all its terms ANDed / OR-normalized), `Origin.Kind: 'RawFilter'`, `NeverExclude: true`; may name the delete column |
+| anything else (`InternalJoin*`, `ExternalJoin*`, `FacetSelection`, …) | `400 FACET_FILTER_INVALID` with `Detail: { ClauseType, Reason: 'UnsupportedClauseType' }` (`NamedScope` → `400 FACET_UNKNOWN_SCOPE`, §3) |
+
+- `GUIDGroup` + `Junction: 'OR'`: clauses sharing a `GUIDGroup` whose `Junction` is `'OR'` become **one** conjunct `{ Or: [ <each clause Pred> ] }` with `Origin.Hash` = the first clause's Hash and `Fields` = union.
+- **Value coercion by column DataType** (L3): `ID`/`Numeric`/`Decimal`/`ForeignKey` → `Number` (non-finite → `400 FACET_FILTER_INVALID`); `Boolean` → `0`/`1` (accepts `true/false/'true'/'false'/0/1/'0'/'1'`); `DateTime` → canonical `'YYYY-MM-DD HH:mm:ss'` via `FacetBuckets.canonicalDateTime(v)` (accepts `YYYY-MM-DD`, `YYYY-MM-DD HH:mm[:ss]`, `YYYY-MM-DDTHH:mm:ss[.fff][Z]`; unparseable → `400`); `String`/`Text` → `String(v)`. FilterString values are **not** coerced (list parity: meadow-filter passes them as strings).
+- `FilterByColumn(s)` must be filterable columns (`400 FACET_UNKNOWN_FIELD`); a clause may not name the delete column (only `RawFilter`/`FilterString` may).
+
+### 4.5 Rendering the AST into a FoxHound query — `FilterAST.applyToQuery(pConjuncts, pQuery, pOptions)`
+
+```javascript
+FilterAST.applyToQuery(pConjuncts, pQuery, { Dialect: 'SQLite', ParameterPrefix: 'c' })
+```
+
+- Appends FoxHound filter entries for the conjuncts, ANDed, **without** the fence (the caller adds `addFilter('', '', '(', 'AND', 'FacetFenceOpen')` before and `addFilter('', '', ')', 'AND', 'FacetFenceClose')` after). Or/And nodes render as `addFilter('', '', '(', <connector>)` … `addFilter('', '', ')')` groups; the first entry inside a group carries connector `AND` (ignored by FoxHound).
+- Op → FoxHound operator: `EQ =`, `NE !=`, `GT >`, `GE >=`, `LT <`, `LE <=`, `LK LIKE`, `NLK NOT LIKE`, `IN IN`, `NIN NOT IN`, `NOTNULL IS NOT NULL`, and `NULL`: **`IS NULL` on PostgreSQL/MySQL/MSSQL; on SQLite operator `IS` with value `null`** (the SQLite dialect has no `IS NULL` branch until FH-2; `"C" IS :p` with a NULL bind is SQL's `IS NULL`; verified in the skeleton probe).
+- Parameter names: `<ParameterPrefix><ConjunctIndex>_<Field>` (FoxHound appends `_w<i>`), so every bound name is unique and alphanumeric.
+- `FilterAST.toFilterString(pConjuncts, pOptions)` renders the same conjuncts as a **fenced** meadow-filter string (`FOP~0~(~0~ … ~FCP~0~)~0`; each conjunct that is an `Or`/`And` group becomes its own nested `FOP`/`FOPOR` … `FCP` group) for the harness `listCount` oracle. Default `{ Encode: false }`: the **raw** (decoded) string — the harness URL-encodes the whole string exactly once for the GET path, and restify decodes it once (meadow-endpoints 4.0.21 GET routes do no further decoding). `{ Encode: true }`: each value `encodeURIComponent`-ed, i.e. the form a client puts in a POST body `FilterString`. `NULL` renders as `FBV~F~IN~0`, `NOTNULL` as `FBV~F~NN~0`, `IN`/`NIN` as `FBL~F~INN~a,b` / `FBL~F~NIN~a,b` (a value containing `,` or `~` → throw `FACET_FILTER_INVALID`: the list cannot carry it). Empty conjunct list → `''`.
+- `FilterAST.build(pEntity, pInput)` reads **only** `pInput.Clauses` and `pInput.FilterString` (so the harness can call it without a full NormalizedRequest).
+
+---
+
+## 5. (c) FoldIR subset (K1–K7, K14) — `RetoldFacetingFoldIR` + `RetoldFacetingPlanner`
+
+The Planner turns each normalized facet spec + catalog descriptor into one **Agg**. Engines compile Aggs; nothing downstream re-reads the catalog for typing (every Dim carries what it needs).
+
+### 5.1 Agg
+
+```javascript
+{
+	Key: 'ByMonth',                          // request Facets[].Key ('#Total' for the envelope Total)
+	FacetID: 'BookStoreSale.SaleDate',       // pivot: the two FacetIDs joined with '|'
+	FacetIDs: [ 'BookStoreSale.SaleDate' ],
+	Kind: 'DateHistogram',                   // Terms | DateHistogram | NumericHistogram | Ranges | Stats | DistinctCount | Missing | Pivot | Count
+	Pivot: 'BookStoreSale',                  // entity pivot (string) — TuplePivot/Union are later
+	Dimensions: [ <Dim> ],                   // Terms/DateHistogram/NumericHistogram/Ranges: 1; Pivot: 2; Stats/DistinctCount/Missing/Count: []
+	Field: 'SaleDate',                       // the measured column for Stats/DistinctCount/Missing; = Dimensions[0].Field for bucketed folds; null for Pivot/Count
+	FieldInfo: <ColumnInfo>,                 // §11.1 (for Stats/DistinctCount/Missing; null otherwise)
+	Measures: [ { Op: 'count' } ],           // M1: always count; Stats implies its own fixed measure set
+	CountMode: 'Rows',                       // M1: always Rows (all M1 dimensions are single-valued)
+	Top: 20,                                 // Terms (and per-axis for Pivot); null otherwise
+	Order: 'CountDesc',
+	Missing: true,
+	EmptyBuckets: true,
+	Chart: false,
+	Exclude: 'Self',                         // resolved policy (§6.2)
+	VariantId: 'v1',
+	Disjunctive: { Mode: 'Exact' | 'Partial' | 'NotApplicable', Excluded: [ 'c2' ], ExcludedHashes: [ '…' ], KeptMixed: [ ], Owned: [ 'c2' ] },
+	ClauseType: 'DateRange' | 'DistinctSelectedValueList' | 'NumericRange' | null,
+	FilterKey: 'SaleDate' | null,
+	Selectable: true,                        // bucketed single-field folds; false for Stats/DistinctCount/Missing/Pivot/Count
+	DepSet: { BookStoreSale: [ 'IDBookStoreSale', 'SaleDate', 'Deleted', … ] },   // pivot columns: PK, dims/measure cols, every conjunct field, delete column, policy columns
+	DisplayName: 'Sale Date'
+}
+```
+
+### 5.2 Dimensions
+
+```javascript
+{ Kind: 'Column',        Field: 'PaymentMethod', DataType: 'String', IsInteger: false, Scale: 0 }
+{ Kind: 'DateBucket',    Field: 'SaleDate', Interval: 'month' }                     // day | week | month | quarter | year
+{ Kind: 'NumericBucket', Field: 'TotalAmount', Mode: 'Nice', Buckets: 20, Edges: null, OpenEnded: false, IsInteger: false, Scale: 2 }
+{ Kind: 'NumericBucket', Field: 'PublicationYear', Mode: 'Edges', Buckets: null, Edges: [ 1800, 1900, 2000, 2030 ], OpenEnded: true, IsInteger: true, Scale: 0 }
+{ Kind: 'Range',         Field: 'Rating', Ranges: [ { Key: 'low', From: null, To: 3, Label: 'Low' }, { Key: 'high', From: 3, To: null, Label: 'High' } ], IsInteger: true, Scale: 0 }
+```
+
+Fold → Dim: `Terms → Column`, `DateHistogram → DateBucket`, `NumericHistogram → NumericBucket`, `Ranges → Range`. `Pivot` axes: each FacetID's own default fold mapped the same way, with the request's `Interval` applied to date axes; **M1 allows only `Column`, `DateBucket` and `Range` axes** (a numeric-histogram axis → per-facet `422 FACET_FOLD_UNSUPPORTED`). Both pivot axes must be on the route entity.
+
+### 5.3 Per-kind semantics every engine implements identically
+
+All counts are over the Agg's Variant base set `B(F′)` (each pivot row once). "Key" below is the dimension key computed by the canonical functions of `contract/Facet-Contract-Buckets.js` (§10.3) — engines must produce byte-identical keys.
+
+| Kind | Raw result fields (§9.2) |
+|---|---|
+| `Count` (`#Total`) | `Total` |
+| `Terms` | `Total`, `MissingCount` (rows whose value IS NULL; for a numeric DataType also any non-number — `''`, `' '`, text — by `FacetBuckets.numericValue`), `Groups` = non-null keys with counts — at least `min(Top + 1, DistinctKeys)` groups chosen by the canonical order (CountDesc, then Key ascending by `FacetBuckets.compareKeys`), plus every selected key; the Live statement ranks by count whatever the `Order` and returns at most `max(Top + 1, Limits.MaxTermsGroups)` ranked rows (ties beyond that in SQL key order — BINARY on SQLite, i.e. canonical) plus the selected keys (one scalar bind each through the `P0` slot); the Reference returns all groups. `DistinctKeys` (number of distinct non-null keys). |
+| `DateHistogram` | `Total`, `MissingCount` (rows whose `dateKey` is null: NULL, `''`, unparseable), `Groups` = every non-null key, `Bounds: { Lo, Hi }` = min/max of `canonicalDateTime(value)` over rows with a non-null key (null when none). More than `Limits.MaxDateBuckets` keys after gap fill → `422 FACET_INTERVAL_TOO_FINE` with `Suggest: { Interval: <next coarser> }` (raised in post-processing). The Live statement returns at most `MaxDateBuckets + 2` key rows (anything more is TOO_FINE whatever the rest holds). |
+| `NumericHistogram` | `Total`, `MissingCount` (NULL), `Bounds: { Lo, Hi }` (min/max of non-null values; null when NonNull = 0), `Geometry` (§10.3.2: `FacetBuckets.numericGeometry(Bounds.Lo, Bounds.Hi, Dim.Buckets, Dim.Scale, Limits.MaxBuckets)` in Nice mode — the Live engine runs a bounds statement first — or `FacetBuckets.edgesGeometry(Dim.Edges, Dim.OpenEnded, Dim.Scale)`), `Groups` = `{ Key: <bucket index>, Count }` for non-empty indexes; rows outside an `Edges` geometry (below the first edge, or ≥ the last edge when not `OpenEnded`) are in no group (they surface as `OtherCount`). |
+| `Ranges` | `Total`, `MissingCount` (NULL), `Groups` = `{ Key: <range Key>, Count }`; a row goes to the **first** range in declared order with `(From == null || v >= From) && (To == null || v < To)` (CASE semantics); rows in no range → no group. |
+| `Stats` | `Total` (= Rows), `MissingCount` (= Rows − NonNull), `Stats: { Rows, NonNull, Min, Max, SumUnits, Factor }` — numeric: `SumUnits = Σ round(v × Factor)` (an exact integer), `Factor = 10^Scale`; DateTime: `Min`/`Max` canonical strings, `SumUnits: null`. |
+| `DistinctCount` | `Total`, `MissingCount`, `DistinctCount` (distinct non-missing values; binary comparison; a numeric DataType counts only numbers) |
+| `Missing` | `Total`, `MissingCount` (NULL; DateTime also unparseable; a numeric DataType also any non-number) |
+| `Pivot` | `Total`, `Cells: [ { Keys: [ k1, k2 ], Count } ]` — **every** non-empty cell, including cells with a null key on either axis (post-processing moves those into `MissingCount`) and cells whose Range-axis value is in no declared range (key `FacetBuckets.NO_RANGE_KEY` = `'#NoRange'`; post-processing counts those as `OtherCount`, exactly like the Ranges fold). Each axis key is computed exactly as its single-dimension fold computes it (`Column` → `normalizeKey` / `numericValue`, `DateBucket` → `dateKey`, `Range` → the first matching range Key, null for NULL, `NO_RANGE_KEY` for no range). More than `Limits.CubeMaxGroups` cells → per-facet `422 FACET_TOO_LARGE { Limit: 'CubeMaxGroups' }` on every engine (the Live statement stops at `CubeMaxGroups + 1` cells). |
+
+Envelope arithmetic (`OtherCount`, `SumOfCounts`, gap fill, Top truncation, labels, clauses) is done **only** in post-processing (§10.4), never in an engine.
+
+### 5.4 `FoldIR` service and `Planner` service (wiring owns both)
+
+```javascript
+RetoldFacetingFoldIR.agg(pFields)            → Agg with defaults applied (pure)
+RetoldFacetingFoldIR.dimensionFor(pFold, pDescriptor, pFacetSpec)  → Dim (pure)
+RetoldFacetingFoldIR.depSet(pAgg, pVariant, pCatalog) → { Entity: [cols] } (pure)
+RetoldFacetingPlanner.plan(pContext, fCallback) → fCallback(null, { Aggs: [Agg…], Variants: {…}, DepSet: {…}, Errors: { Key: FacetErrorEntry } })
+RetoldFacetingPlanner.lower(pFacetSpec, pDescriptors, pContext)  → Agg (pDescriptors: one catalog descriptor per FacetID; throws a per-facet FacetError)
+RetoldFacetingPlanner.depSet(pAggs)                              → the union of every Agg's DepSet (sorted columns)
+```
+
+`plan()` always emits the `#Total` Agg (`Kind: 'Count'`, `VariantId: 'v0'`) when `NormalizedRequest.Total` is true. Per-facet planning errors go to `Errors[Key]`, not to `fCallback(pError)`.
+
+---
+
+## 6. (d) Variants — `RetoldFacetingDisjunctivePlanner.variants(pFilterAST, pFacetSpecs)`
+
+### 6.1 Input
+
+```javascript
+pFacetSpecs = [ { Key: 'ByMonth', OwnedFields: [ 'SaleDate' ], FilterKey: 'SaleDate', Exclude: 'Self' }, … ]
+```
+
+`OwnedFields` = `OF(f)` = the dimension field(s) (auto facets in M1); a Pivot owns both axis fields; Stats/DistinctCount/Missing own their field.
+
+### 6.2 Exclusion rules (`01 §8.3`)
+
+- Default `Exclude`: `Self` for Terms, DateHistogram, NumericHistogram, Ranges; `None` for Stats, DistinctCount, Missing, Pivot (and `#Total`).
+- A conjunct is **owned** by facet f when (in this order): its `Origin.Hash` or `Id` is listed in an explicit `Exclude` array; or `Origin.FilterKey` equals f's `FilterKey`; or `Fields ⊆ OwnedFields`.
+- Under `Self` (or an explicit array) owned conjuncts are excluded, **except** `NeverExclude` conjuncts, which are kept.
+- A conjunct whose `Fields` intersect `OwnedFields` but is not owned (mixed), or an owned `NeverExclude` conjunct, is kept and listed in `KeptMixed`; the facet's mode is then `Partial`.
+- Mode: `NotApplicable` under `None`; else `Partial` if `KeptMixed` is non-empty, else `Exact`.
+
+### 6.3 Output
+
+```javascript
+{
+	Variants:
+	{
+		v0: <Variant>,          // ALWAYS present: the full filter (every conjunct) — Total, and every Exclude:'None' facet
+		v1: <Variant>, …        // one per distinct kept-conjunct set, numbered in order of first appearance among pFacetSpecs
+	},
+	Facets:
+	{
+		ByMonth: { VariantId: 'v1', Mode: 'Exact', Excluded: [ 'c2' ], ExcludedHashes: [ 'SaleDate-DateRange-7a01' ], KeptMixed: [ ], Owned: [ 'c2' ] }
+	}
+}
+```
+
+Variant:
+
+```javascript
+{
+	VariantId: 'v1',
+	Hash: 'c1,c3',                    // canonical: kept conjunct Ids joined with ',' (stable; '' for the empty set)
+	Entity: 'BookStoreSale',
+	ConjunctIds: [ 'c1', 'c3' ],      // kept, in FilterAST order
+	Conjuncts: [ <Conjunct>, … ],     // the same objects as FilterAST.Conjuncts (never copies)
+	ExcludedIds: [ 'c2' ],
+	IncludesDeleted: false,           // any kept conjunct NamesDeleted → the pivot SR uses SoftDelete 'ClientControlled'
+	Facets: [ 'ByMonth' ]             // Agg keys sharing it ('#Total' is in v0)
+}
+```
+
+Facets with identical kept sets **share** a Variant (and therefore a pivot Scoped Relation, memoized per request). The conditional disjunctive scan (one GROUP BY for all single-valued facets, `01 §8.4`) is **not** M1; the Variant/Owned data above is exactly what it will need.
+
+---
+
+## 7. (e) Scoped Relations — `RetoldFacetingScopedRelationBuilder.buildRelation(pContext, pRel, fCallback)`
+
+### 7.1 `Rel` (FoldIR relation, M1 subset of `01 §6`)
+
+```javascript
+{
+	Entity: 'BookStoreSale',
+	As: 'p',                                  // alias: ^[a-eg-z][a-z0-9]{0,7}$ — never starts with 'f' (shell params are f*)
+	Project: [ 'IDBookStoreSale', 'SaleDate' ],   // minimal: PK + dimension/measure columns; never Sensitive
+	Client: [ <Conjunct>, … ] | null,         // the Variant's conjuncts (fenced)
+	Where: null,                              // definition predicates — later milestones
+	Scope: 'Inherit',                         // 'TenantOnly' is later
+	SoftDelete: 'Explicit' | 'ClientControlled'   // 'ClientControlled' iff Variant.IncludesDeleted
+}
+```
+
+### 7.2 Build steps (normative; `03 §3.2`)
+
+1. `tmpDAL = Host.getExecutionDAL(Entity)`; `tmpQuery = tmpDAL.query` (fresh clone).
+2. If `Client` non-empty: `addFilter('', '', '(', 'AND', 'FacetFenceOpen')`, `FilterAST.applyToQuery(Client, tmpQuery, { Dialect })`, `addFilter('', '', ')', 'AND', 'FacetFenceClose')`.
+3. If `SoftDelete === 'Explicit'` and `Host.hasDeleteColumn(Entity)`: `addFilter(Host.getDeleteColumn(Entity), 0, '=', 'AND', 'FacetSoftDelete')` (depth 0, outside the fence; D-37).
+4. `ScopeCapture.capture(pContext, Entity, tmpQuery, Scope, fCaptured)` — runs `Reads-QueryConfiguration` on the **route-bound** controller, then ScopeGuard (§8). Error → `fCallback(error)`. `Capture.Opaque` → refused in M1 (`500 FACET_SCOPE_POLICY_VIOLATION`, `Reason: 'OpaqueUntrusted'`; Staged hops are later).
+5. `tmpQuery.parameters.FacetProjection = Project.map(quote).join(', ')`; `tmpQuery.parameters.queryOverride = 'SELECT <%= _Params.FacetProjection %> FROM<%= TableName %><%= Where %>'`; `tmpQuery.setDialect(DialectName).buildReadQuery()`.
+6. `Dialects.harvest(tmpQuery, As, DialectName)` → rename every bound name `X` in `query.query.parameters` to `<As>_X` (longest names first, word-boundary, dialect sigil, skip PG `::`), strip a trailing `;`.
+
+Memoized in `pContext.Memo.Relations` by `Entity|As|ClientIds|SoftDelete|Project`; each new build increments `pContext.Counters.Relations` and (via capture) `BehaviorRuns`.
+
+### 7.3 Result
+
+```javascript
+{
+	Alias: 'p',
+	Entity: 'BookStoreSale',
+	SQL: 'SELECT "IDBookStoreSale", "SaleDate" FROM BookStoreSale WHERE ( `PaymentMethod` IN ( :p_c1_PaymentMethod_w1_0 ) ) AND `Deleted` = :p_FacetSoftDelete_w3 AND `IDTenant` = :p_TestTenancy_w4',
+	Params: { p_c1_PaymentMethod_w1_0: 'Credit', p_FacetSoftDelete_w3: 0, p_TestTenancy_w4: 1 },
+	ParamTypes: { },                          // MSSQL only (merged into query.parameterTypes by the engine)
+	Columns: [ 'IDBookStoreSale', 'SaleDate' ],
+	Capture: <ScopeCapture>,                  // §8.1
+	Staged: false
+}
+```
+
+### 7.4 Composing and executing a statement (EngineLive, `03 §3.7`)
+
+- Outer query: `tmpPivotDAL.query`, **`setDisableDeleteTracking(true)`** (so FoxHound adds no stray `Deleted` param to the outer statement), `parameters['SR' + i] = Relation.SQL`, `Object.assign(query.query.parameters, Relation.Params)`, shell slot text into `query.parameters.<Slot>`, bound shell values (`f*` names, scalars only, never arrays) into `query.query.parameters`, `parameters.queryOverride = <shell template>`.
+- Execute with `tmpPivotDAL.provider.Read(tmpQuery, fDone)` inside `try/catch`; rows are `tmpQuery.parameters.result.value` (raw driver rows; on SQLite they are null-prototype objects — copy to plain objects before returning).
+- Shell templates come from `ShellTemplates.render(pDialectName, pAgg, pSlots)`; per-dialect expressions (date keys, numeric index, clamp) come from `Shell-Templates-<Dialect>.js`. PostgreSQL/MySQL/MSSQL shells must **dry-build** (SQL text goldens via `setDialect('<Dialect>').buildReadQuery()` with no provider) but are never executed in M1.
+- `EngineLive.compileAgg(pContext, pAgg, pRelations, pDialectName)` → `{ Dialect, SQL, Params, ParamTypes, Statements: [ … ] }` without executing — the O9 golden entry point.
+
+---
+
+## 8. (f) ScopeCapture and ScopeGuard
+
+### 8.1 `RetoldFacetingScopeCapture.capture(pContext, pEntity, pQuery, pScopeMode, [pCaptureOptions,] fCallback)`
+
+`pCaptureOptions` (optional, M2 review): `{ Columns: [ … ] }` — the relation's projection (the PostOperation safe-column rule below); `{ Fresh: true }` — never replay a memoized capture (Records hydration needs the request state this very query's behavior ran with).
+
+```javascript
+{
+	Entity: 'BookStoreSale',
+	Source: 'Behaviors',                       // 'Declared' (controller-less) is later
+	Behavior: 'Reads-QueryConfiguration',      // Scope.BehaviorOverrides[Entity] || Scope.Behavior
+	BehaviorRan: true,                         // false when the controller has no behavior at that hash
+	PostBehaviorFilter: [ <filter entry copies> ],   // deep copy of query.parameters.filter after behaviors
+	Appended: [ { Column: 'IDTenant', Operator: '=', Value: 1, Connector: 'AND', Parameter: 'TestTenancy', Depth: 0 } ],
+	Transformed: [ { Index: 3, Before: { Operator: 'LIKE' }, After: { Operator: 'ILIKE' } } ],
+	Opaque: false,
+	OpaqueReasons: [ ],                         // 'JoinAdded' | 'QueryOverride' | 'QueryBranches' | 'UnknownColumn:<c>' | 'UnknownOperator:<op>' | 'NonScalarValue:<c>' | 'PostOperation'
+	PostOperation: null | { Behaviors: [ 'Reads-PostOperation' ], Opaque, Trusted },   // the read-side behaviors present (06 §3.5)
+	Portable: true,                             // !Opaque and every operator in the base set (stores are later; kept for the seam)
+	Guard: <GuardResult>,                       // §8.2
+	Fingerprint: 'sf:9c1e4a0b77d2'              // 'sf:' + first 12 hex of sha256(Entity | canonical(Appended) | canonical(Transformed) | Behavior | ScopeMode)
+}
+```
+
+- Snapshot before: deep copy of `filter`, plus `join`, `queryOverride`, `queryBranches`, `dataElements`, `distinct`. Run the behavior with `controller.initializeRequestState(pContext.Request, 'Reads')`, `state.Query = pQuery`, `controller.BehaviorInjection.runBehavior(Behavior, controller, pContext.Request, state, cb)`. Behavior error (e.g. a tenancy behavior's 401) → `fCallback(FacetError FACET_UNAUTHENTICATED (401) when the behavior error carries status 401, else FACET_INTERNAL)`.
+- `Depth` on each entry = paren depth at that entry (the fence makes client entries depth ≥ 1).
+- Memoized per request in `pContext.Memo.Captures` by `(Entity, ClientIds, SoftDelete, ScopeMode)`; each run increments `pContext.Counters.BehaviorRuns`.
+- Column checks strip a table qualifier and quotes (`"T"."C"`, `` `T`.`C` ``, `T.C` → `C`).
+- **Read-side behavior audit (06 §3.5, M2 review).** The list paths also run `Read-PreOperation`, `Reads-PostOperation`, `ReadsLite-PostOperation`, `ReadDistinct-PostOperation`, `ReadSelectList-PostOperation`; a row filter or redaction there is invisible to a capture of the QueryConfiguration. When the route-bound controller has any of them (`BehaviorInjection.getBehaviors()` once ME-1 lands, else the `_BehaviorFunctions` keys) the capture is **Opaque** with reason `'PostOperation'` — refused, and never stageable (a staged key query does not run it either) — unless the entity is in `Scope.TrustPostOperation` (the host vouches that the behavior only decorates) or every column the relation reads (its `Columns` projection plus every column its pre-behavior filter names, the explicit soft delete excepted) is listed in `Scope.PostOperationSafeColumns[Entity]` (the host vouches that the behavior never drops a row and never changes those columns). Without `Columns` the safe-column rule cannot apply (fail closed). The audit is part of the memo key. This covers the pivot of Query / Records / Count / Keys, every hop, fragment probes and label reads (an Opaque label read only loses its labels). Describe reports `Entities[E].Opaque: { Reason: 'PostOperation', SafeColumns }`.
+- The capture object carries its request state as a non-enumerable `RequestState` (never hashed).
+
+### 8.2 `RetoldFacetingScopeGuard.assert(pContext, pEntity, pQuery, pCapture)` → `GuardResult` (synchronous)
+
+Uses `pContext.Host.getScopePolicy()` and `pContext.Principal`. Called by `ScopeCapture.capture` after the behaviors ran; a refusal is returned as the result (`Satisfied: false`) and `capture` turns it into the `FACET_SCOPE_POLICY_VIOLATION` callback error (with `Detail: { Entity, Violations }` — column names only, never values).
+
+```javascript
+{
+	Mode: 'Strict' | 'Repair' | 'Off',
+	Required: [ { Column: 'IDTenant', Value: 1 } ],   // from Host.getScopePolicy().requiredFor(Entity, Principal)
+	Satisfied: true,
+	Repaired: false,
+	Violations: [ ]   // { Rule: 'MissingPredicate' | 'WrongValue' | 'DepthZeroOr' | 'UnbalancedFence' | 'OpaqueUntrusted' | 'UnsetValue' | 'PersonalColumnPresent' | 'TenantOnlyUnscoped', Column? }
+}
+```
+
+Assertion per required column `C` (`06 §3.3`): (1) an entry at depth 0 with `Operator '='`, `Connector 'AND'`, column `C` (a qualified entry must name the entity's own table: `Other.IDCustomer` never satisfies this entity's requirement); (2) its `Value` equals the principal's policy value and that value is not in `Scope.UnsetValues`; (3) **no depth-0 entry has connector `OR`**; (4) the fence is balanced. `Strict` → violation = `500 FACET_SCOPE_POLICY_VIOLATION` (the capture calls back with the error; no SQL runs). `Repair` → **only** when every violation is `MissingPredicate`: wrap the whole post-behavior filter in a new depth-0 group, append `addFilter(C, value, '=', 'AND', 'FacetPolicy' + C)`, `Repaired: true`, log error, and the route sets `X-Retold-Facet-Scope-Repaired: 1`; any other violation is refused as in Strict. `Off` → `Satisfied: true`, no checks (only legal with no policy).
+
+### 8.3 Scope policy config (plain RDS, `RetoldFaceting.Scope`)
+
+```javascript
+Scope:
+{
+	Behavior: 'Reads-QueryConfiguration',
+	BehaviorOverrides: { },
+	Guard: 'Strict',                         // effective 'Off' when Policy is false and Required is empty (Describe: ScopeAssurance 'Unscoped')
+	Policy: false | { Column: 'IDTenant', SessionField: 'IDTenant', Exclude: [ ], PersonalScopes: { } },   // 'Auto' === false on plain RDS
+	Required: { },                           // { Entity: [ { Column, From: '$CurrentUser.<Field>' | '$Scope.<Column>' } ] }
+	UnsetValues: [ 0, '', null ],
+	TrustedOpaque: [ ],                      // M2: entities whose Opaque capture may run Staged (§26.3)
+	TrustPostOperation: [ ],                 // M2 review: entities whose read-side Pre/PostOperation behavior only decorates (§8.1)
+	PostOperationSafeColumns: { },           // M2 review: { Entity: [ columns the PostOperation never drops a row over nor changes ] }
+	UserRecordFields: [ 'IDUser', 'IDCustomer' ],
+	AllowHeaderSession: false
+}
+```
+
+`Host.getScopePolicy()` normalizes this into:
+
+```javascript
+{
+	Kind: 'Policy' | 'None',
+	Column: 'IDTenant', SessionField: 'IDTenant', Exclude: [ ], PersonalScopes: { }, Required: { }, UnsetValues: [ 0, '', null ], Guard: 'Strict',
+	requiredFor: function (pEntity, pPrincipal) { return [ { Column, Value } ]; },   // [] for Global entities
+	isScoped: function (pEntity) { return true | false; }                          // has ≥ 1 required column
+}
+```
+
+Required set for entity `E` (plain RDS, M1): the policy `Column` if `E` has that column and is not in `Exclude`; plus `PersonalScopes[E].Column`; plus `Required[E]` entries. Values: `Principal.ScopeValues[Column]`.
+
+---
+
+## 9. (g) Engines and the Router
+
+### 9.1 Engine interface (`RetoldFacetingEngineBase`, `03 §4`)
+
+```javascript
+get EngineName()                                   // 'Live' | 'Reference'
+capable(pAgg, pContext)          → { Capable: true } | { Capable: false, Reason: '…' }     // pure, no I/O
+freshness(pDepSet)               → { Exact: true, AsOf: <ISO>, LagMS: 0 }
+execute(pContext, pAggs, fCallback)
+```
+
+`execute` runs every Agg (all Variants) of one request. Callback:
+
+```javascript
+fCallback(pError, pExecution)
+// pError: only for whole-request failures (scope violation on the pivot, behavior 401, DB unavailable)
+pExecution =
+{
+	Engine: 'Live',
+	AsOf: pContext.Now,
+	Exact: true,
+	Results: { '#Total': <RawFacetResult>, ByMonth: <RawFacetResult>, … },
+	Errors: { Pages: <FacetErrorEntry> },             // per-Agg failures (timeout, too fine, unsupported)
+	Captures: { BookStoreSale: { Fingerprint: 'sf:…', Repaired: false } },   // for Version and the Repaired header
+	Statements: 3                                     // Live: statements executed; Reference: list reads executed
+}
+```
+
+### 9.2 RawFacetResult
+
+```javascript
+{
+	Key: 'ByMonth',
+	Kind: 'DateHistogram',
+	VariantId: 'v1',
+	Total: 4120,
+	MissingCount: 3,
+	Groups: [ { Key: '2026-03-01 00:00:00', Count: 412 }, … ],   // see §5.3 per kind (unordered is fine)
+	DistinctKeys: null,                     // Terms only
+	Bounds: { Lo: '2025-07-01 00:00:00', Hi: '2026-06-30 23:10:00' } | null,
+	Geometry: null,                         // NumericHistogram only (§10.3.2)
+	Stats: null,                            // Stats only
+	DistinctCount: null,                    // DistinctCount only
+	Cells: null                             // Pivot only
+}
+```
+
+Numbers are JS numbers (engines convert driver bigint/string counts). Keys: Terms keys are the raw column value normalized by `FacetEnvelope.normalizeKey(value, DataType)` (Numeric/Decimal/ID/Boolean/ForeignKey → Number; everything else → String; null stays null).
+
+### 9.3 EngineLive (D) and EngineReference (E)
+
+- **Live** (`03 §3`): per Agg, one pivot SR for the Variant (memoized), then one statement per Agg (NumericHistogram `Nice`: a bounds statement first, then the bucket statement; `Pivot` on SQLite: one `GROUP BY k1, k2` statement — marginals are post-processing). `capable()` refuses nothing M1 plans produce.
+- **Reference** (O1, `10 §5.1`): **must not** use ScopedRelationBuilder, Dialects, ShellTemplates or EngineLive. Per Variant (memoized in `pContext.Memo.VariantRows`): replay the **list endpoint waterfall** on the route-bound controller: `state = controller.initializeRequestState(pContext.Request, 'Reads')`; `state.Query = controller.DAL.query` (the DAL the list itself reads through, which is also `Host.getExecutionDAL(Entity)` for Live: after an RDS reload re-binds `fable.DAL[E]` the routes keep the old controller, D-31); `setCap(0)` (no LIMIT) and `setBegin(0)`; fence `(`…`)` around `FilterAST.applyToQuery(Variant.Conjuncts, state.Query, { Dialect })`; **no explicit soft-delete** (FoxHound's implicit `Deleted = 0`, exactly as the list); `runBehavior(Scope.Behavior)`; `controller.DAL.doReads(state.Query, (pError, pQuery, pRecords) => …)`; `runBehavior('Reads-PostOperation')`. Then fold the records in JS with the canonical functions of `contract/Facet-Contract-Buckets.js` and return the same RawFacetResult shapes. The Reference engine **does not** run ScopeGuard (the list does not); its capture fingerprint is `'ref:' + VariantHash`. A behavior error maps through the shared `FacetErrors.fromBehaviorError` (a facet error passes through; status `401` — number or numeric string — → `FACET_UNAUTHENTICATED`; else `FACET_INTERNAL`), exactly as ScopeCapture maps it, as a whole-request `pError`. Records are plain objects from meadow's marshaller (`DefaultObject` + every selected column, NULLs preserved).
+
+### 9.4 Router (wiring)
+
+```javascript
+RetoldFacetingRouter.register(pEngine)
+RetoldFacetingRouter.route(pAggs, pContext, fCallback)   // → fCallback(pError, pExecution)
+```
+
+M1: `pContext.ForceEngine` set → that engine; otherwise the first registered engine whose `capable()` accepts every Agg — `Live`. (Cache, stores, Pushdown, FanOut are later.)
+
+---
+
+## 10. (h) Envelope, FacetResult, Bucket — and the canonical math
+
+### 10.1 Envelope (`02 §4.1`, M1 fields)
+
+```javascript
+{
+	ContractVersion: 1,
+	Entity: 'BookStoreSale',
+	Version: 'fv1:9c1e4a0b77d2c3e4',    // weak ETag value (§10.5); header ETag: W/"fv1:…"
+	ModelVersion: 'm:4a1e9b0c22d1',
+	Engine: 'Live',                     // engine of the Total
+	Exact: true,
+	AsOf: '2026-10-08T15:02:11.120Z',
+	LagMS: 0, Stale: false, Cached: false,
+	ElapsedMS: 41,
+	Total: 1834,                        // only when Total requested; = list Count for the same session and filter
+	TotalCountMode: 'Rows',
+	IncludesDeleted: false,
+	Filter: { Applied: [ … ], Warnings: [ … ] },   // FilterAST.Applied / FilterAST.Warnings
+	Facets: { ByMonth: <FacetResult>, … },
+	Errors: { Pages: { Code: 'FACET_TIMEOUT', Status: 504, Message: 'Facet exceeded its deadline.' } },
+	Warnings: [ ]                       // pContext.Warnings + NormalizedRequest.Warnings
+}
+```
+
+Partial success → HTTP 200 with `Errors`. The request fails (HTTP status of the first error, body `{ Error: … }`) only when every facet **and** the Total (if requested) failed.
+
+### 10.2 FacetResult (`02 §4.3`, M1 fields)
+
+```javascript
+{
+	Key: 'ByMonth', Facet: 'BookStoreSale.SaleDate', Field: 'SaleDate', Fold: 'DateHistogram',
+	DisplayName: 'Sale Date', DataType: 'DateTime',
+	Selectable: true, ClauseType: 'DateRange', FilterKey: 'SaleDate',
+	Engine: 'Live', Exact: true, AsOf: '…', LagMS: 0, Stale: false, Cached: false,
+	Interval: 'month', TimeZone: 'UTC',                         // date folds only
+	Disjunctive: 'Exact', Excluded: [ '<clause Hash, else conjunct Id>' ], KeptMixed: [ ],
+	CountMode: 'Rows',
+	Total: 4120, SumOfCounts: 4117, MissingCount: 3, OtherCount: 0,
+	MultiValued: false, Truncated: false, TruncatedReason: null,   // 'Top' | 'MaxBuckets'
+	DistinctCount: 31,                                        // Terms: DistinctKeys; DistinctCount fold: the value
+	Bounds: { Lo, Hi } | null,
+	Buckets: [ <Bucket> ],                                    // [] for Stats/DistinctCount/Missing/Pivot
+	Stats: { Rows, NonNull, Min, Max, Sum, Avg } | null,     // Stats fold
+	// Pivot results only (02 §4.3, at the FacetResult top level):
+	Dimensions: [ { Facet, Field, Fold, Interval } ], RowKeys: [ … ], ColumnKeys: [ … ],
+	Cells: [ { K1, K2, Count } ], Marginals: { Rows: [ { Key, Count } ], Columns: [ { Key, Count } ], Total },
+	Geometry: null | { Mode, Lo, Hi, Width, N, Scale, Edges: [ … ] },   // NumericHistogram
+	Chart: null | { Labels: [ … ], Datasets: [ { label: DisplayName, data: [ … ] } ] }
+}
+```
+
+- `OtherCount = Total − SumOfCounts − MissingCount` (always present: every M1 fold is single-valued); for Stats/DistinctCount/Missing it is `0` and `SumOfCounts` is `0`.
+- Selected-zero Terms keys (§10.4) are counted in `SumOfCounts` as 0 and do not change `OtherCount`.
+- Stats formatting: `Decimal` → `Min`, `Max`, `Sum` as strings with exactly `Scale` decimals (`(units / Factor).toFixed(Scale)`, computed from integer units); integer columns → `Min`, `Max`, `Sum` as Numbers; every numeric column → `Avg = Number((SumUnits / NonNull / Factor).toFixed(Scale + 4))` (a Number); `DateTime` → `Min`/`Max` canonical strings, `Sum`/`Avg` null; `NonNull === 0` → `Min`/`Max`/`Sum`/`Avg` null.
+
+### 10.3 Canonical math (`contract/Facet-Contract-Buckets.js`; both engines and the post-processor use these)
+
+#### 10.3.1 Dates (D-22: naive wall clock in `StorageTimeZone`, wire format `YYYY-MM-DD HH:mm:ss`)
+
+- `canonicalDateTime(v)` → `'YYYY-MM-DD HH:mm:ss'` or `null`. Accepts strings `YYYY-MM-DD`, `YYYY-MM-DD HH:mm`, `YYYY-MM-DD HH:mm:ss`, with `T` instead of space, optional `.fff` and optional `Z`/`+00:00` (dropped — StorageTimeZone is UTC in M1). `''`, `null`, non-strings, out-of-range parts → `null`.
+- `dateKey(v, pInterval)` → bucket start string or `null` (null whenever `canonicalDateTime(v)` is null). `day`: `YYYY-MM-DD 00:00:00`; `week`: ISO Monday on or before the date; `month`: `YYYY-MM-01 00:00:00`; `quarter`: first month of the quarter; `year`: `YYYY-01-01 00:00:00`. Must equal SQLite `strftime` (`03 §3.4` table) for canonical inputs.
+- `nextDateKey(pKey, pInterval)` → the following bucket start (the bucket's `End`).
+- `fillDateKeys(pLoKey, pHiKey, pInterval, pMax)` → every key from Lo through Hi inclusive (more than `pMax` keys → throws `FACET_INTERVAL_TOO_FINE` with `Detail: { Suggest: { Interval: coarserInterval(pInterval) } }`).
+- `dateLabel(pKey, pInterval)` → `day` `'2026-03-02'`, `week` `'Week of 2026-03-02'`, `month` `'Mar 2026'`, `quarter` `'Q1 2026'`, `year` `'2026'`.
+- `coarserInterval(pInterval)` → `day→week→month→quarter→year→null` (for `Suggest`).
+
+#### 10.3.2 Numbers (integer-unit bucketing; exact on every dialect)
+
+- `Scale` = column scale (`Decimal(10,2)` → 2; integer columns 0); `Factor = 10^Scale`; `units(v) = Math.round(v * Factor)` (SQL: `ROUND(v * :fFactor)` cast to integer). The GEOMETRY is integer-unit; bucket MEMBERSHIP is decided against the exact edges with the RAW value (below), so a value with more decimals than the Scale (SQLite REAL) lands where its bucket Clause puts it.
+- `numericGeometry(pLo, pHi, pBuckets, pScale, pMaxBuckets)` (Nice mode) → `{ Mode: 'Nice', Lo, Hi, Scale, Factor, LoUnits, WidthUnits, Width, N, Edges }`, computed entirely in integer units:
+  ```
+  loU = units(Lo); hiU = units(Hi)
+  loU −= 1 when the edge loU/Factor > Lo;  hiU += 1 when hiU/Factor < Hi      (cover the RAW bounds)
+  candidates (units) = 1, 2, 5, 10, 20, 50, 100, …          (m × 10^k, m ∈ {1,2,5}; ≥ 1 unit, so integer columns get integer widths)
+  WidthUnits = the smallest candidate with WidthUnits × pBuckets ≥ (hiU − loU)
+  LoUnits    = Math.floor(loU / WidthUnits) × WidthUnits      (toward −∞; negative outliers are fine)
+  N          = max(1, ceil((hiU − LoUnits) / WidthUnits))
+  while N > pMaxBuckets: WidthUnits = next candidate; recompute LoUnits and N
+  Width      = WidthUnits / Factor;  Edges[i] = Number(((LoUnits + i × WidthUnits) / Factor).toFixed(Scale)), i = 0..N
+  ```
+  No non-null values (`Lo === null`) → `N = 0`, `Edges: []`.
+- `numericIndex(v, pGeometry)` (Nice) → candidate `c = min(floor((units(v) − LoUnits) / WidthUnits), N − 1)`, then corrected once against the exact edges with the raw value: `c − 1` when `v < Edges[c]`, `c + 1` when `c < N − 1` and `v ≥ Edges[c + 1]` (one step suffices: a bucket is ≥ 1 unit, rounding moves a value ≤ ½ unit). The clamp puts `Hi` into the last bucket, which is **closed** (`[Edges[N−1], Edges[N]]`, `EndExclusive: false`). SQL does the same, e.g. SQLite `CASE WHEN v < (:fLoUnits + c * :fWidthUnits) / :fFactor THEN c - 1 WHEN c < :fLastIndex AND v >= (:fLoUnits + (c + 1) * :fWidthUnits) / :fFactor THEN c + 1 ELSE c END` with `c` the integer candidate; the edge is a quotient of two exact doubles, so it equals the contract's `Edges[i]` bit for bit.
+- Edges mode: `edgesGeometry(pEdges, pOpenEnded, pScale)` → `{ Mode: 'Edges', Edges, N: Edges.length − 1 (+1 if OpenEnded), … }`; `numericIndex` for Edges = the `i` with `Edges[i] ≤ v < Edges[i+1]` (the open bucket `v ≥ Edges[last]`), else `null` (Other).
+- `numericBucketBounds(pGeometry, pIndex)` → `{ Start: Edges[i], End: Edges[i+1], EndExclusive }`: half-open except the last Nice bucket (`EndExclusive: false`, `End = Edges[N] ≥ Hi`); an open-ended Edges bucket has only `Start`.
+- `numericLabel(…)`: integer columns `'0–9'` (`[a, b)` → `a–(b−1)`), decimals `'0–<10'`, closed last bucket `'a–b'`, open `'a+'`.
+- `compareKeys(a, b)` → numbers numerically, strings by UTF-16 code unit (`a < b`), `null` last. Terms order `CountDesc`: count descending then `compareKeys` ascending; `KeyAsc`/`KeyDesc` by `compareKeys`. It is a **total** order on mixed keys (finite numbers before every other non-null key, which compare as Strings), so `compareKeys(10, '10') === -1`: compare keys only after `normalizeKey`.
+- A1 implementation notes (`contract/Facet-Contract-Buckets.js`): `units` rounds half away from zero (SQL `ROUND`; identical to `Math.round` for values with ≤ `Scale` decimals) and returns `null` for non-numbers; `numericGeometry` treats `pMaxBuckets < 2` as 2 (a span across an aligned edge never fits one bucket) and throws `FACET_INTERNAL` beyond 2^53 units; every mode decides membership with raw comparisons (`v >= Edge`). `numericValue(v)` is the one "is this stored value a number" rule (numbers, bigints, plain numeric-literal strings, booleans → 0/1; `''`, `' '`, text → null), and `DATA_TYPE_CLASSES` / `INTEGER_TYPES` / `DECIMAL_TYPES` / `NUMERIC_KEY_TYPES` / `isNumericType` the one DataType classification. Also exported: `formatUnits(pUnits, pScale)` (exact decimal string from integer units), `rangeKey(pValue, pRanges)` (first matching declared range, CASE semantics), `rangeLabel(pRange, pIsInteger)`, `normalizeKey` (the same function `FacetEnvelope.normalizeKey` re-exports; a blank string in a numeric column stays a String), `INTERVAL_ORDER`, `NUMERIC_KEY_TYPES`. `canonicalDateTime` also reads a JS `Date` in UTC (driver values in M2); a width-1 integer bucket is labelled `'5'`, not `'5–5'`. Years format like SQLite `strftime('%Y')` (C `%04d`), so the ISO week of `0000-01-01` is `'-001-12-27 00:00:00'`; such out-of-range bucket keys (and `10000-…`) are accepted by the key functions — `normalizeDateKey(pKey, pInterval)` (re-key an engine group), `compareDateKeys` (chronological order), `nextDateKey`, `fillDateKeys`, `dateLabel` — but never by `canonicalDateTime` / `dateKey` (stored values stay 0000–9999).
+
+### 10.4 Post-processing — pure functions in `contract/Facet-Contract-Envelope.js` (A), called by the service (wiring)
+
+```javascript
+FacetEnvelope.buildFacetResult(pAgg, pRaw, pPost)       // → FacetResult (throws FacetError for that facet, e.g. FACET_INTERVAL_TOO_FINE)
+FacetEnvelope.buildEnvelope(pParts)                     // → Envelope
+FacetEnvelope.normalizeKey(pValue, pDataType)           // §9.2
+FacetEnvelope.normalizeForComparison(pEnvelope)         // strips Version, AsOf, ElapsedMS, Engine (envelope + facets), Cached, LagMS, Stale; for O1 deep-equal
+```
+
+`pPost = { Engine, AsOf, Exact, Limits, StorageTimeZone, OwnedConjuncts: [Conjunct…] /* by Agg.Disjunctive.Owned */, DisplayName }`.
+
+`buildFacetResult` does, in order: sort `Groups` by the Agg's `Order`; Terms → truncate to `Top` (`Truncated: true, TruncatedReason: 'Top'` when more groups than `Top` exist **or** `DistinctKeys > Top`); DateHistogram → gap fill between `dateKey(Bounds.Lo)` and `dateKey(Bounds.Hi)` when `EmptyBuckets` (cap `MaxDateBuckets`); NumericHistogram → one bucket per index `0..N−1` (zero-filled); Ranges → one bucket per declared range (zero-filled); Pivot → marginals, `Top` per axis by marginal (CountDesc), cells restricted to the kept keys, null-key cells into `MissingCount`; then for every bucket `Label`, `Start`/`End`/`EndExclusive`, `Selected`, `Clause` (`FacetClauses.bucketClause`), `Selection: { Facet, Key }`; selected-zero Terms buckets appended (`Count: 0, Selected: true`) for owned keys not already present; `SumOfCounts`, `OtherCount`; `Chart` when requested.
+
+Engine-independence rules (A, binding on the post-processor):
+
+- Groups are re-keyed through the canonical key functions and duplicates merged (`'5'` and `5` in a Numeric column are one key).
+- Terms: the kept set is always the first `Top` groups in the **canonical** order (Count desc, Key asc); `Order` only changes the display order of the kept set. So an engine returning `Top + 1` groups and one returning every group produce identical buckets. `Top: null` → `Limits.DefaultTop`.
+- A selected Terms key that is not in the kept set is appended (sorted by `compareKeys`, after the kept buckets) with the count the engine returned for it, else `0`. The Live Terms statement returns the selected keys' groups too (`Agg.SelectedKeys`, one scalar bind each), so both engines report real counts.
+- A Terms key holding `'~'` (or `'%7E'`) cannot be a clause value: its bucket keeps `Selection` and `Count` but gets `Clause: null` (UnsafeKey, `03 §6.1`).
+- `Missing: false` folds missing rows into `OtherCount` (`MissingCount: 0`), so `SumOfCounts + MissingCount + OtherCount === Total` always holds for bucketed folds and Pivot.
+- Pivot: marginals are over cells whose two keys are real (non-null, in a declared range — so the two marginal sums are equal) and are reported for the kept keys; `NO_RANGE_KEY` cells are `OtherCount` like the Ranges fold, NULL cells `MissingCount`; `Top` (`null` → `Limits.MaxTop`) applies per axis by marginal; Column axes display in `Order`, DateBucket axes by key, Range axes in declared order; `SumOfCounts` = `Marginals.Total` = the displayed cells; `Chart` = rows × one dataset per column key.
+- Bucket `Selection` and a non-null `Clause` appear only when `Agg.Selectable`; `Excluded` lists each excluded conjunct's `Origin.Hash` (looked up in `pPost.OwnedConjuncts`, else the parallel `ExcludedHashes` entry), else its `Id`.
+- `FacetEnvelope.requestFailure(pEnvelope, pTotalRequested)` → the first `Errors` entry when every facet and the requested Total failed (§10.1), else `null`.
+
+### 10.5 Version (weak ETag, wiring)
+
+`Version = 'fv1:' + sha256( ModelVersion | Entity | canonicalJSON(NormalizedRequest.Facets) | canonicalJSON(FilterAST.Conjuncts[].Pred + Ids) | sorted Captures[Entity].Fingerprint | canonicalJSON(Principal.ScopeValues) | Engine | canonicalJSON(normalizeForComparison(Envelope)) ).slice(0, 16)`. There are no generations in M1, so the Version also hashes the computed representation itself (every count, key, label, `Excluded`, `Filter.Applied`; the volatile fields stripped): a write that changes any count, or a request that differs only in a clause Hash, is a different ETag, so an `If-None-Match` 304 is never stale. P3 replaces the representation digest with the DepSet generations.
+
+### 10.6 Bucket (`02 §4.4`)
+
+```javascript
+{
+	Key: '2026-03-01 00:00:00',          // Terms: the value; DateHistogram: bucket start; NumericHistogram: index; Ranges: range Key
+	Label: 'Mar 2026',
+	Count: 412,
+	Selected: false,
+	Start: '2026-03-01 00:00:00', End: '2026-04-01 00:00:00', EndExclusive: true,   // range buckets only
+	Clause: { … } | null,                // §10.7
+	Selection: { Facet: 'BookStoreSale.SaleDate', Key: '2026-03-01 00:00:00' }
+}
+```
+
+### 10.7 Bucket clauses (`FacetClauses.bucketClause(pFacetResultMeta, pBucket)`, `02 §5`)
+
+| Fold | Clause |
+|---|---|
+| Terms (any column, **FK columns included in M1**) | `{ Type: 'DistinctSelectedValueList', FilterByColumn: Field, Values: [ Key ], FilterKey, ClauseKey: 'DistinctSelectedValueList' }` |
+| DateHistogram | `{ Type: 'DateRange', FilterByColumn, Values: { Start, End }, EndExclusive: true, FilterKey, ClauseKey: 'DateRange' }` |
+| NumericHistogram, Ranges | `{ Type: 'NumericRange', FilterByColumn, Values: { Start?, End? }, EndExclusive: <bucket's>, FilterKey, ClauseKey: 'NumericRange' }` (open bucket: only `Start`; a range with only `To`: only `End`) |
+| Stats, DistinctCount, Missing, Pivot | no buckets / `Clause: null` |
+
+O2 (selection round trip): replacing every conjunct the facet owns with the compiled `Bucket.Clause` and counting through the **list** (`GET /1.0/<E>s/Count/FilteredTo/<fenced filter>`) equals `Bucket.Count`; for single-valued folds also `SumOfCounts + MissingCount + OtherCount == Total`, and envelope `Total == list Count`.
+
+### 10.8 Selected (`FacetClauses.selectedFrom(pAgg, pOwnedConjuncts)`)
+
+Terms: keys from owned `IN`/`EQ` predicates on the field (and `Or` of them), normalized with `normalizeKey` → `{ Keys: [ … ] }`. Range folds: owned `GE/GT` + `LT/LE` bounds on the field → `{ Range: { Lo, LoInclusive, Hi, HiInclusive } }`; a bucket is `Selected` when `[Start, End)` lies inside it. Nothing owned → nothing selected.
+
+Full return shape: `{ Keys, Range, Ranges, Constrained }` — `Ranges` is the union of selected intervals (an `Or` of spans; `Range` is `Ranges[0]` when there is exactly one, else `null`), `Constrained` is false when nothing owned is expressible. `NeverExclude` conjuncts (RawFilter) are not selections; several owned conjuncts are ANDed (key sets / intervals intersect); date bounds are compared as `canonicalDateTime` strings, numeric bounds as numbers, and on integer columns `GT a` ≡ `GE a+1`, `LE b` ≡ `LT b+1` (so a closed integer bucket `[90, 100]` is `[90, 101)`). `FacetClauses.bucketSelected(pAgg, pSelected, pBucket)` applies the test. Also in `Facet-Contract-Clauses.js`: `ownership(pFacetSpec, pConjunct)` → `'Explicit' | 'FilterKey' | 'Fields' | null` and `exclusionFor(pFacetSpec, pConjuncts)` → `{ Mode, Owned, Excluded, ExcludedHashes (parallel, null when no Hash), KeptMixed, Kept }` (the §6.2 rule for one facet; the DisjunctivePlanner may delegate), `isMixed`, `clauseHash(pClause)` (deterministic `<FilterKey>-<ClauseKey>-<12 hex>` content hash), `canonicalJSON`, `shortHash` (non-cryptographic).
+
+---
+
+## 11. (i) Catalog — `RetoldFacetingCatalog` (B)
+
+### 11.1 ColumnInfo
+
+```javascript
+{
+	Entity: 'BookStoreSale', Column: 'TotalAmount',
+	DataType: 'Decimal',            // Columns[].DataType (authoritative, 01 §3.1)
+	MeadowType: 'Decimal',          // MeadowSchema.Schema[].Type (detects Deleted/AutoIdentity/audit types)
+	Size: '10,2', IsInteger: false, Scale: 2,
+	Join: null, JoinTarget: null,   // FK: Join = target PK column, JoinTarget = target entity (via the PK-column index)
+	IsPK: false, IsDeleteColumn: false, IsAudit: false, IsPolicyColumn: false,
+	Sensitive: false,               // Sensitive columns are NEVER returned by column() — see below
+	Filterable: true,               // every non-Sensitive column (including Text, ID, GUID, the delete column)
+	Facetable: true                 // has ≥ 1 fold
+}
+```
+
+### 11.2 Facet descriptor and FacetID grammar
+
+Auto FacetID: `<Entity>.<Column>`; `FacetRequest.parseFacetID(pFacetID)` → `{ Entity, Column, Kind: 'Auto' }` | `{ Kind: 'Path' }` (contains `>`) | `{ Kind: 'Declared', Entity, Name }` (contains `/`) | `null` (syntax error). Entity and Column must match `^[A-Za-z_][A-Za-z0-9_]{0,63}$`. M1 resolves only `Auto`: `Path` → per-facet `422 FACET_FOLD_UNSUPPORTED` (`Detail.Feature: 'PathFacet'`), `Declared` → per-facet `400 FACET_UNKNOWN_FACET`. The FacetID's entity must equal the route entity (else per-facet `400 FACET_UNKNOWN_FACET`).
+
+```javascript
+{
+	Facet: 'BookStoreSale.SaleDate', Entity: 'BookStoreSale', Field: 'SaleDate',
+	DisplayName: 'Sale Date',       // de-camel-cased column name (later: overrides)
+	DataType: 'DateTime', IsInteger: false, Scale: 0,
+	Folds: [ 'DateHistogram', 'Stats', 'Missing' ], DefaultFold: 'DateHistogram',
+	ClauseType: 'DateRange', FilterKey: 'SaleDate',
+	Intervals: [ 'day', 'week', 'month', 'quarter', 'year' ], DefaultInterval: 'month',   // DateTime only
+	Target: null,                   // FK target entity
+	Labels: false,                  // FK label resolution is later
+	Selectable: true, Engines: [ 'Live' ], Auto: true
+}
+```
+
+Derivation (M1; `01 §3.2` with the M1 adjustments of §16):
+
+| Column | Folds (first = default) | ClauseType (default fold) |
+|---|---|---|
+| PK (`DataType: 'ID'` or MeadowType `AutoIdentity`), GUID (`DataType: 'GUID'`, MeadowType `AutoGUID`, or a column name starting with `GUID` — the bookstore's `User.GUIDUser` is `Numeric`/`Integer`) | none (still filterable) | — |
+| Has `Join` (any DataType) | Terms, Missing, DistinctCount | DistinctSelectedValueList |
+| `Boolean` (not the delete column) | Terms, Missing | DistinctSelectedValueList |
+| `DateTime` (not `DeleteDate`) | DateHistogram, Stats, Missing | DateRange |
+| `Numeric` integer, no Join | NumericHistogram, Terms, Ranges, Stats, DistinctCount, Missing | NumericRange |
+| `Decimal` | NumericHistogram, Ranges, Stats, Missing | NumericRange |
+| `String` with Size ≤ `Catalog.MaxTermsStringSize` (128), not in a unique index | Terms, Missing, DistinctCount | DistinctSelectedValueList |
+| `Text`, `JSON`, `JSONProxy`, longer `String` | none (still filterable) | — |
+| delete column, `DeleteDate`, `CreatingIDUser`/`UpdatingIDUser`/`DeletingIDUser`, the policy column | none (still filterable, except Sensitive) | — |
+| Sensitive (`/Password|Hash|Secret|Token|Salt|ApiKey|Key$|Code$|Email|Phone/i` + `Catalog.Sensitive` entries) | none, **not filterable**, absent from Describe | — |
+
+### 11.3 Catalog methods
+
+```javascript
+rebuild(pModel, pHost)              // sync; builds entities, columns, descriptors; computes ModelVersion from RetoldFacetingGraph.graphHash()
+                                    // (the service rebuilds the Graph first); throws on illegal identifiers
+modelVersion()                      // 'm:' + first 12 hex of sha1(GraphHash | catalog options | policy hash)
+entities()                          // [ 'Book', … ] facetable entity names (Host.isFacetable)
+getFacetable(pEntity)               // EntityDescriptor | null  { Entity, DisplayName, PK, DeleteColumn, Columns: { Name: ColumnInfo }, Facets: [ descriptor ], Dates, Numeric, Categorical, ScopeAssurance }
+facet(pFacetID)                     // descriptor | null (Auto only in M1)
+column(pEntity, pColumn)            // ColumnInfo | null (null for unknown AND Sensitive — the FilterValidator whitelist)
+filterableColumns(pEntity)          // [ names ]
+isSensitive(pEntity, pColumn)       // default denylist + Catalog.Sensitive entries − Catalog.<E>.IncludeSensitive
+describe(pEntity, pPrincipal)       // the Describe entity block (02 §7)
+```
+
+`RetoldFacetingGraph` (B): `rebuild(pModel)`, `edge(pName)` (`'Review.IDBook'`), `outgoing(pEntity)`, `incoming(pEntity)`, `isBridge(pEntity)`, `graphHash()`. Edges keyed by `(From, FromColumn)`; targets via the PK-column index. Used by nothing in M1 except `ModelVersion` and Describe `Target`; it exists so M2 paths have a home.
+
+---
+
+## 12. (j) Host — `RetoldFacetingHostDataService` (B), base `RetoldFacetingHostBase`
+
+### 12.1 Methods
+
+```javascript
+bind(pRetoldDataService, fCallback)       // capture fable.DAL / fable.MeadowEndpoints refs and SNAPSHOT the route-bound controller per entity;
+                                          // refuse (FacetError FACET_INTERNAL) when MeadowEndpointsSessionDataSource === 'Header' and !Scope.AllowHeaderSession
+getHostKind()                             // 'DataService'
+getModel(fCallback)                       // fCallback(null, RetoldDataService.fullModel)
+getModelSync()                            // same, synchronously (the catalog build is sync)
+onModelChanged(fListener)                 // interim: wraps RetoldDataService.loadModel; listener(pModel) after a load
+listEntities()                            // every entity with a DAL
+getDAL(pEntity)                           // fable.DAL[pEntity] | null
+getExecutionDAL(pEntity)                  // M1: === getDAL (Shared pool on SQLite); Dedicated pools are later
+getRouteBoundController(pEntity)          // the controller captured at bind() (routes stay bound to it across RDS reloads, D-31) | null
+getServiceServer()                        // fable.OratorServiceServer
+getScopePolicy()                          // §8.3 normalized policy
+getAuthorizer()                           // null on plain RDS (Strategy 'None')
+getDialectProfile(pEntity)                // { Name: 'SQLite' | 'PostgreSQL' | 'MySQL' | 'MSSQL' } from the DAL's provider name
+hasDeleteColumn(pEntity) / getDeleteColumn(pEntity)   // from MeadowSchema.Schema Type 'Deleted'
+getPrimaryKey(pEntity)                    // MeadowSchema.DefaultIdentifier (AutoIdentity column)
+isFacetable(pEntity, pPrincipal)          // 06 §5.1 for plain RDS: route-bound controller; not NeverFacet/Account/ApiKey/LoginChallenge/RetoldFacetChangeLog;
+                                          // with a policy: scoped OR listed in Catalog.GlobalEntities
+resolvePrincipal(pRequest, fCallback)     // §12.2 (raw; PrincipalResolver adds the unset-value check)
+installChangeIntake(pIntake)              // later (no-op stub)
+```
+
+Route-bound controller: `fable.MeadowEndpoints[E].controller` **as first seen at `bind()`**; after `onModelChanged`, entities that already had routes keep their captured controller (RDS skips `connectRoutes` for them), new entities take the new one.
+
+### 12.2 Principal (frozen)
+
+```javascript
+{
+	Kind: 'User' | 'Anonymous',            // User when SessionData.LoggedIn === true
+	Source: 'InProcess',
+	IDUser: 7,                              // SessionData.UserID || SessionData.IDUser || 0
+	IDCustomer: 0,                          // SessionData.CustomerID || SessionData.IDCustomer || 0
+	ScopeValues: { IDTenant: 1 },           // keyed by policy column, from SessionData[SessionField]
+	UserRecord: { IDUser: 7, IDCustomer: 0 },   // only Scope.UserRecordFields
+	RoleSetHash: '',
+	ResolvedAt: 1791472000000
+}
+```
+
+Plain RDS: `SessionData = controller.initializeRequestState(pRequest, 'Reads').SessionData` (any route-bound controller; the session marshaler is shared). `RetoldFacetingPrincipalResolver.resolve(pContext, fCallback)` (wiring) wraps `pContext.Host.resolvePrincipal(pContext.Request, …)`: with a policy, any required `ScopeValues[Column]` in `Scope.UnsetValues` → `401 FACET_UNAUTHENTICATED` before anything else runs.
+
+### 12.3 Installer (`source/Retold-Faceting-Installers.js`, B)
+
+```javascript
+installOnRetoldDataService(pRetoldDataService, pOptions, fCallback)
+// 1 fable.addServiceType('RetoldFacetingService', …) + instantiateServiceProvider('RetoldFacetingService', resolve(pOptions))
+// 2 RetoldFacetingService.attach({ RetoldDataService: pRetoldDataService }, fCallback)  — host bind, catalog build, routes
+```
+
+`attach()` refuses (boot error) an entity named `Facet`, `Describe`, `Agent`, `Admin`, `Changes` or `Status` (D-17).
+
+---
+
+## 13. (k) Error codes used in M1 (`contract/Facet-Contract-Errors.js`)
+
+| Code | Status | M1 use |
+|---|---|---|
+| `FACET_UNAUTHENTICATED` | 401 | policy value unset; a behavior's 401 |
+| `FACET_FORBIDDEN` | 403 | (reserved for hops/labels; not produced by M1 auto facets) |
+| `FACET_ADHOC_FORBIDDEN` | 403 | `Definition` on a facet |
+| `FACET_UNKNOWN_ENTITY` | 404 | root entity unknown, not facetable or not readable |
+| `FACET_UNKNOWN_FACET` | 400 | per facet: unknown/declared FacetID, entity mismatch |
+| `FACET_UNKNOWN_FIELD` | 400 | filter names an unknown or Sensitive column |
+| `FACET_UNKNOWN_SCOPE` | 400 | any `Scopes` / `NamedScope` clause |
+| `FACET_UNKNOWN_FOLD` | 400 | per facet: `Fold` not in the descriptor's `Folds` |
+| `FACET_FILTER_INVALID` | 400 | validator/compiler rejection (`Detail: { Offset, Token }` or `{ ClauseType, Reason }`) |
+| `FACET_REQUEST_INVALID` | 400 | **M1 addition**: body shape and L1 limits (non-object body, bad types, duplicate Keys, size/depth/count limits) |
+| `FACET_TOO_MANY_FACETS` | 400 | `Facets.length > Limits.MaxFacets` |
+| `FACET_INTERVAL_TOO_FINE` | 422 | date buckets > `MaxDateBuckets` (`Suggest: { Interval }`) |
+| `FACET_FOLD_UNSUPPORTED` | 422 | not-in-M1 features (`Detail: { Feature, Milestone: 1 }`): path facets, Log mode, numeric pivot axis, `Group:` exclusion, non-Rows CountMode, Selections, FilterExperience, Records, Params |
+| `FACET_TOO_LARGE` | 422 | relation / behavior-run budgets |
+| `FACET_TIMEZONE_UNSUPPORTED` | 422 | `TimeZone ≠ StorageTimeZone` |
+| `FACET_SCOPE_POLICY_VIOLATION` | 500 | ScopeGuard Strict refusal; Opaque capture |
+| `FACET_INTERNAL` | 500 | anything unexpected |
+| `FACET_MODEL_RELOADING` | 503 | catalog rebuild in progress |
+| `FACET_TIMEOUT` | 504 | deadline exceeded (per facet) |
+
+Shapes: whole-request failure → HTTP status + `{ Error: { Code, Status, Message, Detail } }`; per facet → `Errors[Key] = { Code, Status, Message }` (FacetErrorEntry). `libFacetErrors.create(pCode, pMessage, pDetail)` returns an `Error` with `.FacetError === true`, `.Code`, `.Status`, `.Detail`; `toResponse(pError)` and `toEntry(pError)` map any error (non-facet errors → `FACET_INTERNAL` with a generic message). `isFacetError(pError)`.
+
+---
+
+## 14. (l) Test harness, fixtures and the Reference oracle (E)
+
+### 14.1 `test/support/Facet-Test-Harness.js`
+
+```javascript
+const libHarness = require('./support/Facet-Test-Harness.js');
+
+let _Harness = libHarness.start(
+	{
+		Port: 19110,                     // REQUIRED registry port (§14.4); the server binds an EPHEMERAL port unless FixedPort: true
+		Fixture: 'Bookstore',            // 'Bookstore' | 'Bookstore-Tenant'
+		Seed: 20261008,                  // default fixed seed
+		Scale: 'Small',                  // 'Small' (default, fast) | 'Medium'
+		Faceting: { },                   // RetoldFaceting option overrides (e.g. { Scope: { Guard: 'Repair' } })
+		TenancyBehavior: 'Auto',         // 'Auto' (installed iff Fixture is Bookstore-Tenant) | true | false | function (custom behavior, e.g. the E1 clobber)
+		LogLevel: 'fatal'
+	},
+	(pError) => { /* ready */ });
+```
+
+The returned object (synchronously; fields populate before `fDone`):
+
+```javascript
+{
+	fable, rds, faceting,                // fable, fable.RetoldDataService, fable.RetoldFacetingService
+	db,                                  // the node:sqlite DatabaseSync (read-only use in tests)
+	baseURL: 'http://127.0.0.1:<bound port>',   // set once the server listens
+	port: <bound port>,
+	model,                               // the model object loaded into RDS (Bookstore-Tenant adds IDTenant everywhere)
+	seed: { Fixture, Seed, Scale, Counts: { Entity: rows incl. deleted }, LiveCounts: { Entity: non-deleted }, Tenants: [ 1, 2 ] | [ ] },
+	stop(fDone),                         // closes the server and the DB; idempotent
+	request(pMethod, pPath, pBody, pOptions, fCallback),      // fetch; pOptions.Tenant / pOptions.User set the test session; → fCallback(null, { Status, Headers, Body })
+	facetQuery(pEntity, pBody, pOptions, fCallback),          // POST /1.0/Facet/:Entity/Query → { Status, Headers, Body }
+	reference(pEntity, pBody, pOptions, fCallback),           // in-process faceting.queryInternal(…, { ForceEngine: 'Reference' }) with the same session → (pError, pEnvelope)
+	listCount(pEntity, pFilterString, pOptions, fCallback),   // GET /1.0/<E>s/Count[/FilteredTo/<encodeURIComponent(raw)>] → (pError, Count)
+	listRows(pEntity, pFilterString, pOptions, fCallback),    // GET /1.0/<E>s[/FilteredTo/<encodeURIComponent(raw)>]/0/0 (Cap 0 = all) → (pError, Records)
+	toFilterString(pEntity, pBody),                           // RAW fenced meadow-filter string for the body's Clauses + FilterString (FilterAST.build + toFilterString)
+	normalize(pEnvelope),                                     // FacetEnvelope.normalizeForComparison
+	assertSelectionRoundTrip(pEntity, pBody, pEnvelope, pOptions, fCallback)   // O2 over every selectable bucket with Count > 0 (and a sample of Count 0)
+}
+```
+
+Session shim (test-only): the harness registers `fable.OratorServiceServer.pre(…)` reading `x-facet-test-tenant` / `x-facet-test-user` and setting `pRequest.UserSession = { LoggedIn: true, UserID: <user>, IDTenant: <tenant>, CustomerID: <tenant> }` (no header → anonymous default session). `MeadowEndpointsSessionDataSource` stays `'Request'`. In-process calls (`reference`) build a synthetic request with the same `UserSession`.
+
+Test tenancy behavior (Bookstore-Tenant): for **every** entity, `setBehavior` (or `addBehavior` once ME-1 lands) on `Reads-QueryConfiguration` and `Count-QueryConfiguration`: unset `SessionData.IDTenant` → `fCallback(controller.ErrorHandler.getError('Authentication required.', 401))`; else `pRequestState.Query.addFilter('IDTenant', SessionData.IDTenant, '=', 'AND', 'TestTenancy')`. Faceting option defaults for that fixture: `Scope: { Policy: { Column: 'IDTenant', SessionField: 'IDTenant' }, Guard: 'Strict' }`.
+
+Further harness members:
+
+- `compare(pEntity, pBody, pOptions, fCallback)` → `{ Live: <HTTP response>, Reference: <envelope>, LiveNormalized, ReferenceNormalized }` (O1 in one call).
+- `installBehavior(pEntity, pHash, fBehavior)` (and the exported `installBehavior(pController, pHash, fBehavior)`): **chain-wraps** whatever is already at that hash (existing first, then the new one; an error short-circuits), because `setBehavior` is single-slot. The tenancy behavior is installed this way, on the entities that have the policy column (or `TenancyEntities: [ … ]`; a custom `TenancyBehavior` function defaults to every entity); `TenancyBehavior: true` on a fixture without the column is a start error. `tenancyEntities` lists where it went.
+- `assertSelectionRoundTrip` checks against the REQUEST, not the service's own claims: (1) the exclusion it derives on its own (`expectedExclusion(pBody, pSpec)`: clauses and FilterString stanzas on the facet's column, Self folds only; bodies with OR junctions / groups are skipped) must equal `FacetResult.Excluded`; (2) envelope `Total` against the list Count of the RAW `body.FilterString` when there are no Clauses (and no top-level OR — the stock list does not parenthesize its own soft delete), else the rendered filter; (3) a Terms bucket's `Clause` is null exactly when its key holds `'~'`, and every non-null `Clause` compiles (a refused Clause is a mismatch, never skipped); then it removes the conjuncts the facet excluded, appends the compiled `Bucket.Clause`, and compares the list Count; facet `Total` against the list Count of the facet's own filter, and `SumOfCounts + MissingCount + OtherCount == Total` for Terms/DateHistogram/NumericHistogram/Ranges. Options `MaxBuckets` (positive buckets per facet), `ZeroSample` (default 2). Mismatch → `fCallback(Error with .Report, Report)`; only a bucket value the list SYNTAX cannot carry is counted in `Report.Skipped`.
+- Exports: `sessionFor`, `syntheticRequest(pEntity, pOptions, pBody)`, `testTenancyBehavior`, `installBehavior`, `expectedExclusion`, `TENANCY_BEHAVIOR_HASHES`, `BUCKETED_FOLDS`.
+- Seed result also carries `TenantCounts` / `TenantLiveCounts` (`{ 1: { Entity: n }, 2: … }`) and `Traps` (`FirstSaleDate`, `LastSaleDate`, `PublicationYearOutlier`, `TotalAmountOutlier`, `MissingStoreIDBase`, `SubScaleAmount` (499.996, just below the Nice edge 500.00), `BoundarySaleDates` (`'2023-04-01'`, `'2023-07-01 00:00'`, `'2022-01-01T00:00:00'`), `UnsafeGenre` (`'Sci~Fi'`), `TextBookCounts` (`''`, `' '` in the integer `BookStoreInventory.BookCount`)); the seed module also exports `fingerprint(db, model)` (sha256 of every table in PK order), `stream(seed, name)`, `primaryKeyOf`, `foreignKeysOf`, `SCALES`, `TENANT_COLUMN`. Small: User 240, Customer 120, Author 400, Book 1 500, BookStore 40, Employee 120, Inventory 1 600, Review 6 000, Sale 3 000 (+ items, prices, joins); Medium ×4. Generation is one PRNG stream per table.
+
+Boot sequence: `new libFable({ Product, APIServerPort: 0 /* ephemeral; Port with FixedPort */, SQLite: { SQLiteFilePath: ':memory:' }, LogStreams: [ { streamtype: 'console', level } ] })` → register + `connectAsync` `MeadowSQLiteProvider` → `BookstoreSeed.build(db, …)` → `RetoldDataService` with `{ StorageProvider: 'SQLite', FullMeadowSchemaFilename: false }` → `pre()` session shim → `initializeService` → `rds.loadModel('Bookstore', model, 'SQLite', …)` → tenancy behaviors → `installOnRetoldDataService(rds, FacetingOptions, …)`. `stop` → `fable.Orator.stopWebServer(…)`.
+
+### 14.2 `test/fixtures/Bookstore-Seed.js`
+
+```javascript
+const libBookstoreSeed = require('./fixtures/Bookstore-Seed.js');
+libBookstoreSeed.model(pFixture)                       // deep clone of test/fixtures/Bookstore-Model.json (a copy of the retold-harness MeadowModel-Extended.json); 'Bookstore-Tenant' adds an IDTenant
+                                                      // column (Columns[], MeadowSchema.Schema Type 'Integer', DefaultObject 0, JsonSchema) to EVERY table
+libBookstoreSeed.createTables(pDB, pModel)             // DDL generated from the model (never the harness .sql files)
+libBookstoreSeed.build(pDB, { Fixture, Seed, Scale })  // createTables + deterministic rows → { Fixture, Seed, Scale, Counts, LiveCounts, Tenants }
+libBookstoreSeed.prng(pSeed)                           // mulberry32; the only randomness source
+```
+
+Data requirements (`08 §5`): soft-deleted rows in every table that has `Deleted` (both sides of future anti-joins); NULL dates and NULL numbers; `''` strings (e.g. `Book.Language`); skewed categories (PaymentMethod, Language, Rating); decimals with exactly the column scale; DateTime values as `YYYY-MM-DD HH:mm:ss`; a non-empty `BookStoreCatalogJoin`; `BookStoreSale.SaleDate` spanning several years including a single-day first month; `Book.PublicationYear` with a negative outlier. Bookstore-Tenant: tenant 1 = the base data, tenant 2 = a ~5 % clone with distinct IDs and the same distributions, plus tenant-1 rows referencing tenant-2 parents.
+
+### 14.3 Reference engine rules (O1)
+
+See §9.3. The harness's `reference()` and the HTTP `facetQuery()` must produce envelopes that are deep-equal after `normalize()` for every fixture request — that is the M1 exit criterion, together with O2 (`assertSelectionRoundTrip`) and the two-tenant isolation test (tenant 2's facets equal the facets of tenant 2's own list; no tenant-1 row ever counts).
+
+### 14.4 Port registry (19100–19199)
+
+| Port | File |
+|---|---|
+| 19100 | (reserved: skeleton probes) |
+| 19101 | `test/Facet-Host_tests.js` |
+| 19102 | `test/Facet-Catalog-Graph_tests.js` |
+| 19103 | `test/Facet-FilterAST_tests.js` (only if it boots a server) |
+| 19104 | `test/Facet-Live-Unit_tests.js` |
+| 19105 | `test/Facet-ShellTemplates_tests.js` (only if it boots a server) |
+| 19106 | `test/Facet-Reference_tests.js` |
+| 19110 | `test/Facet-Live-Bookstore_tests.js` |
+| 19111 | `test/Facet-Conformance-SQLite_tests.js` (four harnesses in turn: Bookstore, Bookstore-Tenant, Strict clobber, Repair clobber) |
+| 19112 | `test/Facet-Security_tests.js` |
+| 19113 | `test/Facet-ClauseCompiler_tests.js` (the pict Filter.js oracle) |
+| 19190 | `debug/m1-smoke.js` (manual smoke run, not part of `npm test`) |
+| 19120–19129 | M2 test files (§32.4) |
+| 19196–19198 | `example_applications/faceting_demo` (registry tags of the ProjectTrack, LabTrack and Bookstore domains; binds ephemeral; the demo's own ports are 19300–19310: 19300 `npm start`, 19301 its `npm test`, 19302 its `npm run check:browser`) |
+| 19130–19189, 19192–19195, 19199 | free; claim one by adding a row here |
+
+---
+
+## 15. Module export summary and method index (what the smoke test checks)
+
+### 15.1 Exports
+
+| File | Export | Kind |
+|---|---|---|
+| `source/Retold-Faceting-Service.js` | `RetoldFacetingService` (+ statics `.installOnRetoldDataService`, `.Options`, `.SUB_SERVICES`) | service |
+| `source/Retold-Faceting-Installers.js` | `{ installOnRetoldDataService }` | functions |
+| `source/Retold-Faceting-Service-Options.js` | `{ DEFAULTS, ROUTE_RESERVED_NAMES, NEVER_FACETABLE, resolve, deepMerge, hasScopePolicy }` | data + pure functions |
+| `source/contract/Facet-Contract-Request.js` | `{ CONTRACT_VERSION, FOLDS, SELECTABLE_FOLDS, INTERVALS, ORDERS, NUMERIC_MODES, EXCLUDE_POLICIES, DEFAULT_EXCLUDE, FOLD_CLAUSE_TYPE, M1_CLAUSE_TYPES, FILTER_INSTRUCTIONS, FILTER_STRIPPED_INSTRUCTIONS, FILTER_OPERATOR_MAP, PRED_OPS, IDENTIFIER_PATTERN, parseFacetID, defaultExcludeFor, clauseTypeFor, clampPositiveInteger, LIMIT_DEFAULTS, LATER_FOLDS, RESERVED_KEY_PREFIX, checkLimits, normalizeFacetSpec, normalizeRequest, isLegacyPayload, legacyToRequest }` | pure |
+| `source/contract/Facet-Contract-Envelope.js` | `{ CONTRACT_VERSION, NUMERIC_KEY_TYPES, VOLATILE_FIELDS, normalizeKey, emptyFacetResult, buildFacetResult, buildEnvelope, requestFailure, normalizeForComparison }` | pure |
+| `source/contract/Facet-Contract-Buckets.js` | `{ INTERVAL_ORDER, NUMERIC_KEY_TYPES, canonicalDateTime, dateKey, normalizeDateKey, compareDateKeys, nextDateKey, fillDateKeys, dateLabel, coarserInterval, units, formatUnits, numericGeometry, edgesGeometry, numericIndex, numericBucketBounds, numericLabel, rangeKey, rangeLabel, normalizeKey, compareKeys }` | pure |
+| `source/contract/Facet-Contract-Clauses.js` | `{ TILDE_PATTERN, canonicalJSON, shortHash, isClauseSafeKey, clauseSignature, clauseHash, ownership, isMixed, exclusionFor, bucketClause, selectedFrom, bucketSelected }` | pure |
+| `source/contract/Facet-Contract-Util.js` | `{ RESERVED_KEY_NAMES, CONTROL_CHARACTER_PATTERN, NUMERIC_LITERAL_PATTERN, isPlainObject, hasOwn, isPresent, toFiniteNumber, toCount, keyProblem, logSafe }` | pure |
+| `source/contract/Facet-Contract-Errors.js` | `{ CODES, create, isFacetError, toResponse, toEntry }` | pure (complete) |
+| `source/engine/live/Shell-Templates-<Dialect>.js` | `{ Dialect, Templates: { Count, Terms, DateHistogram, NumericBounds, NumericHistogram, Ranges, Stats, DistinctCount, Missing, Pivot }, Expressions: { dateKey(pColumnSQL, pInterval), numericIndex(pColumnSQL) } }` | pure data |
+| every other `source/**/*.js` | the service class (`module.exports = Class; module.exports.serviceType = '…'`); some add statics (`Catalog.SENSITIVE_PATTERN`, `FoldIR.FOLD_DIMENSION_KIND`, `ScopeCapture.PORTABLE_OPERATORS`, `ScopedRelationBuilder.ALIAS_PATTERN` / `.PROJECTION_TEMPLATE`, `Dialects.DIALECT_PROFILES`, `ShellTemplates.ALLOWED_SLOT_PATTERN`) | service |
+
+### 15.2 Method index (binding signatures; sections above give the semantics)
+
+| Service | Methods |
+|---|---|
+| `RetoldFacetingService` | `registerServices()`, `attach({ RetoldDataService }, fCallback)`, `connectRoutes(pServiceServer)`, `query(pEntity, pBody, pRequest, fCallback)`, `queryInternal(pEntity, pBody, pRequest, { ForceEngine }, fCallback)`, `newContext(pEntity, pRequest, pInternalOptions)`, `describe(pEntity, pPrincipal)`, `describeRequest(pEntity, pRequest, fCallback)`, `status()`; property `Host` |
+| `RetoldFacetingHostBase` / `…HostDataService` | §12.1 |
+| `RetoldFacetingCatalog` | `rebuild(pModel, pHost)`, `modelVersion()`, `entities()`, `getFacetable(pEntity)`, `facet(pFacetID)`, `column(pEntity, pColumn)`, `filterableColumns(pEntity)`, `isSensitive(pEntity, pColumn)`, `describe(pEntity, pPrincipal)` |
+| `RetoldFacetingGraph` | `rebuild(pModel)`, `edge(pName)`, `outgoing(pEntity)`, `incoming(pEntity)`, `isBridge(pEntity)`, `graphHash()` |
+| `RetoldFacetingRequestNormalizer` | `normalize(pEntity, pBody)` → NormalizedRequest (throws), `normalizeLegacy(pEntity, pBody)` → null |
+| `RetoldFacetingFilterValidator` | `validate(pEntity, pFilterString, { AllowDeleteColumn })` → `{ Stanzas, Warnings }` (throws) |
+| `RetoldFacetingClauseCompiler` | `compile(pEntity, pClauses)` → `{ Conjuncts, Warnings }` (throws), `coerceValue(pColumnInfo, pValue)` |
+| `RetoldFacetingFilterAST` | `fromStanzas(pEntity, pStanzas, pOrigin)`, `build(pEntity, { Clauses, FilterString })` → FilterAST, `applyToQuery(pConjuncts, pQuery, { Dialect, ParameterPrefix })`, `toFilterString(pConjuncts, { Encode })`, `fieldsOf(pPred)` |
+| `RetoldFacetingDisjunctivePlanner` | `variants(pFilterAST, pFacetSpecs)` → `{ Variants, Facets }` |
+| `RetoldFacetingFoldIR` | `agg(pFields)`, `dimensionFor(pFold, pDescriptor, pFacetSpec)`, `depSet(pAgg, pVariant, pCatalog)` |
+| `RetoldFacetingPlanner` | `plan(pContext, fCallback)`, `lower(pFacetSpec, pDescriptors, pContext)`, `depSet(pAggs)` |
+| `RetoldFacetingPrincipalResolver` | `resolve(pContext, fCallback)` |
+| `RetoldFacetingAuthorizer` | `check(pContext, pEntities, fCallback)` → `{ Allowed, Denied }` |
+| `RetoldFacetingScopeCapture` | `capture(pContext, pEntity, pQuery, pScopeMode, fCallback)`, `probe(pEntity, fCallback)` (later) |
+| `RetoldFacetingScopeGuard` | `assert(pContext, pEntity, pQuery, pCapture)` → GuardResult |
+| `RetoldFacetingRouter` | `register(pEngine)`, `engine(pEngineName)`, `route(pAggs, pContext, fCallback)` |
+| `RetoldFacetingEngineBase` (+ Live, Reference) | `EngineName` getter, `capable(pAgg, pContext)`, `freshness(pDepSet)`, `execute(pContext, pAggs, fCallback)`, `newExecution(pContext)`; Live adds `compileAgg(pContext, pAgg, pRelations, pDialectName)`; Reference adds `readVariantRows(pContext, pVariant, fCallback)`, `fold(pAgg, pRecords)` |
+| `RetoldFacetingScopedRelationBuilder` | `buildRelation(pContext, pRel, fCallback)`, `relationKey(pRel)` |
+| `RetoldFacetingDialects` | `forName(pDialectName)`, `forDAL(pDAL)`, `quote(pDialectName, pIdentifier)`, `harvest(pQuery, pAlias, pDialectName)` → `{ SQL, Params, ParamTypes }`, `mergeParameterTypes(pQuery, pParamTypes)` |
+| `RetoldFacetingShellTemplates` | `dialect(pDialectName)`, `render(pDialectName, pAgg, pSlots)` → `{ Template, Slots, Bound }`, `validateAll()` → `{ Errors }` |
+| `RetoldFacetingRoutes` | `connect(pServiceServer)`, `setStandardHeaders(pResponse, pVersion)`, `sendError(pResponse, pError, fNext)`, `handleQuery`, `handleDescribe` |
+
+## 16. Ambiguities resolved / M1 deviations from the design
+
+1. **Describe route.** The design table (`02 §2.1`) has `GET /1.0/Facet/Describe/:Entity`; the M1 brief says `GET /1.0/Facet/:Entity/Describe`. Both are mounted (they cannot collide: `Describe` is a reserved entity name). Describe is the canonical form in docs.
+2. **Contract modules are not classes.** The brief asks for class skeletons in every file, but `10 §3.1` requires `contract/` to be pure with zero requires (it cannot extend `fable-serviceproviderbase`). Contract modules export frozen constants and pure functions; the smoke test asserts their exports instead of constructing them. Same for `Shell-Templates-<Dialect>.js` (data consumed by the `RetoldFacetingShellTemplates` service).
+3. **Terms on integer columns.** `01 §3.2` lists only NumericHistogram/Stats/Missing for numeric columns, but the design's own fixture F1 runs Terms on `Review.Rating`. M1 lists `Terms`, `Ranges` and `DistinctCount` as non-default folds on integer `Numeric` columns (Decimal: `Ranges` only).
+4. **FK Terms buckets.** The design writes FK buckets back as `InternalJoinSelectedValueList`. M1 has no join-clause compiler, so FK Terms facets write `DistinctSelectedValueList` on the FK column itself (equivalent by L3 on the pivot). **Labels (wiring, superseding the earlier "no label reads")**: FK Terms buckets are labelled by one scoped, guarded read of the target per facet (§18.6), `LabelResolved: true|false`; `Labels: false` on the facet turns it off. The FK size-class gate (`AutoFKTermsMaxTargetRows`) is a seam: M1 lists every FK facet.
+5. **Numeric bucketing in integer units** (§10.3.2) instead of the design's float `FLOOR((v − Lo) / Width)`: the float form disagrees between PG `numeric` and JS doubles at decimal edges (e.g. 8.4 / 0.2). Same edges, same buckets, exact everywhere.
+6. **Stats sums** are exact integer-unit sums, formatted from units (§10.2), so Live and Reference agree to the cent.
+7. **New error code `FACET_REQUEST_INVALID` (400)** for body shape and L1 limits; the design lists the limits but no code. Not-in-M1 request features use `FACET_FOLD_UNSUPPORTED` (422) with `Detail.Feature`, `Scopes` use `FACET_UNKNOWN_SCOPE` (nothing is registered), inline `Definition` uses `FACET_ADHOC_FORBIDDEN`.
+8. **SQLite NULL predicates** render as `"C" IS :p` with a NULL bind (`IS NULL` semantics) instead of shell fragments (`03 §3.2`), because in M1 the predicate must live inside the fenced FoxHound WHERE of the SR. Verified on node:sqlite.
+9. **Reference engine applies the Variant through `FilterAST.applyToQuery`** inside the list waterfall rather than through `controller.parseFilter(string)`, because the stock SQLite list cannot render `IS NULL` (FH-2) and has no fence (ME-2). Independence from Live is kept where it matters: no SRs, no harvest, no shells, no explicit soft-delete, JS folding. The fully independent oracle is O2 through the real HTTP Count route.
+10. **Pivot axes** limited to Column / DateBucket / Range; null-key cells go to `MissingCount`, no-range cells to `OtherCount`; `Top` applies per axis by marginal; the pivot fields sit at the FacetResult top level (`02 §4.3`).
+11. **Date Missing** = NULL **or unparseable** (incl. `''`), because SQLite `strftime('')` is NULL; dates are never bucketed from non-canonical text.
+12. **Numeric `0` is a range bound** in the clause compiler (pict's Filter.js drops it by truthiness — upstream quirk, noted for PICT-1).
+13. **No conditional disjunctive scan, no cache, no generations** in M1: one statement per Agg (per Variant SR shared). `Version` hashes the computed representation instead (§10.5) until P3.
+14. **Principal on plain RDS** comes from the meadow-endpoints session marshaler; the tests' "authentication" is a harness-only `pre()` shim setting `pRequest.UserSession` from test headers.
+15. **Security services take `pContext` first** (`resolve(pContext)`, `check(pContext, pEntities)`, `assert(pContext, pEntity, pQuery, pCapture)`) instead of the design's `resolve(pRequest)` / `check(pEntities, pPrincipal)` / `assert(pEntity, pPrincipal, pQuery)`, matching the design's own `capture(pContext, …)` so every security call reaches the host and principal the same way.
+16. **`capable(pAgg, pContext)`** instead of `capable(pAgg, pDepSet, pCaptures)`: in M1 captures happen inside `execute` (there is no store routing that needs them up front).
+17. **`Dialects.harvest(pQuery, pAlias, pDialectName)`** is a service method keyed by dialect name rather than a method on a per-dialect profile object.
+18. **SQLite in M1.** The meadow group rule is "Postgres everywhere" for applications; M1 *executes* only on in-memory SQLite because that is the test fixture backend, and the PostgreSQL/MySQL/MSSQL shells are dry-built SQL goldens until M2 executes them. Nothing in M1 may assume SQLite-only semantics outside `Shell-Templates-SQLite.js` and the `NULL` rendering of §4.5.
+19. **Options defaults for M1:** `Freshness.DefaultMode: 'Exact'` and `Cache.Enabled: false` (design: `'Bounded'`, cache on) because no store or cache exists yet; `Limits` gains `DefaultTop`, `DefaultBuckets` and the L1 limits (`MaxBodyBytes`, `MaxJSONDepth`, `MaxClauses`, `MaxValueBytes`, `MaxInList`) as explicit keys; `Time.DefaultInterval: 'month'`.
+20. **Filter-string encoding for the list oracle.** The installed meadow-endpoints (4.0.21) GET routes decode the filter only through restify's path-param decoding, so the oracle sends the RAW string URL-encoded once (§4.5); `FilterString` in a facet POST body stays percent-encoded and is decoded once by the FilterValidator (`02 §3.1`).
+21. **Clause sequence = pict's filter string.** pict prepends every RawFilter's stanzas, unwrapped, before the clause groups; the ClauseCompiler composes the same top-level sequence. Without an OR in it each RawFilter and each clause is its own conjunct (a RawFilter fenced alone, `NeverExclude`); with one, SQL precedence makes the whole clause filter ONE conjunct (`NeverExclude` when it holds a RawFilter). Proven against pict's Filter.js by `test/Facet-ClauseCompiler_tests.js`.
+22. **Day-aligned date bounds bind date-only.** A midnight `GE` / `LT` DateTime bound binds `'YYYY-MM-DD'` (it sorts before every same-day text form on SQLite TEXT dates), so a clause agrees with canonical bucketing for every stored shape `canonicalDateTime` accepts; `GT` / `LE` keep the canonical value; FilterString values are never rewritten (list parity).
+23. **Stats Min / Max / Sum are reported at the column Scale** (from integer units): a stored value with more decimals than the Scale is rounded in Stats (499.996 → `'500.00'`), while bucket membership uses the raw value (§10.3.2).
+24. **Scope values are normalized once** (trimmed; numeric literals → Number; booleans → 0/1) in `buildPrincipal`; `0`, `''`, `null`, `false` (and `'0'`, `' 0'`, `'00'`) are always unset, plus `Scope.UnsetValues`.
+
+---
+
+## 17. Seams for later milestones (stub, do not implement)
+
+> M2 implements the definitions, path, Staged-hop, cube, Records/Keys and PostgreSQL seams below (Part II); the remaining seams are listed in §37.
+
+| Seam | Where | M1 behavior |
+|---|---|---|
+| Definitions, named scopes, aliases | `catalog/` (`DefinitionRegistry` file not created yet) | `Scopes` → 400; declared FacetIDs → 400 |
+| Path facets / cross-entity FoldIR (K8–K20) | `Planner.lower`, `FoldIR` | `422 FACET_FOLD_UNSUPPORTED` |
+| Staged hops (Opaque captures) | `ScopedRelationBuilder` | refused (500 `FACET_SCOPE_POLICY_VIOLATION`; the reason is logged, never sent) |
+| MySQL / MSSQL Terms, DistinctCount and Pivot key collation | `Shell-Templates-MySQL.js`, `-MSSQL.js` (`valueKey`) | dry-built only: keys group under a BINARY collation while a bucket's `DistinctSelectedValueList` Clause is evaluated by the list under the column's (case/accent-insensitive, PAD SPACE) collation — must be resolved (group under the column collation, or merge keys under it in post-processing) with a case-variant O2 fixture before those dialects execute (M2) |
+| Row-count prechecks (`MaxLiveRows`, `SQLiteMaxRows`, …) | `EngineLive` | not enforced (`Options.LIMITS_NOT_ENFORCED`; attach warns when one is configured); statements are bounded in rows returned instead (§5.3) |
+| Conditional disjunctive scan | `EngineLive` | per-Agg statements |
+| CostModel / Admission / Dedicated pool / worker thread | `EngineLive`, `Host.getExecutionDAL` | shared host DAL on the event loop |
+| Labels | post-processing | FK Terms labels done (§18.6); Pivot axis labels and label caching are later |
+| ResultCache / Generations / ChangeIntake | `Router` | always execute |
+| Records / Keys / Explain / GET Query / SSE | `routes/` | not mounted |
+| Agent, Standalone, Pushdown, FanOut, stores | — | not present |
+
+---
+
+## 18. Implementation notes (M1)
+
+Everything here is additive to the sections above; where it refines a rule the section is named.
+
+### 18.1 Query entry point
+
+- `RetoldFacetingService.query(pEntity, pBody, pRequest, fCallback)` / `queryInternal(…, { ForceEngine }, fCallback)` call back `fCallback(pError, pEnvelope, pMeta)`. The third argument is in-process only (never serialized): `pMeta = { Version, Engine, ScopeRepaired, Statements, Relations, BehaviorRuns, Variants }` — the route uses `ScopeRepaired` for `X-Retold-Facet-Scope-Repaired: 1`, the tests use the counters (Variant sharing).
+- Pipeline order is §2.1 exactly. `pContext.Deadline` is reset after step 2 to `start + min(Limits.TimeoutMS, NormalizedRequest.TimeoutMS)`. A stage that throws a non-facet error becomes a logged `FACET_INTERNAL` carrying the plan hash (`sha256(Entity | canonicalJSON(Facets))[0..12]`), never the message.
+- `Errors` lists facets in **request order** (planning errors and execution errors interleaved as the facets were requested), then `'#Total'` when the Total failed. A whole-request failure (§10.1) is re-created from the first entry with its `Detail`.
+- `execute()` with no Aggs (every facet failed planning and `Total: false`) runs nothing; the request then fails with the first facet error.
+
+### 18.2 Planner and FoldIR
+
+- `Planner.resolveFacets(pFacetSpec, pContext)` → descriptors (step 5): `Path` → 422 `FACET_FOLD_UNSUPPORTED` `{ Feature: 'PathFacet', Milestone: 1 }`; `Declared`, another entity, unknown or Sensitive column → 400 `FACET_UNKNOWN_FACET` `{ Facet }`.
+- `Planner.lower`: Fold not in `descriptor.Folds` → per-facet 400 `FACET_UNKNOWN_FOLD` `{ Facet, Fold, Folds }`; `Ranges` without `Ranges`, `Mode: 'Edges'` without `Edges`, an `Interval` the descriptor does not offer → per-facet 400 `FACET_REQUEST_INVALID` `{ Field, Facet, Reason }`. Terms `Top` defaults to `Limits.DefaultTop`; Pivot `Top` stays null (post-processing uses `MaxTop`). `FilterKey` = descriptor FilterKey for every single-field fold; `ClauseType = clauseTypeFor(Fold)`; `Selectable` = the fold is bucketed. Pivot `DisplayName` = the two names joined with `' × '`.
+- Every Dim carries `DataType` (DateBucket, NumericBucket and Range included).
+- `FoldIR.pivotAxisFor(pDescriptor, pFacetSpec)`: the axis facet's default fold mapped as in §5.2, except a `NumericHistogram`-default axis becomes a **Range** axis when the request carries `Ranges`, else a **Column** (Terms) axis when the facet lists `Terms` (integer columns), else per-facet 422 `{ Feature: 'NumericPivotAxis' }`.
+- Agg additions: `SelectedKeys` (Terms: `FacetClauses.selectedFrom(Agg, Owned).Keys`), `LabelLookup` (Terms on an FK with a label column and `Labels !== false`, else null). `DepSet = FoldIR.depSet(Agg, Variant, Catalog)` (PK, delete column, policy columns, dimension/measure columns, every kept conjunct field).
+- `'#Total'` is passed to the DisjunctivePlanner as `{ Key: '#Total', OwnedFields: [], FilterKey: null, Exclude: 'None' }`, so it is listed in `v0.Facets`.
+
+### 18.3 Engines and Router
+
+- `ShellTemplates.render` Terms: `fTopPlusOne = Top + 1` (`Top` null → `Limits.DefaultTop`) for every `Order`, `fMaxGroups = max(Top + 1, Limits.MaxTermsGroups)`, and `Agg.SelectedKeys` bound as `fS0…fSn` and OR-ed in through the `P0` slot (`' OR "r"."Key" IN (:fS0, …)'`, structural text built from bind names only), so a selected key ranked below `Top + 1` keeps its real count in Live exactly as in the Reference. DateHistogram binds `fMaxGroups = MaxDateBuckets + 2`, Pivot `fMaxGroups = CubeMaxGroups + 1`.
+- `Router.route`: `ForceEngine` → that engine (unknown → `FACET_INTERNAL`); otherwise the first registered engine whose `capable()` accepts every Agg, falling back to Live (which reports the Aggs it refuses per facet).
+
+### 18.4 Post-processing (contract Envelope)
+
+- Ranges: a range that overlaps an earlier one collects only what earlier ranges left (CASE semantics). Its bucket keeps the declared `Start`/`End`/`Label`, but its `Clause` selects the **effective** span (one interval), or is `null` when the effective span is empty or split (the bucket keeps its `Selection`). So O2 holds for every bucket that has a Clause.
+
+### 18.5 Version
+
+`Version = 'fv1:' + sha256( ModelVersion | Entity | canonicalJSON({ Facets, Total }) | canonicalJSON(Conjuncts[].{ Id, Pred }) | sorted '<Entity>=<Captures[Entity].Fingerprint>' | canonicalJSON(Principal.ScopeValues) | Engine | canonicalJSON(normalizeForComparison(Envelope)) )[0..16]` (§10.5 plus `Total`). `If-None-Match` (weak comparison; a list; `*`) equal to the Version → `304` with the standard headers and no body; because the representation is part of the Version, a 304 is only ever sent for an identical answer.
+
+### 18.6 FK labels
+
+For each Terms facet with a `LabelLookup`, `RetoldFacetingLabelResolver` reads the target **as the principal**: the target must be `Host.isFacetable` + `Catalog.getFacetable` + `Authorizer.canRead`, and both the key and label columns must be catalog columns (never Sensitive). Query: `Host.getExecutionDAL(Target).query` projected to exactly `[ KeyColumn, LabelColumn ]`, `KeyColumn IN (<bucket keys>)` rendered by `FilterAST.applyToQuery` inside the `FacetFenceOpen`/`FacetFenceClose` fence, an **explicit** depth-0 `<DeleteColumn> = 0` (`FacetSoftDelete`, D-37) when the target has a delete column, then `ScopeCapture.capture(…, 'Inherit')` (the target's `Reads-QueryConfiguration` + ScopeGuard), then `doReads`. Keys found get `Label = String(<label column>)`, `LabelResolved: true`; keys not visible (another tenant's parent, a soft-deleted or missing row, a failed or Opaque capture) keep `Label = String(Key)`, `LabelResolved: false` — never an error, never an unscoped read. `Chart.Labels` follow. Labels are post-processing, so Live and Reference envelopes carry the same labels. Catalog descriptors (and Describe) now say `Labels: true` for FK facets with a label column.
+
+### 18.7 Security services
+
+- `PrincipalResolver.resolve` decides 401 **without looking at whether the route entity exists or is facetable** (06 §5.2 / §11): no policy → pass; a policy and an `Anonymous` principal → 401 unless the root entity is in `Catalog.AllowAnonymous` (Describe without an entity: unless that list is non-empty); a policy and any other principal → 401 when ANY policy column (`Policy.Column`, every `PersonalScopes` column, every `Required` column) holds an unset value. The 401 carries no Detail (the column names are logged).
+- `Authorizer.check(pContext, pEntities, fCallback)` → `{ Allowed, Denied }` (`Host.isFacetable && Catalog.getFacetable && canRead`); the root (first entity) denied → `fCallback(404 FACET_UNKNOWN_ENTITY)`. `Authorizer.canRead(pContext, pEntity)`: on a policy host an Anonymous principal reads only `Catalog.AllowAnonymous` entities; otherwise it consults `Host.getAuthorizer().canRead(E, Principal)` when a host authorizer exists (null on plain RDS → true), failing closed if it throws.
+- Every 5xx client form (`toResponse` / `toEntry`) carries only the code's canonical Message and no Detail (a `FACET_SCOPE_POLICY_VIOLATION` keeps its rule list on the Error for the log and in-process callers); the route logs a non-canonical 5xx message.
+- Behavior errors map through `FacetErrors.fromBehaviorError` on Live (ScopeCapture) and the Reference alike.
+
+### 18.8 Describe
+
+`describe(pEntity, pPrincipal, pContext)` → `{ ContractVersion, ModelVersion, Role, ScopeAssurance (deployment-wide), TimeZones, Limits { MaxFacets, MaxTop, MaxBuckets, MaxDateBuckets, MaxHops, TimeoutMS }, Freshness { DefaultMode, MaxLagMS }, Engines { Live { Available, Dialect } }, Entities { E: Catalog.describe(E, Principal, fCanRead) } }` — only entities `Authorizer.canRead` allows, and an FK `Target` only when the principal can read it; the per-entity forms (`/Describe/:Entity`, `/:Entity/Describe`) return the same shape with one entry and `Entity: E` (unknown / not facetable → 404). `describeRequest` resolves the principal (401 rules above) and gates the entity like a query.
+
+### 18.9 attach
+
+`attach()` also: refuses reserved entity names (D-17) from `Host.reservedEntityNames()` (DALs, endpoints, model tables — the one check; the installer relies on it); warns about configured `LIMITS_NOT_ENFORCED`; runs `ShellTemplates.validateAll()` and refuses to boot on any error; registers `Host.onModelChanged(m => rebuildCatalog(m))` (Graph then Catalog; a failed rebuild is logged and the previous catalog stays). `rebuildCatalog(pModel)` is public.
+
+
+---
+
+# Part II — Milestone 2: cross-entity folds, definitions, named scopes, PostgreSQL
+
+> **Binding for M2.** Part II wins over Part I wherever they conflict; §19.2 lists every Part I rule it changes. Where Part II and the design set disagree, Part II wins for M2 and §36 lists each deliberate deviation. The M2 builders are **A** (definitions, paths, post-processing), **B** (binding, clause compilation, lowering, variants and the cube plan), **C** (Live SQL, per-hop scope, Staged, cube execution), **D** (fixtures, Reference engine, harness), **E** (PostgreSQL) and the **wiring** agent (service pipeline, routes, end-to-end tests); §35 is the file ownership table.
+
+---
+
+## 19. Overview, precedence, services, options, context
+
+### 19.1 What M2 adds
+
+| Area | Addition | Owner |
+|---|---|---|
+| Definitions | `RetoldFacetingDefinitionRegistry` + `catalog/Facet-Definition-Schema.json`: definitions files (`FormatVersion`, `Aliases`, `Expressions`, `Scopes`, `Facets`), validated at load, invalid entries disabled (§20) | A |
+| Paths | `RetoldFacetingGraph.resolvePath`: `>E.c`, `<E.c`, `=E.c` (co-reference), `@Alias`, step objects; resolved at load, never solved at query time (§21) | A |
+| Folds | K8 PathTerms, K9 BridgeTerms (`PivotDistinct`), K10 PathSemiJoin, K11 AntiPath (incl. composite `Correlate`), K12 ChildRollup, K17 UnionOfPaths (`Any`), K18 TuplePivot, K19 HavingCount, K20 ExistsSplit. K13 Quantified, K15 Computed, K16 UnionOfSources: `422 FACET_FOLD_UNSUPPORTED` `{ Feature, Milestone: 2 }` | B lowers, C/D execute |
+| Filters | Named scopes (request `Scopes` and the `NamedScope` clause), `$CurrentUser.*` / `$Scope.*` / `$Now` / `$Today` / `$StartOf.*` / `$Param.*`, `BindHash`; `InternalJoin*` / `ExternalJoin*` clauses compile to `Exists` conjuncts (§22, §23) | B |
+| Plans | Variants keyed by kept conjuncts **and** the definition `Where`; the conditional disjunctive scan (cube, §25); Staged hops (§26.3) | B plans, C executes |
+| Scope | Every hop is a Scoped Relation (own DAL, own behaviors, ScopeGuard, explicit `Deleted`); `Scope: 'TenantOnly'` hops (§26.2) | C |
+| Routes | `POST /1.0/Facet/:Entity/Records`, `…/Records/:Begin/:Cap`, `…/Records/Count`, `…/Keys`, the `…/Scope/:Scope/…` forms; `Records` in the Query body (§28) | wiring |
+| Oracles | Reference engine across entities (each hop read through **its** list as the same principal, §27.2); O5 plan forms (§34) | D, C |
+| Fixtures | ProjectTrack and LabTrack (two tenants, owner scope on `LabForm`, global lookups), definitions files for E1/E2/E3 (§31) | D |
+| PostgreSQL | dedicated `rfs-test-postgres` container, `Provider: 'PostgreSQL'` harness hook, execution of the PG shells, `npm run test:pg` (§33) | E |
+
+### 19.2 Part I rules changed by Part II
+
+| Part I | M1 rule | M2 rule |
+|---|---|---|
+| §2.1 | Principal → Shape → Gate → Filter → Plan → Execute → Post | Principal → Shape → Gate → **Bind** (§22.6) → Filter → Plan → Execute → **Records** (a Query body with `Records`, §28.3) → Post. Gate also covers every entity the request filter references, before their fields are validated (§19.6); the Plan stage puts the plan and its `Cubes` on the context for the engines; the Records / Count / Keys entry points run Principal → Shape → Gate → Bind → Filter → Params → `planBase` → Live (§28.3) |
+| §2.2 | context fields | + `Bind`, `PlanForm`, `Mode`, `Plan`, `Cubes`, `RecordsResult`; `Now` may be pinned in-process (§19.5) |
+| §3 | `Scopes`, `NamedScope` → 400; `Params`, `Records` → 422 | accepted (§28.2, normalizer owned by wiring); `Selections`, `FilterExperience`, `Definition` still refused (`Milestone: 2`, `403` for `Definition`) |
+| §3 / §11.2 | `Path` FacetIDs → 422; `Declared` → 400 | resolved through the registry (§20.8) |
+| §4.1 | column-only `Pred` | + `Exists` / `NotExists` / `HavingCount` nodes (bound, paths resolved) in conjuncts that come from scopes and join clauses (§23.2) |
+| §4.2 | Conjunct | + `Shape`, `Binds`, `Entities`; `Origin.Kind` `'Scope'` and `'Join'` (§23.1) |
+| §4.4 | M1 clause table; `InternalJoin*` / `ExternalJoin*` / `NamedScope` refused | compiled (§23.4); `M2_CLAUSE_TYPES` supersedes `M1_CLAUSE_TYPES` |
+| §4.5 | `applyToQuery` / `toFilterString` render every conjunct | refuse `Shape: 'Path'` conjuncts (`FACET_INTERNAL` / `FACET_FILTER_INVALID { Reason: 'PathConjunct' }`) (§23.6) |
+| §5.1, §5.2 | Agg, Dims | additions §24.3, §24.5 |
+| §6 | Variants by kept conjunct set | by (kept set, `WhereHash`); + `ColumnConjuncts`, `PathPred`, `Where` (§25.1) |
+| §7.1, §7.2 | `Rel.Where` refused; `Scope` only `'Inherit'`; Opaque refused | `Where` rendered in its own fence, `'TenantOnly'`, Staged (§24.1, §26) |
+| §8.1, §8.2 | `ScopeMode` only `'Inherit'` | `'TenantOnly'` (§26.2) |
+| §9.1 | `Captures` for the pivot | for every captured entity (pivot and hops); + `Cubes`, `Staged` counters (§26.6) |
+| §9.3 | Reference over one list | across entities (§27.2) |
+| §10.1, §10.2 | envelope, FacetResult | additions (§29) |
+| §10.5 / §18.5 | Version | + `BindHash`; `ModelVersion` covers the definitions (§30.2) |
+| §13 | error table | §19.7 |
+| §14 | harness | §32 |
+| §17 | seams | §37 |
+
+Everything in Part I that is not listed here still holds (fences, explicit soft delete, harvest renaming, shells never bind arrays, canonical bucket math, every value bound, every identifier from the catalog).
+
+### 19.3 New files and services (skeletons exist; every service is registered in `SUB_SERVICES`)
+
+| File | Export (`serviceType`) | Owner |
+|---|---|---|
+| `source/catalog/Retold-Faceting-DefinitionRegistry.js` | `RetoldFacetingDefinitionRegistry` (+ statics `DEFINITION_SCHEMA`, `FORMAT_VERSION`) | A |
+| `source/catalog/Facet-Definition-Schema.json` | draft-07 JSON schema of a definitions file | A |
+| `source/plan/Retold-Faceting-Binder.js` | `RetoldFacetingBinder` (+ `TOKEN_PATTERN`, `PARAM_TYPES`) | B |
+| `source/engine/live/Retold-Faceting-PredicateCompiler.js` | `RetoldFacetingPredicateCompiler` (+ `FRAGMENT_PREFIX`) | C |
+| `source/engine/live/Retold-Faceting-StagedKeys.js` | `RetoldFacetingStagedKeys` | C |
+| `source/engine/live/Retold-Faceting-CubeExecutor.js` | `RetoldFacetingCubeExecutor` | C |
+| `test/support/Facet-Harness-Providers.js` | provider hook (SQLite implemented; PostgreSQL by E) | E |
+| `test/support/Facet-Docker-Postgres.js` | the `rfs-test-postgres` container helper | E |
+| `test/fixtures/ProjectTrack-Model.json`, `LabTrack-Model.json` | domain models (08 §1), complete | D |
+| `test/fixtures/ProjectTrack-Seed.js`, `LabTrack-Seed.js` | seed modules (`model()`, `FACETING_OPTIONS` implemented; `generate` / `build` by D) | D |
+| `test/fixtures/ProjectTrack-Definitions.json`, `LabTrack-Definitions.json` | E1 / E3 definitions + coverage facets (schema-valid) | D |
+
+Registration order (`SUB_SERVICES`): … Catalog, **DefinitionRegistry**, RequestNormalizer, FilterValidator, ClauseCompiler, FilterAST, DisjunctivePlanner, FoldIR, **Binder**, Planner, … ScopedRelationBuilder, **PredicateCompiler**, **StagedKeys**, **CubeExecutor**, EngineLive, … . A builder may add a further service only by adding it to `SUB_SERVICES` and to `test/Facet-Smoke_tests.js` in the same change. Optional helper modules a builder may add without registration: `source/plan/Retold-Faceting-Lowering.js` (B, pure functions or a service), `source/engine/live/Retold-Faceting-StatementComposer.js` (C).
+
+Bookstore-Seed now also exports `generate(pOptions)` (rows without a database), `GENERATION_ORDER`, `insertRows`, `countRows`; `build()` is unchanged in behavior.
+
+### 19.4 Options (M2)
+
+```javascript
+Definitions: { Path: 'facets/' | false, Files: [ '<path>' … ], Objects: [ <definitions object> … ], AllowAdHoc: false },
+Execution:   { …, Cube: 'Auto' | 'Always' | 'Never', Staged: 'Auto' | 'Always' | 'Never' },
+Limits:      { …, MaxHops: 4, MaxExistsDepth: 4, MaxScopeDepth: 3, MaxScopesPerRequest: 16, MaxStagedKeys: 50000,
+               MaxRecordsPage: 500, MaxRecordsOffset: 10000, MaxKeys: 50000 },
+Cache:       { …, NowBucketMS: 60000 },          // $Now granularity (§22.1), even with the cache off
+Scope:       { …, TrustedOpaque: [ 'Entity' … ],  // entities whose Opaque capture may run Staged (§26.3)
+               TrustPostOperation: [ 'Entity' … ], PostOperationSafeColumns: { Entity: [ … ] } }   // the read-side behavior audit (§8.1)
+```
+
+`MaxExistsDepth`, `MaxStagedKeys`, `MaxRecordsPage`, `MaxRecordsOffset`, `MaxKeys` moved from `LIMITS_NOT_ENFORCED` into `DEFAULTS.Limits`; each is enforced by its owner (§35). `AllowAdHoc` stays ignored: inline `Definition` is always `403 FACET_ADHOC_FORBIDDEN` in M2.
+
+### 19.5 Request context additions (`newContext`)
+
+```javascript
+{
+	…M1 fields,
+	Now: '2026-10-08T15:02:11.120Z',          // in-process callers may pin it: queryInternal(…, { Now: '2026-10-08T12:00:00Z' })
+	PlanForm: { Cube: 'Auto', Staged: 'Auto' }, // Execution.Cube / .Staged, overridable in-process only: queryInternal(…, { PlanForm: { Cube: 'Never' } })
+	Bind: null,                                 // BindContext (§22.1), set by the Bind stage
+	Mode: 'Query',                              // 'Query' | 'Records' | 'Count' | 'Keys' — newContext's 4th argument, set by the entry point
+	Plan: null,                                 // the Planner.plan (or planBase) result, set by the Plan stage
+	Cubes: [],                                  // Plan.Cubes: EngineLive reads them here (§25.2)
+	RecordsResult: null                         // { Records, Dropped, Keys, Captures } of a Query body's Records (§28.4)
+}
+```
+
+`ForceEngine`, `PlanForm` and `Now` are reachable only through `pInternalOptions` (tests, the fixture CLI), never from a client; `Mode` only through the entry point (`query` / `records` / `count` / `keys`). Engines create `Memo.HopRows` (Reference), `Memo.Staged` (Live) and `Counters.StagedKeys` lazily (`newContext` keeps the M1 `Memo` shape).
+
+### 19.6 The per-entity gate
+
+`RetoldFacetingAuthorizer.canFacet(pContext, pEntity)` (implemented) = `Host.isFacetable(E, Principal) && Catalog.getFacetable(E) && canRead(E)`; `check()` uses it. Every M2 caller gates with it:
+
+| Entity referenced by | When gated | Failure |
+|---|---|---|
+| the route | stage Gate (M1) | `404 FACET_UNKNOWN_ENTITY` |
+| the request filter: every entity of a named scope's predicates (scope entity and every hop), every join-clause target and join table | inside `FilterAST.build` **before** that entity's fields are validated (`pInput.CanFacet`, §23.3) | whole request `403 FACET_FORBIDDEN`, no Detail |
+| one facet only: definition `Where`, dimension paths, tuple sides, child relations | Planner, per facet (`Agg.Entities`) | per facet `403 FACET_FORBIDDEN`, no Detail |
+| label targets, selected-zero key targets | LabelResolver (M1 §18.6) | unlabeled keys |
+
+Unknown, not facetable and unreadable entities are indistinguishable at every row.
+
+### 19.7 Errors in M2
+
+| Code | Status | M2 use |
+|---|---|---|
+| `FACET_UNKNOWN_SCOPE` | 400 | unknown, disabled, or wrong-entity scope (`Detail: { Scope }`); same body for each |
+| `FACET_UNKNOWN_FACET` | 400 | unknown or disabled declared facet / sibling; an unresolvable path FacetID |
+| `FACET_PARAM_INVALID` | 400 | `Params` fail a declared schema (`Detail: { Scope \| Facet, Param, Reason }`; never the value) |
+| `FACET_FILTER_INVALID` | 400 | an integer column compared with a number outside the column's range — 32-bit unless `Size: 'bigint'` — from a clause, a FilterString or a bound value (`Reason: 'InvalidNumber'`: never a statement the database fails), join clause not on a declared edge (`Reason: 'UndeclaredJoin'`), a `NamedScope` clause with `Junction: 'OR'` or a `GUIDGroup` (`Reason: 'NamedScopeJunction'`), a path conjunct the list syntax cannot carry (`Reason: 'PathConjunct'`, `toFilterString` only) |
+| `FACET_UNKNOWN_FIELD` | 400 | a join clause's remote field (`Detail: { Field, Entity }`, after that entity passed the gate) |
+| `FACET_FORBIDDEN` | 403 | §19.6 |
+| `FACET_UNAUTHENTICATED` | 401 | also: a `$CurrentUser.*` / `$Scope.*` token binds an unset value (§22.4) |
+| `FACET_FOLD_UNSUPPORTED` | 422 | K13/K15/K16 and the other `Supported: false` features (§20.3 stage 12) with `Detail: { Feature, Milestone: 2 }`; Live refusals keep M1 behavior |
+| `FACET_PATH_TOO_BROAD` | 422 | a Staged key set over `MaxStagedKeys` (`Detail: { Limit: 'MaxStagedKeys', Suggest: { Engine: 'ClickHouse' } }`) |
+| `FACET_TOO_LARGE` | 422 | `MaxRelationsPerRequest`, `MaxBehaviorRunsPerRequest`, `MaxScopesPerRequest` |
+| `FACET_REQUEST_INVALID` | 400 | Records/Keys page limits (`Detail: { Field: 'Cap' \| 'Begin', Max }`), bad `Sort` |
+| `FACET_DEFINITION_INVALID` | (500) | **load-time only** (boot log, `disabled()`, Status); never a request error |
+| `FACET_SCOPE_POLICY_VIOLATION` | 500 | also: a refused `TenantOnly` relaxation, an untrusted Opaque hop |
+
+Errors raised by the request filter (scopes, join clauses, params, binding) fail the whole request; errors raised by one facet's definition fail that facet only (`Errors[Key]`), exactly like M1 per-facet errors.
+
+---
+
+## 20. The DefinitionRegistry (A)
+
+### 20.1 Sources and load
+
+- **Sources**, in this order: every `*.json` file directly under `Definitions.Path` (sorted by file name; not recursive; `Path: false` or a missing directory loads nothing — a configured `Path` other than the default that is missing or not a directory adds the warning `DEFINITIONS_PATH_MISSING` (Kind `'File'`, `Source` = the path) and logs at warn; the default `'facets/'` missing logs at info), then each `Definitions.Files` entry (absolute, or relative to `Path`, or to `process.cwd()` when `Path` is false), then each `Definitions.Objects` entry (a parsed object; its source name is `#object<i>`). Files are read synchronously at boot (`attach`) and on reload.
+- **Atomic swap.** `load()` builds new maps and replaces the old ones only when it finishes; a reload that throws keeps the previous registry (logged).
+- **Names are global.** A scope, facet or alias name defined in two sources disables **both** (`Reason: 'DuplicateName'`). A declared alias may not reuse a synthetic bridge alias name (`'AliasShadowsBridge'`).
+- **Order of boot** (wiring, in `rebuildCatalog`): `Graph.rebuild(model)` → `Catalog.rebuild(model, Host)` → `DefinitionRegistry.load(Options.Definitions)` → `Catalog.refreshModelVersion()` (A adds it: ModelVersion material + `definitionsHash()`). A model reload re-runs the same sequence on the retained sources.
+- `pEnvironment` defaults: `Graph = fable.RetoldFacetingGraph`, `Catalog = fable.RetoldFacetingCatalog`, `Policy = fable.RetoldFacetingService.Host.getScopePolicy()` (or `{ Kind: 'None', PersonalScopes: {} }` without a host), `Options = this.options`.
+
+### 20.2 What the schema checks vs what the registry checks
+
+`Facet-Definition-Schema.json` checks **shape only** (types, enums, identifier and step-string patterns, required keys, no unknown keys). The registry validates it with a **built-in** validator implementing exactly the keywords the schema uses (`type const enum pattern properties propertyNames required additionalProperties items minItems maxItems minLength maxLength minimum oneOf anyOf $ref`) — no runtime dependency. `test/Facet-Definitions_tests.js` cross-checks the built-in validator against `ajv` (6.x, umbrella `node_modules`, test-only) on every fixture and on negative cases. Everything else is semantic and checked against the graph, the catalog and the policy (§20.3).
+
+The schema is applied **per entry**: the file envelope (`FormatVersion`, section types) first — a bad envelope disables every entry of that source (`Kind: 'File'`); then each alias against `#/definitions/Path`, each scope against `#/definitions/ScopeDefinition`, each facet against `#/definitions/FacetDefinition`.
+
+### 20.3 Validation stages (in order; the first failure disables the entry)
+
+1. **Schema** (§20.2).
+2. **Names.** `Facet: '<Home>.<Name>'`: `Home` is an entity in the catalog (host-facetable); `<Name>` is not a column of `Home` (`'NameShadowsColumn'`); for an entity pivot `Pivot` (default `Home`) equals `Home`; for a TuplePivot `Home` defaults to the first `From` entity and must be one of them. Scope names `'<Entity>.<Name>'` must have `<Entity>` equal to the scope's `Entity` (`'ScopeEntityMismatch'`). Sibling names are identifiers, unique per facet; sibling FacetIDs are `'<Facet>/<Name>'`.
+3. **Aliases.** Spliced recursively; unknown → `'UnknownAlias'`; a cycle disables every alias in it (`'AliasCycle'`). Graph bridge aliases (`'Book~Author'`) are always available.
+4. **Paths.** Every path through `Graph.resolvePath` (§21); errors carry `Step` (the index after splicing).
+5. **Predicates.** Each `Field` is a catalog column of the entity the predicate is evaluated on (`Catalog.column` non-null; Sensitive and unknown are both `'UnknownField'`), never the delete column (`'DeletedField'`), never a policy column (`'PolicyField'`: scope is the policy's job); `NULL`/`NOTNULL` take no `Value`; `IN`/`NIN` take a non-empty array or a list-typed `$Param`; every other op takes one scalar or a scalar token. Literal values are coerced with `ClauseCompiler.coerceValue` (`'InvalidValue'`). A string `Value` starting with `$` must be a valid token (§22.2) (`'UnknownToken'`); `$Param.<Name>` must be declared by the enclosing scope or facet (`'UndeclaredParam'`); a list `$Param` under a scalar op is `'ParamShape'`. `Correlate` pairs: the outer field (optionally `alias.Field` in a TuplePivot) is a column of the outer entity, the inner field a column of the path's last entity, both numeric-class or both non-numeric (`'CorrelateType'`).
+6. **Scope references** `{ "Scope": X, "Params"? }`: X exists and is enabled (`'UnknownScope'`, or `'DependsOnDisabled'`), X's `Entity` equals the entity the reference is evaluated on (`'ScopeEntityMismatch'`), the reference's `Params` satisfy X's schema (literals, or tokens of the enclosing definition; missing without `Default` → `'ScopeParamMissing'`), expansion depth ≤ `Limits.MaxScopeDepth` (`'ScopeTooDeep'`), no cycle (every scope in a cycle is disabled, `'ScopeCycle'`).
+7. **Existence depth.** The number of nested existence subqueries after lowering (one per path step, one per `CheckParent`, across nested `Exists`/scope expansions) ≤ `Limits.MaxExistsDepth` (`'ExistsTooDeep'`).
+8. **`TenantOnly`** only on steps of `Exists` / `NotExists` / `HavingCount` / `ExistsSplit` paths (`'TenantOnlyNotAllowed'` on dimension, label, child-rollup or tuple paths), with a non-empty `ScopeReason` (`'TenantOnlyNeedsReason'`), on an entity with a `PersonalScopes` entry in the policy (`'TenantOnlyNeedsPolicy'`) **that keeps another required column** (`'TenantOnlyNeedsTenant'`: `Policy.requiredFor(E, null)` minus the personal column must be non-empty, and the personal column may be neither the policy `Column` nor one of `Required[E]` — otherwise the relaxation would read every tenant). No `$Param` may be compared anywhere under a path holding a `TenantOnly` step (its step Wheres, the existence `Where`, nested existence nodes): `'TenantOnlyParam'` (a client-chosen value compared with other users' rows would let a client binary-search their private columns, 06 §4.4); literals and `$CurrentUser` / `$Scope` / `$Now` tokens are fine.
+9. **CheckParent forcing** (§21.4) — a warning `'CheckParentForced'`, not an error.
+10. **Dimensions** (§20.5).
+11. **TuplePivot** (§20.6).
+12. **Unsupported in M2** — the entry loads with `Supported: false, Unsupported: { Feature, Milestone: 2 }`; a request that uses it gets `422 FACET_FOLD_UNSUPPORTED` with that Detail (per facet; whole request for a scope): `All` / `AllNonEmpty` (`'Quantified'`), any `Expr` or `Expressions` use (`'Computed'`), `Pivot.Union` (`'UnionOfSources'`), `Mode: 'Log'` (`'LogMode'`), `CountMode: 'Approx'`, a declared `CountMode: 'KeyDistinct'` or `DistinctKey` (`'CountMode'`; a TuplePivot's declared `'Rows'` canonicalizes to `'KeyDistinct'` over its `Key`), `Measures` other than `[ { Op: 'count' } ]` (`'Measures'`), `ChildRollup` with `Agg ≠ 'count'` (`'ChildRollupAgg'`) or a `Child.Path` that is not one `<` step (`'ChildRollupPath'`), `HavingCount` whose path is not one `<` or `=` step (`'HavingCountPath'`), `Exclude: 'Group:…'` / `ExcludeGroup` (`'ExcludeGroup'`), a path predicate inside a lookup step's `Where` (`'LookupPathWhere'`), a 2-D declared facet over a TuplePivot (`'TuplePivotPivot'`), a dimension `TimeZone` other than the storage time zone (`'TimeZone'`).
+13. **Ignored with a warning:** a `Catalog` section (`'CatalogSectionIgnored'`), `Elide: true` (`'ElideIgnored'`: M2 never elides a hop, §36), `Engines`, `Freshness`, `Limits`, `Visibility`, `Records`, `Missing`, `ClauseType`, `Selectable` (`'Ignored:<Key>'`).
+
+### 20.4 Disabled entries and warnings
+
+```javascript
+// RetoldFacetingDefinitionRegistry.disabled() → [ DisabledEntry ]
+{
+	Kind: 'Facet' | 'Scope' | 'Alias' | 'File',
+	Name: 'Project.MyProjects',
+	Source: '/abs/path/facets/Project.json' | '#object0',
+	Errors:
+	[
+		{ Code: 'FACET_DEFINITION_INVALID', Reason: 'UnknownField', Pointer: '/Scopes/Project.MyProjects/Where/0/Any/0/Exists/Where/1',
+		  Step: 0, Entity: 'ProjectMembership', Field: 'Rol', DependsOn: null }
+	]
+}
+// warnings() → [ { Code: 'CheckParentForced' | 'ElideIgnored' | 'CatalogSectionIgnored' | 'Ignored:<Key>', Kind, Name, Source, Pointer } ]
+```
+
+Each disabled entry is logged once (`fable.log.error`, code, source, pointer, reason; never a value). Everything that references a disabled entry is disabled with `Reason: 'DependsOnDisabled', DependsOn: '<name>'`. A request naming a disabled entry gets the same answer as an unknown one (§19.7).
+
+Reasons beyond the ones §20.3 / §21 name (as built): `BandEdges`, `TenantOnlyNeedsTenant`, `TenantOnlyParam` (M2 review), `UnknownEntity` (an entity on a path, a scope or a tuple side that is not in the catalog — a load error, not a request-time 403; label paths are exempt), `HomeMismatch`, `PivotMismatch`, `InvalidPath`, `InvalidStep`, `TokenType` (a token whose value type cannot reach the column), `ParamSchema`, `ScopeParamInvalid`, `DimensionShape`, `FieldType`, `FieldNotFoldable`, `LabelsPath`, `TupleAlias`, `TupleHome`, and for whole sources `Unreadable`, `InvalidJSON`, `Internal`. A name defined twice is disabled everywhere it appears; every member of an alias or scope cycle is disabled. `validate(pObject)` checks the object on its own (it cannot reference scopes or aliases already loaded).
+
+### 20.5 Dimension rules (per `Kind`)
+
+| Kind | Requires | Rules |
+|---|---|---|
+| `Terms` on a pivot column | `Field` | a catalog column of the pivot (any column the auto catalog could fold: not PK/GUID/Sensitive/Text/long String) |
+| `Terms` / `DateHistogram` / `NumericHistogram` / `Ranges` over a **to-one** path (K8) | `Path` (only `>` steps) + `Field` on the last entity | Terms: any non-Sensitive catalog column of the last entity **including its primary key** (bucketing by the target row, e.g. 08 §4.2 `ByQueue` on `IDLabQueue`); DateHistogram: a DateTime column; NumericHistogram / Ranges: a numeric column, **never a Boolean** (`'FieldType'`: a production PostgreSQL BOOLEAN has no min / max / arithmetic; Booleans are Terms / Missing, as the auto catalog folds them); `LabelField` (Terms only) a column of the last entity → `LabelLookup { Entity: last, KeyColumn: Field, LabelColumn: LabelField }` |
+| `Terms` over a path with any `<` or `=` step (K9) | `Path` + `KeyField` (any non-Sensitive column of the last entity, its primary key included); optional `Where` (on the last entity), `LabelField` | forces `CountMode: 'PivotDistinct'` (an explicit `'Rows'` is an error `'CountModeRows'`); `LabelField` → `LabelLookup` on the last entity keyed by `KeyField` |
+| `ChildRollup` (K12) | `Child: { Path: [ '<C.fk' ], Agg: 'count', Where? }`, `Edges` strictly ascending positive integers **starting at 1** (`'BandEdges'`: band 0 is exactly "no visible child", so a count of 1 is never filed under 'None') | band keys 0..n (§24.9) |
+| `ExistsSplit` (K20) | `Path`, optional `Where`, `Correlate`, `Labels: { "true", "false" }` | keys `1` (exists) and `0`; labels default `'Yes'` / `'No'` |
+| any, in a TuplePivot | `Field: '<alias>.<Column>'` | the alias's primary key or the column itself is in `Key` (so the dimension is a function of the tuple: single-valued) (`'TupleDimensionNotKeyed'`); `Path` not allowed (`'TuplePath'`) |
+
+`Labels: { Path: [ '>E.c' … ], Field }` on a Terms dimension (a to-one path from the dimension's entity — the pivot, or the tuple side's entity — to the label entity, whose last step's target column equals the dimension's key) → `LabelLookup { Entity: <path To>, KeyColumn: <last step's To column>, LabelColumn: Field }`. `Top`, `Order`, `Missing`, `Interval`, `EmptyBuckets`, `Mode` (`'Nice'`/`'Edges'`), `Buckets`, `Edges`, `OpenEnded`, `Ranges` mean what they mean for auto facets and are the defaults a request may override. A facet with two `Dimensions` is a 2-D Pivot over the declared dims (each must be single-valued: no K9, K12 or K20 axis, `'PivotAxis'`).
+
+### 20.6 TuplePivot rules (K18)
+
+`From` has 2–4 sides with unique aliases (`^[a-z][a-z0-9]{0,7}$`), entities in the catalog; side `Where` is evaluated on that side's entity (scope references allowed); **every** side must be reachable from the Home side through Join-related `On` pairs — one column `Join`s the other side's primary key, or both columns `Join` the same target primary key (co-referencing FKs, 08 §4.3) — else `'TupleOnNotJoined'` with the unreachable side's pointer (`/Pivot/Tuple/From/<i>`; a side with no pair or only non-join pairs is a near-cartesian product); other pairs are plain equalities; `Key` lists `alias.Column` pairs; `Home` is the route entity and must be a `From` entity (the first side with that entity is the **Home side**; it may be declared anywhere in `From` — the Planner lowers the sides Home first, then in connectivity order, §24.4). A declared `CountMode: 'Rows'` canonicalizes to `'KeyDistinct'` (distinct `Key` tuples) with the load warning `CountModeCanonicalized`; Describe and every FacetResult report `CountMode: 'KeyDistinct'`. TuplePivots are server-authored only (definitions files). Facet-level `Where` predicates use `From: '<alias>'` to start a path at a side (default: the Home side) and `Correlate` outer fields as `'<alias>.<Column>'` (default alias: the path's `From`).
+
+### 20.7 Canonical forms (what the registry serves)
+
+**CanonicalPred** (unbound): Part I `Pred` plus existence nodes; every path resolved; every scope reference inlined; `Any` → `Or`; `Not` pushed down (operator negation `EQ↔NE GT↔LE GE↔LT LK↔NLK IN↔NIN NULL↔NOTNULL`, De Morgan, `Exists↔NotExists`, `HavingCount` op negation `EQ↔NE GE↔LT GT↔LE`); a `Where` array is an `And` (a one-item array is the item); `$`-strings become `Bind` leaves.
+
+```javascript
+{ Field: 'Role', Op: 'IN', Value: [ 'Owner' ] }                      // literal, coerced by the column DataType
+{ Field: 'IDUser', Op: 'EQ', Bind: '$CurrentUser.IDUser' }            // bound later by the Binder (never a Value and a Bind)
+{ And: [ … ] }   { Or: [ … ] }
+{ Exists:    { From: null | '<tuple alias>', Path: <PathPlan>, Where: <CanonicalPred> | null, Correlate: [ { Outer: { Alias: null | 'r', Field: 'IDLabFormType' }, Inner: 'IDLabFormType' } ] } }
+{ NotExists: { …same… } }
+{ HavingCount: { From, Path, Where, Correlate, Op: 'GE', Value: 3 } }
+```
+
+`Exists.Where` is evaluated on `Path.To`; each `PathPlan` step may carry its own `Where` (evaluated on that step's target).
+
+**CanonicalScope**
+
+```javascript
+{
+	Scope: 'Project.MyProjects', Entity: 'Project', Description: '…',
+	Params: { Roles: { Type: 'EnumList', Values: [ 'Owner', 'Lead', 'Member', 'Reviewer' ], Default: [ 'Owner', 'Lead', 'Member' ] } },
+	Where: <CanonicalPred>,                 // the And of the declared Where items
+	Entities: [ 'Project', 'ProjectMembership' ],   // every entity it reads (gate list)
+	Binds: [ '$CurrentUser.IDUser', '$Param.Roles' ],
+	Relaxed: false,                         // any TenantOnly step
+	Supported: true, Unsupported: null,
+	DefinitionHash: 'dh:…', Source: '…'
+}
+```
+
+**CanonicalFacet** (declared facets and each sibling; also the synthesized PathAuto facets)
+
+```javascript
+{
+	Facet: 'MaterialIntakeRequirement.MyFormsToDo/ByQueue', Origin: 'Declared' | 'Sibling' | 'PathAuto', SiblingOf: 'MaterialIntakeRequirement.MyFormsToDo' | null,
+	Entity: 'MaterialIntakeRequirement',            // = Home = the route entity
+	Version: 1, Title, Description, DisplayName,
+	Pivot: { Kind: 'Entity', Entity: 'MaterialIntakeRequirement' }
+	     | { Kind: 'Tuple', Sides: [ { Name: 'i', Entity: 'MaterialIntake', Where: <CanonicalPred>|null }, … ],
+	         On: [ { Left: { Name: 'i', Field: 'IDMaterialType' }, Right: { Name: 'r', Field: 'IDMaterialType' } } ],
+	         Key: [ { Name: 'i', Field: 'IDMaterialIntake' }, { Name: 'r', Field: 'IDLabFormType' } ], Home: 'i' },
+	Where: <CanonicalPred> | null,                  // W_def, never excluded
+	Dimensions: [ <CanonicalDim> ],                 // 1, or 2 for a declared Pivot
+	Fold: 'Terms' | 'DateHistogram' | 'NumericHistogram' | 'Ranges' | 'ChildRollup' | 'ExistsSplit' | 'Pivot',
+	Folds: [ … ],                                   // folds a request may ask for (PathAuto: the target descriptor's bucketed folds)
+	CountMode: 'Rows' | 'PivotDistinct' | 'KeyDistinct',   // TuplePivot → 'KeyDistinct' (distinct Key tuples), K9 → 'PivotDistinct'
+	Exclude: 'Self' | 'None' | [ … ], FilterKey: '…',       // FilterKey default: §23.5
+	Params: { … }, Entities: [ … ], Binds: [ … ],
+	Relaxed: false, Semantics: 'NoVisibleMatch' | null,      // NoVisibleMatch when any NotExists / ExistsSplit / ChildRollup is involved
+	Supported: true, Unsupported: null,
+	DefinitionHash: 'dh:…', FoldHash: 'fh:…', Source: '…'
+}
+// CanonicalDim
+{
+	Kind: 'Terms' | 'DateHistogram' | 'NumericHistogram' | 'Ranges' | 'ChildRollup' | 'ExistsSplit',
+	Field: 'IDLabQueue' | null, Alias: null | 'i',          // Alias = TuplePivot side name
+	Path: <PathPlan> | null, PathShape: 'ToOne' | 'ToMany' | null,
+	KeyField: null | 'IDUser', LabelLookup: null | { Entity, KeyColumn, LabelColumn },
+	Where: <CanonicalPred> | null, Correlate: [ … ] | null,  // K9 / K20
+	Child: null | { Path: <PathPlan>, Agg: 'count', Field: null, Where: <CanonicalPred> | null },   // K12
+	Edges, Labels, Top, Order, Missing, Interval, EmptyBuckets, Mode, Buckets, OpenEnded, Ranges,
+	DataType, IsInteger, Scale                               // of the keyed column (Field / KeyField), from the catalog
+}
+```
+
+Hashes: `DefinitionHash = 'dh:' + sha1(canonicalJSON(entry as authored))[0..12]`, `FoldHash = 'fh:' + sha1(DefinitionHash | GraphHash)[0..12]` (siblings: the parent's DefinitionHash with `'/<Name>'`), `definitionsHash() = 'd:' + sha1(canonicalJSON({ Sources: [ { Source, Hash: sha1(content) } ], Disabled: [ '<Kind>:<Name>' … ] }))[0..12]` — `Source` is the file **basename** (`#object<i>` for objects), so the hash is the same on every machine.
+
+As built, a CanonicalFacet also carries `Path` (the step strings of a path dimension), `MultiValued`, `Selectable`, `ClauseType`, `OwnedFields`, `WhereScopes` (the request `Scopes` equivalent to a `Where` made only of scope references) and `Siblings` (the sibling FacetIDs of a main facet); canonical forms are deep-frozen. Conventions:
+
+- **FilterKey default:** a facet on a pivot column defaults to that column; any other single-dimension facet to its FacetID; a 2-D pivot gets `null`. A declared `FilterKey` applies to the main facet only.
+- **Exclude:** siblings inherit the declared `Exclude`, except ChildRollup, ExistsSplit and TuplePivot siblings (`'None'`).
+- **CountMode:** K9 is always `PivotDistinct`, a TuplePivot always `KeyDistinct`, everything else `Rows`.
+- **TuplePivot `Where`:** facet-level leaves carry `Alias`; existence nodes always carry `From` (a side name).
+- **Predicates:** nested `And` / `Or` groups are flattened.
+- **Explicit co-reference** (`{ Via, To }`) is written `'=E.c@S.s'` in `Path` strings only when it differs from the default co-reference source.
+- **Labels:** label targets are not in `Entities` (the gate list) and need not be facetable (the LabelResolver gates them, unlabelled when refused, §19.6); `LabelField` is allowed only on path dimensions; a facet-level `Labels` is the default of its main dimensions; ChildRollup / ExistsSplit `Labels` travel on the lowered FoldIR dimension (§24.3) for §29.2.
+- **Entities:** the definition's own entity first, then the others in order of appearance.
+
+### 20.8 FacetID resolution (Planner step 5, M2)
+
+| `parseFacetID` Kind | Resolution |
+|---|---|
+| `Auto` `'E.Name'` | `registry.facet('E.Name')` first (a declared name never equals a column, §20.3), else `Catalog.facet` (M1) |
+| `Declared` `'E.Name/Sibling'` | `registry.facet` |
+| `Path` `'E.c>T.col'` | `registry.resolveFacet`: synthesized **PathAuto** when `E.c` is a graph edge to `T`, the edge is neither `Audit` nor `Tenant`, `T` is not a hub, and `T.col` has a catalog descriptor with at least one bucketed fold; exactly one hop (a longer path FacetID is unknown: multi-hop paths are declared). Dimension = the target descriptor's default fold over `Path: [ '>E.c' ]`, `Field: col`; `Folds` = the descriptor's folds ∩ `[ Terms, DateHistogram, NumericHistogram, Ranges ]`; FK target columns keep their `LabelLookup` |
+
+The resolved facet's `Entity` must equal the route entity, else `400 FACET_UNKNOWN_FACET` (as M1). Disabled or unknown → `400 FACET_UNKNOWN_FACET`; `Supported: false` → `422`. The per-facet gate runs **during resolution** (before the request Params are checked): a declared facet whose entities the principal may not facet is `403` and declares no params (its top-level Params read as `Unknown`, like a nonexistent facet's); a **PathAuto** facet whose target the principal may not facet is the same `400 FACET_UNKNOWN_FACET` as a path that does not exist (no 403-vs-400 oracle on hidden entities or edges). `resolveFacet` caches only real PathAuto facets (bounded by edges × target columns), never a miss. A request `Fold` must be in `Folds` (`400 FACET_UNKNOWN_FOLD`); a request may override `Top`, `Order`, `Missing`, `Interval`, `EmptyBuckets`, `Buckets`, `Mode`, `Edges`, `OpenEnded`, `Ranges`, `Exclude`, `Labels: false`, `Chart` exactly as for auto facets.
+
+### 20.9 Registry API
+
+| Method | Returns |
+|---|---|
+| `load(pSources?, pEnvironment?)` | `{ Loaded: { Facets, Scopes, Aliases }, Disabled: [ DisabledEntry ], Warnings: [ … ], DefinitionsHash }` (sync) |
+| `validate(pDefinitionsObject, pEnvironment?)` | `{ Valid, Errors: [ … ], Warnings: [ … ], Canonical: { Facets, Scopes, Aliases } }` (no state change) |
+| `facet(pFacetID)` / `resolveFacet(pFacetID)` | CanonicalFacet \| null (§20.8) |
+| `scope(pName)` | CanonicalScope \| null |
+| `scopesFor(pEntity)` / `facetsFor(pEntity)` | enabled entries homed on the entity (Describe) |
+| `alias(pName)` | canonical steps of a **declared** alias \| null |
+| `expression(pName)` | always `null` in M2 |
+| `disabled()` / `warnings()` | lists (§20.4) |
+| `definitionsHash()` | `'d:…'` |
+| `status()` | `{ Files, Facets, Scopes, Aliases, Disabled, Warnings }` |
+
+---
+
+## 21. Paths (A: `RetoldFacetingGraph.resolvePath`)
+
+### 21.1 Grammar (01 §4.5, normative)
+
+```
+Path       := Step+                         JSON array; a space-separated string is sugar
+Step       := '>' Entity '.' Column         forward: standing on Entity, go to the row Column references   (to-one)
+            | '<' Entity '.' Column         reverse: standing on Column's target, go to the Entity rows     (to-many)
+            | '=' Entity '.' Column         co-reference: standing on S, whose FK Joins the same target PK
+                                            as Entity.Column, go to the Entity rows sharing that target     (to-many)
+            | '@' AliasName                 splice a declared or bridge alias
+            | { Step, Where?, As?, Elide?, CheckParent?, Scope?, ScopeReason? }
+            | { Via: 'S.s', To: 'E.c', Where?, CheckParent?, Scope?, ScopeReason? }    explicit co-reference
+```
+
+### 21.2 PathPlan
+
+```javascript
+{
+	From: 'MaterialIntakeRequirement', To: 'LabForm',
+	Steps:
+	[
+		{
+			Index: 0, Raw: '=LabForm.IDMaterialIntake',
+			Direction: 'Forward' | 'Reverse' | 'CoReference',
+			Edge: 'LabForm.IDMaterialIntake',                       // the graph edge the step walks (for '=': the target side's edge)
+			From: 'MaterialIntakeRequirement', To: 'LabForm',
+			On: [ [ 'IDMaterialIntake', 'IDMaterialIntake' ] ],    // [ column on From, column on To ] pairs (equality)
+			Via: null | 'MaterialIntakeRequirement.IDMaterialIntake', // co-reference: the source FK edge
+			Parent: null | 'MaterialIntake',                        // co-reference: the shared target entity
+			CheckParent: false,                                     // after forcing (§21.4)
+			Cardinality: 'ToOne' | 'ToMany',
+			Where: <CanonicalPred> | null,                          // hop predicate on To
+			Scope: 'Inherit' | 'TenantOnly', ScopeReason: null | '…',
+			Elide: false, As: null
+		}
+	],
+	Hops: 1,
+	ToOne: false,                                                    // every step Forward
+	Signature: '=LabForm.IDMaterialIntake'                           // the step Raw strings (aliases spliced, Where/Scope ignored) joined by ' '
+}
+```
+
+`On` by direction: `>E.c` standing on `E`: `[[ c, edge.ToColumn ]]`, next entity `edge.To`. `<E.c` standing on `edge.To`: `[[ edge.ToColumn, c ]]`, next `E`. `=E.c` standing on `S`: `[[ s, c ]]` where `s` is the **unique** FK column of `S` whose edge `To` equals `edge(E.c).To` (several → `'AmbiguousCoReference'`: use the `{ Via, To }` form; none → `'NotCoReferent'`), next `E`.
+
+### 21.3 Resolution rules
+
+- Each step starts at the entity where the previous one ended (`'WrongStart'`); `E.c` must be a graph edge (`'UnknownEdge'`; a column without `Join` is `'NotAJoin'`); `{ Via, To }` requires both edges to `Join` the same target PK (`'NotCoReferent'`) and `Via`'s entity to be the current entity.
+- Aliases are spliced before counting: `Hops ≤ Limits.MaxHops` (`'TooManyHops'`). A step object's options apply to that one step; an alias's step objects keep theirs.
+- Audit-user and tenant edges may be walked when declared (01 §5.1) but are never offered by PathAuto (§20.8).
+- `resolvePath` validates structure only; step `Where` fields, `TenantOnly` rules and depth are the registry's (§20.3).
+
+### 21.4 CheckParent forcing
+
+A co-reference step skips its parent. The registry forces `CheckParent: true` (warning `'CheckParentForced'`) when the parent entity has a delete column **or** a required policy column for some principal (`Policy.requiredFor(Parent, null)` non-empty, or the policy `Column` is a column of Parent and Parent is not excluded), **unless** a sibling item at the top level of the same `Where` (a scope's `Where`, or the facet's `Where` for a facet dimension; scope references inlined first) is an `Exists` whose first step is `>S.s` — the same FK of the same entity into the parent (08 §4.2: `ToDoForMe` visits the intake first, so no forcing). With `CheckParent: true` the lowering adds the parent as a correlated existence check inside the co-reference subquery (§24.8).
+
+### 21.5 Graph API additions (A)
+
+```javascript
+resolvePath(pFrom, pSteps, pOptions) → PathPlan          // throws FACET_DEFINITION_INVALID { Reason, Step } ; pOptions: { Aliases: Map|object, MaxHops }
+coReferenceSource(pEntity, pEdgeName) → 'S.s' | null      // throws AmbiguousCoReference when several
+pathSignature(pPathPlan) → string
+```
+
+---
+
+## 22. Bound values (B: `RetoldFacetingBinder`)
+
+### 22.1 BindContext
+
+```javascript
+{
+	Principal: <frozen Principal>,
+	CurrentUser: { IDUser: 42, IDCustomer: 1, …Scope.UserRecordFields },   // from Principal.IDUser / IDCustomer / UserRecord ONLY
+	Scope: { IDCustomer: 1, OwnerIDUser: 42 },                               // Principal.ScopeValues
+	Now: '2026-10-08 15:02:00',      // pContext.Now floored to Cache.NowBucketMS, the naive wall clock 'YYYY-MM-DD HH:mm:ss' in Time.StorageTimeZone (Intl; an unknown zone is FACET_INTERNAL)
+	Today: '2026-10-08 00:00:00',
+	StartOf: { day, week, month, quarter, year },                            // FacetBuckets.dateKey(Now, interval)
+	NowBucketMS: 60000,
+	Used: Map<token, value>                                                  // every value bind() substituted (Binder.recordUsed: a second DIFFERENT value of one key is kept under '<key>#2', '#3', …)
+}
+```
+
+`Binder.context(pContext)` is pure over `pContext.Principal`, `pContext.Now`, `pContext.Options`. The same floored `Now` is bound in Live, the Reference and Records, so every engine compares against one instant.
+
+### 22.2 Tokens
+
+`$CurrentUser.IDUser`, `$CurrentUser.IDCustomer`, `$CurrentUser.<F>` with `F` in `Scope.UserRecordFields`; `$Scope.<Column>` with `Column` a policy column (`Policy.Column`, a `PersonalScopes` column or a `Required` column); `$Now`, `$Today`, `$StartOf.<day|week|month|quarter|year>`; `$Param.<Name>`. `TOKEN_PATTERN` is the grammar; anything else starting with `$` is a load error. Tokens appear only as a whole `Value` in definitions (never inside arrays, never in client input: a client clause value `'$Now'` is the literal string).
+
+### 22.3 Params
+
+| Type | Accepts | Bound as |
+|---|---|---|
+| `Enum` | one member of `Values` | scalar |
+| `EnumList` | non-empty array (≤ `MaxInList`) of distinct members of `Values` | array |
+| `Integer` / `IntegerList` | **safe** integers (numbers or numeric strings; `Number.isSafeInteger`) within `Min` / `Max` | number / array |
+| `String` | string ≤ `MaxLength` (default 256), no `~` | string |
+| `Boolean` | `true false 0 1 'true' 'false' '0' '1'` | `1` / `0` |
+| `DateTime` | anything `canonicalDateTime` accepts | canonical string |
+
+`validateParams(pSchema, pValues, pOwner)`: unknown name → `400 FACET_PARAM_INVALID { Reason: 'Unknown' }`; missing without `Default` → `'Required'`; wrong type → `'Type'`; not in `Values` → `'NotAllowed'`; out of range → `'Range'`. `Detail` names `Scope` or `Facet` and `Param`, never the value. Sources: `Scopes[i].Params` (and a `NamedScope` clause's `Params`) validate against that scope; the top-level request `Params` validate against every referenced declared facet's `Params` (a name no referenced facet declares → `'Unknown'`); the `/Scope/:Scope/` route form takes the scope's params from the top-level `Params` (only the names that scope declares).
+
+### 22.4 Binding
+
+`bind(pPred, pBindContext, pParams)` returns a new tree (also binding every `PathPlan` step `Where`): each `{ Bind }` leaf becomes `{ Field, Op, Value }` with the value coerced by the column DataType (`ClauseCompiler.coerceValue`, element-wise for lists); a list param under `IN`/`NIN` stays a list, an `Enum` under `IN` becomes a one-element list. A `$CurrentUser.*` or `$Scope.*` value that is unset (`isUnsetScopeValue` with `Scope.UnsetValues`) → `401 FACET_UNAUTHENTICATED` (whole request; fail closed, never "matches nothing"). Every substituted token is recorded in `Used` (params keyed `'$Param:<Owner>.<Name>'`).
+
+### 22.5 BindHash
+
+`bindHash(pBindContext) = 'b:' + sha256(canonicalJSON([ [ token, value ] … ] sorted by token))[0..16]` over `Used` at the end of planning (filter and every Agg). A scope referenced twice with different Params binds both values (`'$Param:<Scope>.<Name>'` and `'…#2'`), so two different answers never share a BindHash. It is part of the Version (§30.2) and of every future cache key; a request that binds nothing has the hash of `[]`.
+
+### 22.6 The Bind stage (wiring)
+
+After Gate and before Filter: `pContext.Bind = Binder.context(pContext)`. `FilterAST.build` receives it (scope and join expansion bind immediately); the Planner binds definition `Where`, dimension and child predicates with it; `Plan.BindHash` is computed last.
+
+---
+
+## 23. FilterAST and clauses (B)
+
+### 23.1 Conjunct additions
+
+```javascript
+{
+	…M1 fields (Id, Origin, Fields, NeverExclude, Fence, NamesDeleted, Pred),
+	Origin: { Kind: 'Clause' | 'String' | 'RawFilter' | 'Scope' | 'Join', Hash, FilterKey, ClauseType, Index,
+	          Scope: 'Project.MyProjects' | undefined, Params: { … } | undefined },     // Scope conjuncts only (validated params)
+	Shape: 'Column' | 'Path',          // 'Path' when Pred contains an Exists / NotExists / HavingCount node
+	Binds: [ '$CurrentUser.IDUser' ],  // tokens this conjunct bound
+	Entities: [ 'ProjectMembership' ]  // entities other than the route entity it reads (gated, §19.6)
+}
+```
+
+M1 conjuncts get `Shape: 'Column'`, `Binds: []`, `Entities: []`.
+
+### 23.2 Bound Pred grammar (conjunct `Pred`)
+
+Part I §4.1 leaves and `And`/`Or`, plus the CanonicalPred existence nodes (§20.7) with every `Bind` replaced by a coerced `Value` (also inside step `Where`s). Conjuncts never use `From` (TuplePivots are definitions-only). A Path-shape conjunct's leaves are on the route entity; its existence nodes' `Where`s are on their `Path.To`.
+
+### 23.3 `FilterAST.build(pEntity, pInput)` (M2)
+
+```javascript
+FilterAST.build(pEntity,
+	{
+		Clauses, FilterString,                     // M1
+		Scopes: [ { Scope, Params } ] | null,      // request Scopes (the normalizer validated the shape)
+		Bind: <BindContext> | null,                // required when any scope or join clause is present, else FACET_INTERNAL
+		CanFacet: (pEntity) => boolean | null      // §19.6; null = allow (unit tests)
+	})
+→ { Entity, Conjuncts, IncludesDeleted, Applied, Warnings, Entities: [ … ] }   // Entities: every non-root entity any conjunct reads
+```
+
+Conjunct order (and so Ids): every clause in array order (a `NamedScope` clause at its own index; merged OR groups as M1), then the FilterString terms, then the request `Scopes` in array order. Bodies without scopes or join clauses produce exactly the M1 Ids. `Applied` gains `{ Scope: '<name>' }` for every scope conjunct (clause or request). More than `Limits.MaxScopesPerRequest` scopes (clauses + request) → `422 FACET_TOO_LARGE { Limit: 'MaxScopesPerRequest' }`.
+
+### 23.4 Compile targets
+
+| Input | Conjunct |
+|---|---|
+| request `Scopes[i]` / clause `{ Type: 'NamedScope', Scope, Params }` | `registry.scope(Scope)`: unknown, disabled or `Entity ≠ route entity` → `400 FACET_UNKNOWN_SCOPE { Scope }`; gate every `scope.Entities` (`403`) **before** `Supported: false` → `422` (no feature leak about a scope over hidden entities); params validated (§22.3); `Pred = Binder.bind(scope.Where)`; `Origin: { Kind: 'Scope', Scope, Params, Hash: <clause Hash or null>, FilterKey: null, ClauseType: 'NamedScope' \| null }`, `Fields: [ '@scope:<Scope>' ]`, `NeverExclude: true`. A `NamedScope` **clause** is extracted before the pict-sequence algebra (it is never OR-combined with client clauses); `Junction: 'OR'` or a `GUIDGroup` on it → `400 FACET_FILTER_INVALID { Reason: 'NamedScopeJunction' }` |
+| `InternalJoinSelectedValue(List)` | **first** the client-named `RemoteTable` is gated (an unknown, hidden or unreadable name is the same `403`, no Detail, before any graph lookup; a missing name is a malformed clause); then edge `<Entity>.<JoinInternalConnectionColumn>` must exist with `To === RemoteTable` and `ToColumn === (JoinExternalConnectionColumn \|\| ToColumn)`, else `400 FACET_FILTER_INVALID { Reason: 'UndeclaredJoin' }`; gate `RemoteTable`; lookup field `ExternalFilterTableLookupColumn \|\| 'ID' + RemoteTable` (a filterable column of RemoteTable, else `FACET_UNKNOWN_FIELD`); `Pred = { Exists: { Path: [ '>E.c' ], Where: { Field: lookup, Op: 'IN', Value: [ coerced non-null values ] } } }` (no values → ignored + `FACET_CLAUSE_EMPTY`) |
+| `InternalJoinMatch / StringMatch / DateMatch / NumericMatch` | same edge rule; fields `ExternalFilterByColumns \|\| [ ExternalFilterByColumn ] \|\| [ 'Name' ]`; per field × value `EQ` (ExactMatch, or Numeric/Date default) else `LK '%v%'`, `Or` of all, inside one `Exists` |
+| `InternalJoinRange / StringRange / NumericRange / DateRange` | same edge rule; per field `GE/GT Start`, `LE/LT End` (M1 bound rules incl. day-aligned date binding), `And` of all, inside one `Exists` |
+| `ExternalJoin*` | **first** `JoinTable` and `ExternalFilterByTable` are gated (as above); then `JoinTable.JoinTableCoreConnectionColumn` must be an edge to the route entity's `CoreConnectionColumn` (default its PK) and `JoinTable.JoinTableExternalConnectionColumn` an edge to `ExternalFilterByTable.ExternalFilterByTableConnectionColumn` (default that edge's ToColumn), else `UndeclaredJoin`; gate `JoinTable` and `ExternalFilterByTable`; `Pred = { Exists: { Path: [ '<J.core', '>J.ext' ], Where: <remote pred on ExternalFilterByTable as for InternalJoin*> } }` (SelectedValue lookup field `ExternalFilterTableLookupColumn \|\| 'ID' + ExternalFilterByTable`) |
+| any other type | M1 (`400 UnsupportedClauseType`) |
+
+Join clauses take part in the pict top-level sequence exactly like column clauses (`Junction`, `GUIDGroup`, `Ordinal`); an OR that binds a join clause with a column clause produces one Path-shape conjunct (`Or[Exists, leaf]`). `Origin.Kind: 'Join'`, `ClauseType` = the clause type; `M2_CLAUSE_TYPES` = M1 types + the twenty `InternalJoin*` / `ExternalJoin*` types + `NamedScope`.
+
+### 23.5 Ownership signatures, FilterKey defaults
+
+- A join conjunct whose every remote field is the edge's `ToColumn` (lookup by the target key, L3) has `Fields: [ JoinInternalConnectionColumn ]` and default `FilterKey` = that column (E1's `IDClient` clause is owned by the `Project.IDClient` facet by both rules). Otherwise `Fields: [ '@path:<PathPlan.Signature>#<RemoteField>' … ]`.
+- A facet whose dimension is a path (K8, K9) owns `'@path:<Signature>#<Field or KeyField>'`; its default `FilterKey` is its FacetID. Declared facets on a pivot column own the column and default `FilterKey` to it.
+- Scope conjuncts own nothing (`'@scope:<name>'`) and are `NeverExclude`; ChildRollup, ExistsSplit and TuplePivot facets own nothing (default `Exclude: 'None'` for K12/K20/TuplePivot unless declared).
+
+### 23.6 Rendering rules
+
+- `applyToQuery` renders `Shape: 'Column'` conjuncts only; a Path-shape conjunct → `FACET_INTERNAL` (a wiring bug). Rel `Where` (column-only) renders through it with `ParameterPrefix: 'w'`.
+- `toFilterString` throws `FACET_FILTER_INVALID { Reason: 'PathConjunct' }` for a Path-shape conjunct: the stock list cannot carry it, so the harness counts those through the Reference engine (§32.3).
+
+---
+
+## 24. FoldIR (B lowers; C and D consume)
+
+FoldIR stays "the only thing engines compile" (01 §6): the Planner lowers bound conjuncts and canonical definitions into Rels, predicate trees and dimensions; **both** engines read the same FoldIR (Live compiles it to SQL, the Reference interprets it over list reads), so a lowering bug shows in both and the per-kind oracles (§34) must catch it independently of the engines.
+
+### 24.1 Rel (M2)
+
+```javascript
+{
+	Entity: 'Task',
+	As: 'h3',                                   // plan-wide unique SQL alias (§24.7)
+	Role: 'Pivot' | 'TupleSide' | 'Hop' | 'Lookup' | 'Multi' | 'Child' | 'Parent',
+	Project: [ 'IDTask', 'IDProject' ],         // PK first, then sorted unique: inner On columns, Key / dimension / KeyField columns; catalog columns only
+	Client: [ <Conjunct> ] | null,              // Pivot and the Home TupleSide only: the Variant's Column-shape conjuncts (client fence, M1)
+	Where: <ColumnPred> | null,                 // bound, column-only ({ Field, Op, Value } / And / Or); never the delete or a policy column
+	WhereHash: '' | 'wh:<12 hex>',              // sha1(canonicalJSON(Where))
+	Scope: 'Inherit' | 'TenantOnly',
+	ScopeReason: null | '…',                    // required with TenantOnly
+	SoftDelete: 'Explicit' | 'ClientControlled',// ClientControlled only for Role 'Pivot' when the Variant IncludesDeleted
+	Stage: 'Never' | 'Allowed'                  // Allowed: leaf of an Exists / NotExists / ExistsFlag with no nested Where and integer inner On columns (§26.3)
+}
+```
+
+### 24.2 FoldPred (predicates outside Rels)
+
+```javascript
+{ Node: 'Cmp', Alias: 'p', Field: 'OwnerIDUser', Op: 'EQ', Value: 42 }     // column leaf on Alias's row; rendered as a PredicateFragment (Live) / list membership (Reference)
+{ Node: 'And', Items: [ … ] }   { Node: 'Or', Items: [ … ] }
+{ Node: 'Exists' | 'NotExists',
+  Rel: <Rel>,
+  On: [ { Outer: { Alias: 'p', Field: 'IDProject' }, Inner: 'IDProject' } ],   // equality pairs; Outer is any alias in scope, Inner a column of Rel.Entity
+  Where: <FoldPred> | null }                                                   // nested; its Cmp leaves use Alias === Rel.As
+{ Node: 'CountCmp', Rel, On, Where, Op: 'EQ'|'NE'|'GT'|'GE'|'LT'|'LE', N: 3 } // K19: (count of matching visible rows) Op N
+{ Node: 'True' }   { Node: 'False' }
+```
+
+SQL three-valued logic applies to every Cmp (a NULL never satisfies a comparison; `NE` rejects NULL), and On pairs are SQL equality (NULL never equal).
+
+### 24.3 Dimensions (M2)
+
+M1 Dims (`Column`, `DateBucket`, `NumericBucket`, `Range`) gain two optional fields:
+
+```javascript
+Alias: 'p' | 'u1',                    // the relation the Field is read from (TuplePivot sides); default 'p'
+Via: null | [ { Rel: <Rel Role 'Lookup'>, On: [ { Outer: { Alias, Field }, Inner } ] } … ]   // K8: a to-one chain from Alias; the value is Field of the LAST Rel, NULL when any link has no visible row
+```
+
+New kinds:
+
+```javascript
+{ Kind: 'Multi', Chain: [ { Rel: <Rel Role 'Multi'>, On } … ], Where: <FoldPred> | null,    // K9: Where on the last Rel (nested)
+  KeyField: 'IDUser', DataType, IsInteger, Scale }
+{ Kind: 'ChildAgg', Rel: <Rel Role 'Child'>, On, Where: <FoldPred> | null, Agg: 'count', Field: null,
+  Edges: [ 1, 3, 10 ], IsInteger: true }                                                       // K12
+{ Kind: 'ExistsFlag', Pred: <FoldPred Exists node> }                                           // K20: key 1 when true, 0 when false
+```
+
+Every Dim keeps `DataType`, `IsInteger`, `Scale` of its keyed column (ChildAgg: `DataType: 'Numeric'`, `IsInteger: true`; ExistsFlag: `DataType: 'Boolean'`). A ChildAgg / ExistsFlag Dim also carries the definition's `Labels` (`{ '<band>': … }` / `{ true, false }`) when it declares any; §29.2 labels its buckets from them (the engines ignore them).
+
+### 24.4 TupleJoin (K18)
+
+```javascript
+Agg.Tuple =
+{
+	Sides: [ { Name: 'i', Alias: 'p', Rel: <Rel Role 'TupleSide'> }, { Name: 'r', Alias: 'u1', Rel: <Rel Role 'TupleSide'> } ],
+	On: [ { Left: { Alias: 'p', Field: 'IDMaterialType' }, Right: { Alias: 'u1', Field: 'IDMaterialType' } } ],
+	Key: [ { Alias: 'p', Field: 'IDMaterialIntake' }, { Alias: 'u1', Field: 'IDLabFormType' } ],
+	Names: { i: 'p', r: 'u1' }
+}
+```
+
+The **Home side** (the first side whose entity is the route entity) takes SQL alias `'p'`, carries the Variant's Column conjuncts (`Rel.Client`), and the Variant's `PathPred` applies to it unchanged. Other sides are `'u1'`, `'u2'`, … (numbered in declared order); definition names never reach SQL. `Tuple.Sides` is ordered **Home first, then each side as soon as an On pair links it to a side already placed** (whatever order the definition declared), so `Sides[0].Alias === 'p'` and every later side joins an earlier one in both engines. `Agg.Pivot` is the Home entity; `CountMode: 'KeyDistinct'`.
+
+### 24.5 Agg additions
+
+```javascript
+{
+	…M1 fields,
+	Kind: …M1 | 'ChildRollup' | 'ExistsSplit',          // K8 / K9 are Terms (and DateHistogram/NumericHistogram/Ranges for K8) with Via / Multi dims
+	Origin: 'Auto' | 'PathAuto' | 'Declared' | 'Sibling',
+	Definition: null | { Facet, Version, DefinitionHash, FoldHash, SiblingOf },
+	Where: <FoldPred> | null,                           // the definition Where (W_def), lowered at pivot / tuple scope; never excluded
+	WhereHash: '' | 'wh:…',
+	Tuple: null | <TupleJoin>,
+	CountMode: 'Rows' | 'PivotDistinct' | 'KeyDistinct',
+	MultiValued: false,                                 // true for Multi dims
+	Relaxed: false, Semantics: null | 'NoVisibleMatch',
+	Path: null | [ '>MaterialIntakeRequirement.IDMaterialIntake', '>MaterialIntake.IDLabQueue' ],   // FacetResult.Path (path dims)
+	OwnedFields: [ … ],                                 // OF(f) handed to the DisjunctivePlanner (§23.5)
+	Entities: [ … ],                                    // every entity the Agg reads (per-facet gate, DepSet)
+	Relations: [ { Alias, Entity, Role } ],             // flat listing of every Rel inside the Agg (informational)
+	CubeId: null | 'cube0',                             // set when the Agg is a cube member (§25.2)
+	LabelLookup: …M1, also from LabelField / Labels.Path
+}
+```
+
+### 24.6 Variant (M2)
+
+```javascript
+{
+	…M1 fields (VariantId, Entity, ConjunctIds, Conjuncts, ExcludedIds, IncludesDeleted, Facets),
+	Hash: 'c1,c3|wh:…',                   // kept conjunct Ids '|' WhereHash ('' for no W_def)
+	ColumnConjuncts: [ … ],               // kept Shape 'Column' conjuncts → pivot Rel.Client
+	PathPred: <FoldPred> | null,          // kept Shape 'Path' conjuncts, lowered at scope 'p' (And of them)
+	Where: <FoldPred> | null,             // the W_def shared by its facets (null for v0)
+	WhereHash: '',
+	Relations: [ { Alias, Entity, Role } ]
+}
+```
+
+Facets group by **(kept conjunct set, WhereHash)**; `v0` is always the full filter with no W_def (envelope Total, Records, Count, Keys, and every `Exclude: 'None'` facet without a W_def). The DisjunctivePlanner takes `pFacetSpecs[i].WhereHash` (+ `Where`) besides the M1 fields.
+
+### 24.7 Aliases
+
+Plan-wide unique (one counter per prefix for the whole plan, so any composition — the cube included — never collides): `'p'` the entity pivot / Home side; `'p2'`, `'p3'`, … extra renderings of the pivot (ChildAgg restriction); `'u<n>'` other tuple sides; `'h<n>'` hops of Variant filter predicates; `'j<n>'` hops of definition `Where`s; `'l<n>'` Via lookups; `'m<n>'` Multi chains; `'x<n>'` ChildAgg children; `'e<n>'` ExistsFlag hops; parent checks use their chain's prefix. Shell templates use only the single letters `p t r d g k v c` as internal aliases, which a FoldIR alias (letter + digits) never equals. All match `ScopedRelationBuilder.ALIAS_PATTERN`. Bind names: SR `'<alias>_…'`, fragments `'q<n>_…'`, staged keys `'<alias>_Keys'` / `'<alias>_K<i>'`, shells `'f…'`.
+
+### 24.8 Lowering rules (B)
+
+| Construct | FoldIR |
+|---|---|
+| kept Column-shape conjunct | pivot `Rel.Client` (fenced; M1) |
+| kept Path-shape conjunct | `Variant.PathPred` (And), scope `'p'`; its leaves → `Cmp { Alias: 'p' }` |
+| `Exists { Path s₁…sₙ, Where W, Correlate C }` at outer alias `o` | `Exists { Rel(s₁.To, Where: col(s₁.Where)), On: s₁.On (Outer o), Where: And(path(s₁.Where), <s₂ … the same, Outer = s₁'s alias>) }`; the innermost Rel's `Where` = `col(sₙ.Where ∧ W)`, its nested `Where` = `path(sₙ.Where ∧ W)`, and `C` is appended to the innermost `On` with `Outer` = the pivot / `From` side alias |
+| `NotExists { … }` | the **outermost** node is `NotExists`, every inner node `Exists` ("no visible chain") |
+| co-reference step `=E.c` from `S` | an `Exists` over `Rel(E)` with `On [[S.s → E.c]]`; `CheckParent: true` adds, inside that `Exists`'s `Where`, `Exists { Rel(Parent, Role 'Parent'), On: [ { Outer: { Alias: <E alias>, Field: c }, Inner: <Parent PK> } ] }` (01 §4.5) |
+| `HavingCount { Path (one '<' or '=' step), Where, Correlate, Op, Value }` | `CountCmp { Rel(step To, Where: col(...)), On, Where: path(...), Op, N: Value }` |
+| `Or` / `Any` | `Or`; an `Or` that contains any existence node stays whole (its leaves become `Cmp` on the alias in scope) |
+| `col(X)` / `path(X)` | split of an `And`: column-only items (leaves, column-only And/Or) go into the Rel's `Where`; items with existence nodes stay as nested FoldPred |
+| step `Scope: 'TenantOnly'` | that step's `Rel.Scope = 'TenantOnly'`, `ScopeReason` |
+| K8 dimension (to-one `Path` + `Field`) | `Dim.Via` = one Lookup Rel per step (`Where` = `col(step.Where)`; a path part → refused at load, §20.3) |
+| K9 dimension | `Dim.Kind 'Multi'`: one Multi Rel per step (step `Where` split col / path as above), the dimension's `Where` split col → the last Rel's `Where`, path → `Multi.Where`; `Agg.CountMode 'PivotDistinct'`, `MultiValued: true` |
+| ChildAgg / Multi / Via `On` | from the path's step `On` pairs, `Outer` = the previous alias (the pivot for the first step) |
+| K12 `ChildRollup` | `Dim.Kind 'ChildAgg'` (child `Where` split col/path as above) |
+| K20 `ExistsSplit` | `Dim.Kind 'ExistsFlag'`, its `Exists` lowered as above at scope `'p'` |
+| TuplePivot | `Agg.Tuple`; each side's `Where` → `col` into the side Rel, `path` into `Agg.Where` with `Outer` = that side's alias |
+| definition `Where` (W_def) | `Agg.Where` (whole tree, scope `'p'`; column leaves stay `Cmp` so the cube can flag them — C may render a top-level column-only item inside the pivot SR instead, in its own fence) |
+| L3 FK pushdown | optional: an `Exists` whose single `>` step's `Where` is only `ToColumn IN K` may get a sibling `Cmp { p.FK IN K }`; it never replaces the `Exists` |
+| L4 elision | never in M2 (§36) |
+
+### 24.9 Raw results of the new kinds (both engines, then §29 post-processing)
+
+| Kind / Dim | RawFacetResult |
+|---|---|
+| Terms with `Via` (K8) | as M1 Terms; a pivot row whose chain has no visible target has key NULL → `MissingCount` |
+| DateHistogram / NumericHistogram / Ranges with `Via` | as M1, value read through the chain (NULL → Missing) |
+| Terms with `Multi` (K9) | `Total` = pivot rows; `Groups` = key → number of **distinct pivot rows** with at least one visible chain to that key; `MissingCount` = pivot rows with no key; `DistinctKeys`; Live row caps and `SelectedKeys` as M1 Terms |
+| ChildRollup (K12) | `Total`; `MissingCount: 0`; `Groups: [ { Key: band, Count } ]` — band 0 = no visible matching child (`Edges[0]` is always 1, so band 0 is exactly a count of 0 / NULL), band i = `[Edges[i−1], Edges[i])`, last band open (01 §4.6) |
+| ExistsSplit (K20) | `Total`; `MissingCount: 0`; `Groups: [ { Key: 1, Count }, { Key: 0, Count } ]` |
+| any kind over a TuplePivot | `Total` = distinct `Key` tuples passing `Agg.Where` and the Variant; `Groups` count distinct `Key` tuples per key |
+| Pivot | axes may carry `Via`; a Pivot over a TuplePivot is refused at load |
+
+`Total` of every facet is computed over its own base set (never summed from buckets); for K9 `SumOfCounts` may exceed `Total`.
+
+### 24.10 DepSet across hops
+
+`FoldIR.depSet(pAgg, pVariant, pCatalog)` = for every Rel in the Agg **and** in its Variant's `PathPred`: the Rel's PK, delete column, policy columns, `Project` columns, `Where` fields and inner `On` columns; plus M1's pivot columns. `Planner.depSet(pAggs)` unions as M1.
+
+### 24.11 Planner / FoldIR API additions (B)
+
+```javascript
+Planner.plan(pContext, fCallback)            // → { Aggs, Variants, Cubes: [ CubePlan ], DepSet, Entities, BindHash, Errors }
+Planner.planBase(pContext, fCallback)        // Records / Count / Keys: → { Variant: <v0 lowered>, Pivot: Entity, DepSet, Entities, BindHash }
+Planner.resolveFacets(pFacetSpec, pContext)  // §20.8 (registry first)
+Planner.lowerPred(pBoundPred, pScope, pAliasCounter) → FoldPred        // pScope: { Alias, Entity }
+FoldIR.rel(pFields) → Rel (defaults applied)
+FoldIR.realias(pTree, pFrom, pTo) → tree (pure; tests and composers)
+FoldIR.relations(pTree) → [ Rel ] (every Rel inside a FoldPred / Dim / Agg)
+```
+
+---
+
+## 25. Variants and the conditional disjunctive scan (B plans, C executes)
+
+### 25.1 Eligibility
+
+A **cube member** is an Agg on an entity pivot (`Tuple` null), not `MultiValued`, of kind `Count`, `Terms`, `DateHistogram`, `NumericHistogram` (only `Mode: 'Edges'`), `Ranges`, `Pivot`, `ChildRollup`, `ExistsSplit`, **`Stats` or `Missing`** (M2 review: single-row aggregates as per-group *measures*, §25.2) (dimensions may carry `Via`), whose Variant is not `IncludesDeleted` and excludes no conjunct that `NamesDeleted`. Per pivot entity the planner forms one cube when `PlanForm.Cube` is `'Always'` and at least one member exists, or `'Auto'` and at least two members exist; `'Never'` forms none. NumericHistogram `Nice` (bounds, then buckets), DistinctCount, K9 and TuplePivot Aggs keep their own statements.
+
+### 25.2 CubePlan
+
+```javascript
+{
+	CubeId: 'cube0',
+	Pivot: 'Project',
+	Flags: [ { Flag: 'b1', ConjunctId: 'c1' }, … ],      // every conjunct some member excludes, in conjunct order
+	Common: [ 'c4', 'c5' ],                                // every other conjunct (scopes, RawFilters, unowned): the cube's base filter
+	WhereFlags: [ { Flag: 'w1', WhereHash: 'wh:…', Where: <FoldPred> } ],   // one per distinct non-empty member WhereHash
+	Dims: [ { Column: 'd1', Dim: <Dim>, Members: [ 'Status', 'StatusByClient' ] } ],   // de-duplicated by canonical JSON of the Dim
+	Bounds: [ { Lo: 'lo1', Hi: 'hi1', Dim: 'd3' } ],      // min / max of the canonical date VALUE per group, for DateHistogram members
+	Measures: [ { Column: 'm1', Kind: 'Stats' | 'Missing', Field, DataType, Scale, Members: [ … ] } ],   // per group: count(v) "m1nn"; Stats also min "m1lo", max "m1hi", the integer-unit sum "m1su" (bind 'fm1Factor'); members carry Measure: 'm1'
+	Members: [ { AggKey: 'Status', Dims: [ 'd1' ], RequireFlags: [ 'b2', 'b3' ], RequireWhere: null | 'w1' } … ],
+	MaxGroups: <Limits.CubeMaxGroups>
+}
+```
+
+`RequireFlags` of a member = `Flags` minus the conjuncts its Variant excludes; `#Total` requires every flag and no W_def. Plan: `{ …, Cubes: [ CubePlan ] }`; each member Agg keeps its full per-Variant form and gets `CubeId`.
+
+### 25.3 Execution and marginalization (C, `RetoldFacetingCubeExecutor`)
+
+- Base relation: the pivot SR built from the **Common** Column conjuncts (fenced), the Common Path conjuncts as pivot-level predicates; each flag `b<n>` = `CASE WHEN <conjunct> THEN 1 ELSE 0 END` (column conjuncts as PredicateFragments, path conjuncts as `EXISTS (…)`), each `w<n>` likewise for a W_def; one **plain** `GROUP BY` over every `d<n>`, `b<n>`, `w<n>` with `count(*) AS "N"` and the `lo`/`hi` bounds; at most `MaxGroups + 1` rows.
+- Behavior transforms: if the capture of the Common SR has `Transformed` entries (a behavior rewrote client operators, e.g. LIKE → ILIKE), **or** the fragment probe (§26.4) finds a transformed flag / W_def / Common column leaf, the flags would be evaluated outside the pivot's own relation: **fall back** (per-Variant statements, which put the owned conjuncts back inside the relation).
+- Measures marginalize like the counts: `Rows = Σ N`, `NonNull = Σ nn`, `Min = min(lo)`, `Max = max(hi)` (numbers, or canonical date strings), `SumUnits = Σ su`; the result goes through `EngineLive.foldRows` exactly as the single-row Stats / Missing statement's row does (O5).
+- Fallbacks are logged at `warn` (with the driver's code and message, never bound values) for `Statement`, `Compose`, `Collect`, `Relation`; at `info` for `CubeMaxGroups`, `Transformed`, `Ineligible`.
+- `marginalize(pCubePlan, pMemberAggs, pGrainRows)` (pure): member m sums `N` over grain rows whose `RequireFlags` are all `1` and whose `RequireWhere` (if any) is `1`, grouped by its dims; DateHistogram bounds are the min / max over the same rows; keys are normalized exactly as the per-Variant statement's rows are (`foldRows`). The RawFacetResult of every member **equals** its per-Variant result (O5).
+- More than `MaxGroups` grain rows → `FellBack: true`: the members run per Variant (never an error, recorded in `Execution.CubeFallbacks`).
+
+---
+
+## 26. Live: per-hop Scoped Relations, TenantOnly, Staged, composition (C)
+
+### 26.1 `buildRelation` (M2)
+
+1. Shape checks as M1 (`Rel.Where` is now legal; `Scope` is `'Inherit'` or `'TenantOnly'`).
+2. Fresh `DAL.query`; client fence (Pivot / Home side only, M1); **Where fence**: `addFilter('', '', '(', 'AND', 'FacetWhereOpen')`, `FilterAST.applyToQuery([ { Id: 'w', Pred: Rel.Where } ], …, { ParameterPrefix: 'w' })`, `addFilter('', '', ')', 'AND', 'FacetWhereClose')`.
+3. Explicit `Deleted = 0` at depth 0 for every Role except a `ClientControlled` pivot (D-37).
+4. `ScopeCapture.capture(pContext, Entity, query, Rel.Scope, …)` (§26.2 for TenantOnly).
+5. Opaque capture: Staged when §26.3 allows it, else `500 FACET_SCOPE_POLICY_VIOLATION { Reason: 'OpaqueUntrusted' }` (as M1).
+6. Projection, build, harvest as M1.
+7. Memo: the pre-harvest relation is memoized by `(Entity | ClientIds | WhereHash | Scope | SoftDelete | Project)` — **alias excluded** — and harvested per alias; `Counters.Relations` counts distinct keys (so the same hop under two aliases costs one relation and one behavior run).
+
+### 26.2 TenantOnly
+
+`RetoldFacetingScopeCapture.relaxPersonalScope(pFilter, pPolicy, pPrincipal, pEntity)` — static, pure, exported (the Reference uses the same function, §27.2):
+
+```javascript
+→ { Filter: [ …entries without the removed one ], Removed: [ <entry> ], Refused: null | 'NoPersonalScope' | 'NotFound' | 'NotExact' | 'ColumnElsewhere' }
+```
+
+The personal column is `pPolicy.PersonalScopes[pEntity].Column`. Exactly one entry may name it (after `stripColumn`), at depth 0, `Operator '='`, `Connector 'AND'`, `Value` equal (after `normalizeScopeValue`) to `pPrincipal.ScopeValues[Column]`; that entry is removed. Any other mention (inside a group, under OR, with IN, a second entry, a client conjunct) → `'ColumnElsewhere'`; no entry → `'NotFound'`; a non-exact one → `'NotExact'`.
+
+`capture(…, 'TenantOnly')`: run the behaviors, then relax; `Refused` → the capture is Opaque (`OpaqueReasons: [ 'TenantOnlyRefused:<reason>' ]`) and is **never** staged (always the 500); ScopeGuard then asserts the required set **minus** the personal column, that no entry names the personal column, that the remaining required set is **not empty** (`'TenantOnlyUnscoped'`, fail closed: a personal-only entity relaxed would cross tenants), and — always for a TenantOnly capture — that no depth-0 connector is OR. `Fingerprint` and the capture memo key include the scope mode. The relaxation keeps the tenant predicate and every other behavior entry; it never crosses tenants (06 §4.4). Facets using a TenantOnly hop report `Relaxed: true`.
+
+### 26.3 Staged hops
+
+- **When.** `PlanForm.Staged` `'Never'` → never (an Opaque capture is refused). `'Auto'` (default) → a Rel with `Stage: 'Allowed'` whose capture is Opaque and whose entity is in `Scope.TrustedOpaque`. `'Always'` (O5 tests) → every Rel with `Stage: 'Allowed'`. A `Stage: 'Never'` Rel with an Opaque capture is refused (dimensions, children, CountCmp, non-leaf hops: `422 FACET_FOLD_UNSUPPORTED { Feature: 'StagedNonLeaf' }` when the entity is trusted, else the 500).
+- **Run.** The hop's own scoped query (Where fence, soft delete, behaviors, guard) as `SELECT DISTINCT <inner On columns>` capped at `Limits.MaxStagedKeys + 1` rows through `provider.Read`. For a trusted Opaque capture whose behavior replaced the query, ScopeGuard still asserts the post-behavior **filter** (required depth-0 `=` AND entries, no depth-0 OR — never deferred; `Deferred: true` only marks the capture), and `StagedKeys.assertRenderedPolicy` checks the replacement exactly: it must be a `queryOverride` template (a `queryBranches` replacement is `TemplateNotVerifiable`) that renders `<%= Where %>` exactly once (`WhereNotRenderedOnce`), holds no `UNION` anywhere and no `OR` after the Where (`TemplateWidens`), and for every required policy column the guarded filter entry's **own** bind (`<Parameter>_w<index>`) holds the principal's value and appears in the SQL as `<column> = <bind>` (optionally qualified by the entity's own table) (`PolicyNotRendered`); any violation is the 500. The inner columns are read from its rows. More than `MaxStagedKeys` keys → `422 FACET_PATH_TOO_BROAD` (whole request for a Variant `PathPred` hop, per facet otherwise).
+- **StagedRelation.**
+
+```javascript
+{ Alias: 'h2', Entity: 'LabForm', Staged: true, Dialect, Columns: [ 'IDMaterialIntake', 'IDLabFormType' ],
+  Keys: [ [ 7, 3 ], … ],                         // distinct, sorted, integers only (a non-integer value → FACET_INTERNAL)
+  Count: 412, Capture: <ScopeCapture>,
+  Params: { h2_Keys: '[[7,3],…]' } | { h2_K0: '{7,…}', h2_K1: '{3,…}' }, ParamTypes: { } }
+```
+
+- **Positional keys.** The staged key columns are the On pairs' inner columns in On order; the membership maps key column `i` to `On[i].Outer` by position (two pairs that share an inner column — `'=E.c'` plus a Correlate onto `c` — keep both correlations).
+- **Membership** (`StagedKeys.membership`, ONE scalar per key column, never a JS array): SQLite `IN (SELECT value FROM json_each(:h2_Keys))` / composite `EXISTS (SELECT 1 FROM json_each(:h2_Keys) AS "v" WHERE json_extract("v"."value", '$[0]') = … AND …)`; PostgreSQL `= ANY(CAST(:h2_K0 AS bigint[]))` / composite `EXISTS (SELECT 1 FROM unnest(CAST(:h2_K0 AS bigint[]), CAST(:h2_K1 AS bigint[])) AS "v"("a", "b") WHERE …)`; MySQL `JSON_TABLE`, MSSQL `OPENJSON` (dry-built). `NOT` for anti-joins. No chunking in M2.
+
+### 26.4 Composition rules
+
+- **Pivot-level predicates first.** `Variant.PathPred` and `Agg.Where` filter pivot rows before any dimension join; a PredicateFragment is rendered only in a scope whose sole FROM item is its alias (wrap the pivot in a derived table before joining Via / Multi / ChildAgg relations).
+- **Fragments honor the entity's behaviors (M2 review).** A column leaf rendered as a PredicateFragment (a scope's leaf under `Any` with an existence node, a W_def leaf, a cube flag, a nested Where leaf on a hop alias) is outside its entity's Scoped Relation, so the entity's behavior never sees it. `StatementComposer.buildUses` therefore ends with `probeFragments`: per entity, one capture (`PredicateCompiler.probeTransforms`, memoized per request in `pContext.Memo.FragmentProbes`) of a fresh query whose client fence holds exactly those leaves; every entry the behavior's operator rewrite touched (`Transformed`) is recorded by `(column, operator, value)` and `fragment()` renders the rewritten operator. An Opaque probe is the 500. Each probe is a behavior run (counts toward `MaxBehaviorRunsPerRequest`).
+- **Exists / NotExists / CountCmp** as in 03 §3.4 (`NOT EXISTS`, never `NOT IN`); every On pair is an equality on quoted, alias-qualified catalog columns.
+- **Via (K8):** `LEFT JOIN (<SR>) "l1" ON "l1"."<pk>" = "p"."<fk>"` per link (to-one by construction), so an invisible target is NULL, never a dropped row.
+- **Multi (K9):** two-level distinct (`SELECT key, count(*) FROM (SELECT DISTINCT key, "p"."<pk>" …) GROUP BY key`), never `count(DISTINCT …)`; a sibling count of the pivot gives `Total`, and pivot rows with no key give `MissingCount`.
+- **ChildAgg (K12):** the child aggregate is restricted to the pivot's keys (a second rendering of the pivot SR, alias `'p2'`, 03 §3.4) or computed as a correlated scalar subquery — both must agree.
+- **TuplePivot (K18):** `FROM (<SR p>) "p" JOIN (<SR u1>) "u1" ON …` then the two-level distinct over `Key` columns.
+- **ExistsFlag (K20):** `CASE WHEN EXISTS (…) THEN 1 ELSE 0 END`.
+- **Shell templates.** New templates go into all four `Shell-Templates-<Dialect>.js` files (in a block marked `// M2`), use only structural slots (`SR<n>[a-z]?`, `D<n>`, `P<n>`, `JOINS`, `WHERE`, `AND_WHERE`, and new `FLAGS`, `GROUP` if needed — `ALLOWED_SLOT_PATTERN` and `PASS_THROUGH_SLOT_PATTERN` may gain exactly those), never bind arrays, and pass `validateAll()`. An empty slot renders as `''` (C always sets it), so the M1 goldens do not change when M1 templates gain a `WHERE` / `JOINS` slot.
+- `compileAgg(pContext, pAgg, pRelations, pDialectName, pOptions)` stays the O9 entry point; the O9 goldens gain one K8, K9, K10, K11 (composite), K12, K18, K19, K20 and cube statement per dialect, and a Staged membership per dialect.
+
+### 26.5 Records / Count / Keys statements (C)
+
+```javascript
+EngineLive.countBase(pContext, pBasePlan, fCallback)                       // → (pError, Count)
+EngineLive.recordKeys(pContext, pBasePlan, { Sort, Begin, Cap }, fCallback) // → (pError, { Keys, Statements })
+EngineLive.keys(pContext, pBasePlan, { Cap }, fCallback)                    // → (pError, { Keys, Count, Truncated })
+```
+
+Ordered keys: `SELECT "p"."<pk>" FROM (<v0 SR>) "p" <PathPred> ORDER BY <sort> LIMIT :fCap OFFSET :fBegin` where each sort field renders `CASE WHEN "p"."F" IS NULL THEN 1 ELSE 0 END, "p"."F" <Dir>` (NULLs last in both directions on every dialect) and the PK ascending is always the final tie-break. Keys: ordered by PK, `LIMIT :fCapPlusOne` (`Truncated` when `Cap + 1` came back); when not truncated `Count` is the key list's length (one statement, one snapshot); only a truncated answer runs the count statement (on PostgreSQL READ COMMITTED it may see a later snapshot; `Count ≥ Cap + 1` either way).
+
+### 26.6 Execution additions
+
+`Execution.Captures[Entity]` aggregates the fingerprints of **every** captured relation of that entity (pivot, hops, children, tuple sides; TenantOnly captures fingerprint differently); `Execution.Repaired` as M1 over all of them; `Execution.CubeFallbacks: [ CubeId ]`; `Execution.Staged: { Relations: n, Keys: n }`. `Counters.StagedKeys` counts staged keys.
+
+---
+
+## 27. Engines
+
+### 27.1 Live `capable()` (C)
+
+Accepts every kind of §24.9 except: TuplePivot with a Pivot Agg, Multi or ChildAgg pivot axes, `CountMode` other than the Agg's own; refuses with `{ Capable: false, Reason }` → per-facet `422 FACET_FOLD_UNSUPPORTED { Feature: Reason, Milestone: 2 }`.
+
+### 27.2 Reference across entities (D)
+
+The oracle interprets the same FoldIR **without** any SQL composition: every relation is read through **its own entity's list waterfall** as the same principal, and every predicate is evaluated in JS except column predicates, which the database evaluates through those list reads (so LIKE, collation and numeric-text semantics are the list's, on every dialect).
+
+```
+listRows(Entity, { Client, Where, Scope }):                       memoized in pContext.Memo.HopRows by Entity|Scope|ClientIds|WhereHash
+	state = controller.initializeRequestState(pContext.Request, 'Reads')   (the route-bound controller of Entity)
+	state.Query = controller.DAL.query; setCap(0); setBegin(0)
+	fence(Client) ; fence(Where)                                           (FilterAST.applyToQuery)
+	runBehavior(Scope.Behavior)                                            (Entity's own tenancy / owner scope, as its list)
+	Scope 'TenantOnly' → ScopeCapture.relaxPersonalScope(state.Query.parameters.filter, policy, Principal, Entity)
+	                      Refused → 500 FACET_SCOPE_POLICY_VIOLATION (same as Live)
+	doReads (FoxHound's implicit Deleted = 0, as the list) ; runBehavior('Reads-PostOperation')
+member(Alias, ColumnPred, row):  the PK of row is in listRows(Entity(Alias), { Where: ColumnPred }) (memoized)
+eval(FoldPred, env):             env = { alias → row }
+	Cmp / column-only And-Or on one alias → member(…)
+	And / Or                              → JS logic
+	Exists(Rel, On, Where)                → some h in listRows(Rel) with every On pair equal (SQL equality: NULL never equal;
+	                                        numbers compared after FacetBuckets.numericValue, strings exactly) and eval(Where, env + { Rel.As: h })
+	NotExists                             → !Exists
+	CountCmp                              → (number of such h) Op N
+base rows: entity pivot → listRows(Pivot, { Client: Variant.ColumnConjuncts }) (M1 readVariantRows);
+           TuplePivot → listRows per side, hash-joined on On, distinct by Key
+keep rows where eval(Variant.PathPred) and eval(Agg.Where); then fold (§24.9):
+	Via      → follow each link (0 matches → NULL key; > 1 → FACET_INTERNAL)
+	Multi    → distinct keys over every chain; count distinct pivot PKs per key
+	ChildAgg → number of matching child rows → band
+	ExistsFlag → eval → 1 / 0
+```
+
+On-pair equality is **typed** by the inner column's catalog DataType (numeric: compare the numbers, so `'7'` = 7; text: compare the exact strings, so `'007'` ≠ `'7'`; the registry requires both sides of a pair to be of one class, `CorrelateType`). Relation memo keys and column groups are memoized by object identity (no per-row hashing). Hops rely on FoxHound's implicit `Deleted = 0` (as the lists), while Live adds an explicit one (I1): **a hop's behavior must not name the delete column** (it would switch the implicit one off and the engines would differ); the explicit Live form is the authoritative one.
+
+Independence: the Reference never uses ScopedRelationBuilder, PredicateCompiler, StagedKeys, CubeExecutor, ShellTemplates, Dialects or EngineLive. It shares the Planner's FoldIR, `FilterAST.applyToQuery` (M1 deviation 9), `ScopeCapture.relaxPersonalScope` (§36) and the contract math. Captures: `'ref:' + VariantHash` for the pivot and `'ref:hop:' + Entity + '|' + Scope + '|' + WhereHash` for each hop entity. `Statements` counts list reads. Oracle helpers with the Live signatures of §26.5: `recordKeys`, `keys`, `countBase`.
+
+### 27.3 Router
+
+Unchanged; `ForceEngine` still selects the Reference; `PlanForm` reaches the engines through the context.
+
+---
+
+## 28. Records, Count and Keys (wiring)
+
+### 28.1 Routes (all POST, JSON bodies read by the M1 route-local reader)
+
+| Route | Body | Response |
+|---|---|---|
+| `/1.0/Facet/:Entity/Records` | Query filter inputs + `Records: { Begin, Cap, Sort }` | bare array of records |
+| `/1.0/Facet/:Entity/Records/:Begin/:Cap` | `{ Clauses, Experience }` (pict `FilterEndpointOverride`) and/or any Query filter input | bare array |
+| `/1.0/Facet/:Entity/Records/Count` | same | `{ Count }` |
+| `/1.0/Facet/:Entity/Keys` | Query filter inputs + `{ Cap }` | `{ Entity, Keys, Count, Truncated, Version }` |
+| `/1.0/Facet/:Entity/Scope/:Scope/Records[/:Begin/:Cap \| /Count]`, `/1.0/Facet/:Entity/Scope/:Scope/Query` | same | same; the path scope is prepended to `Scopes` with params from the top-level `Params` |
+
+pict-section-recordset posts (`RecordSet-RecordProvider-MeadowEndpoints.js:525–625`), so no GET forms are mounted. `Experience` is accepted and ignored (`Projection` is a later milestone).
+
+### 28.2 Normalization (wiring owns `contract/Facet-Contract-Request.js` M2 changes)
+
+- `normalizeRequest(pEntity, pBody, { Limits, Time, Mode })` serves four modes (`REQUEST_MODES`): `'Query'` (default; `Facets` required, `Records` optional), `'Records'` (`Facets` optional and **ignored**, the page defaulted), `'Count'` (`Facets` and `Records` ignored), `'Keys'` (`Facets` and `Records` ignored, a top-level `Cap`). Every mode reads the same filter inputs: `Clauses` (a `NamedScope` clause is shape-checked and carried, its `Params` copied; a `FacetSelection` clause is `422 { Feature: 'Selections' }`), `FilterString`, `Scopes`, `Params`. The recordset's `Experience` is accepted and ignored (`Projection` is M3).
+- `Scopes: [ { Scope, Params? } ]` — each entry a plain object with a non-empty `Scope` string ≤ 256 characters and an optional plain-object `Params`, else `400 FACET_REQUEST_INVALID { Field: 'Scopes', Index }`; normalized to `[ { Scope, Params: {} … } ]` (`[]` when absent). Existence, entity, enablement and the count (`MaxScopesPerRequest`, `422 FACET_TOO_LARGE`) are the FilterAST's (§23.3).
+- `Params` (top level, a scope reference's, a `NamedScope` clause's): a plain object whose names pass `keyProblem` (no control characters, no `Object.prototype` names), copied into a fresh object, else `400 FACET_REQUEST_INVALID { Field, Reason }`; values are the Binder's (§22.3).
+- `Records: { Begin, Cap, Sort }` — `Begin` integer `0 ≤ Begin ≤ Limits.MaxRecordsOffset` (default 0), `Cap` integer `1 ≤ Cap ≤ Limits.MaxRecordsPage` (default `min(250, MaxRecordsPage)`: the list's and the recordset's default page), else `400 FACET_REQUEST_INVALID { Field: 'Begin' | 'Cap', Max }`; `Sort` at most `MAX_RECORDS_SORT` (4) entries `{ Field: <identifier>, Dir: 'ASC' | 'DESC' }` (`Dir` case-insensitive, default `'ASC'`), else `400 { Field: 'Sort' }`. A sort field that is not a filterable, non-Sensitive pivot column is `400 FACET_UNKNOWN_FIELD { Field, Entity }` (the service's Filter stage, after the gate). `Records: false` / `null` on a Query body means none.
+- Keys `Cap`: integer `1 ≤ Cap ≤ Limits.MaxKeys`, default `MaxKeys`.
+- `MaxRecordsPage`, `MaxRecordsOffset`, `MaxKeys` are request limits: the contract's `LIMIT_DEFAULTS` owns them (500 / 10 000 / 50 000) and the service options build `Limits` from it.
+- `FOLDS` gains `ChildRollup` and `ExistsSplit` (default `Exclude: 'None'`, no clause type); `LATER_FOLDS` keeps `PathTerms`, `BridgeTerms`, `TuplePivot`, `Computed`, `UnionOfSources`; `Selections`, `FilterExperience` still refused. Every `422 FACET_FOLD_UNSUPPORTED` the contract raises carries `{ Feature, Milestone: 2 }` (`MILESTONE`).
+- The NormalizedRequest (§3) gains `Mode`, `Scopes`, `Params`, `Records` (`null` or the page) and `Cap` (`null` unless Keys); `Total` is `false` outside the Query mode.
+- The route forms (`Routes.routeBody`): `/Records/:Begin/:Cap` sets `Records.Begin` / `Records.Cap` from the path (keeping the body's `Records.Sort`); a segment that is not a non-negative integer of at most 9 digits is `400 FACET_REQUEST_INVALID { Field, Max }` before the normalizer runs (which checks the range). `/Scope/:Scope/` prepends `{ Scope, Params: <the names that scope declares, from the top-level Params> }` to `Scopes` (`RetoldFacetingService.withPathScope`; an unknown scope gets no params and is refused by the FilterAST).
+
+### 28.3 Plan and execution
+
+Records / Count / Keys: Principal → Shape (mode) → Gate → Bind → Filter (FilterAST with `Bind` and `CanFacet`, the sort-field check) → Params (`Planner.checkRequestParams`: every top-level name must be declared by a scope the request names) → `Planner.planBase` (v0 lowered) → `EngineLive.countBase` / `recordKeys` / `keys` — always Live and Exact (D-38): `pInternalOptions.ForceEngine` is dropped — then, for Records, **hydration** (`RetoldFacetingService.hydrate`):
+
+1. `Host.getExecutionDAL(E).query`, `setCap(0).setBegin(0)`;
+2. inside the client fence (`FacetFenceOpen` / `FacetFenceClose`): the Variant's **column conjuncts** and `pk IN (keys)`, rendered by `FilterAST.applyToQuery` (prefix `c`) — so a row that left the column filter between the key statement and the hydration is dropped too;
+3. the explicit soft delete (`Deleted = 0`, `FacetSoftDelete`) unless a column conjunct names the delete column (the client's own choice, exactly as the pivot relation);
+4. `ScopeCapture.capture(…, 'Inherit', { Columns: [ pk ], Fresh: true })` (the entity's own `Reads-QueryConfiguration` on the route-bound controller + ScopeGuard + the read-side behavior audit of §8.1); an Opaque capture is `500 FACET_SCOPE_POLICY_VIOLATION { Reason: 'OpaqueUntrusted' }`;
+5. `DAL.doReads`, then `Reads-PostOperation` on the route-bound controller with **the same request state the QueryConfiguration ran with** (`capture.RequestState`, as the list waterfall shares one state) carrying `Query` and `Records`;
+6. records reordered to key order; keys that did not hydrate are dropped and counted.
+
+A Query body with `Records` runs the same `planBase` (reusing the request's v0, §24.11) → `recordKeys` → hydration in the **Records** stage, after the facets executed and before the envelope (so the records are part of the Version).
+
+### 28.4 Responses and headers
+
+Records: bare JSON array; `X-Retold-Facet-Records-Dropped: <n>` when n > 0 (only reachable when the pivot's read-side behaviors are vouched for, §8.1). The Records Version also hashes the hydrated records (`sha256(canonicalJSON(Records))`), so a changed or re-decorated record with the same keys gets a new ETag, never a stale 304. Count: `{ Count }`. Keys: `{ Entity, Keys, Count, Truncated, Version }`. Every route sets the M1 standard headers (`ETag` from the Version of §30.2, `Cache-Control: private, no-cache`, `Vary`, `X-Retold-Facet-Contract`), `X-Retold-Facet-Scope-Repaired: 1` when any capture of the answer was repaired, and answers `304` to a matching `If-None-Match` (the statements have run). A Query body with `Records` adds `Records: [ … ]`, `RecordShape: 'Entity'`, `RecordsDropped: n` to the envelope (`normalizeForComparison` keeps them: both engines' envelopes carry the same Live records).
+
+### 28.5 In-process API (wiring)
+
+```javascript
+RetoldFacetingService.records(pEntity, pBody, pRequest, fCallback)   // → (pError, pRecords, pMeta { Dropped, Version, Keys, Statements, ScopeRepaired })
+RetoldFacetingService.count(pEntity, pBody, pRequest, fCallback)     // → (pError, { Count }, pMeta { Version, Statements, ScopeRepaired })
+RetoldFacetingService.keys(pEntity, pBody, pRequest, fCallback)      // → (pError, { Entity, Keys, Count, Truncated, Version }, pMeta { Version, Statements, ScopeRepaired })
+RetoldFacetingService.baseInternal(pMode, pEntity, pBody, pRequest, pInternalOptions, fCallback)   // Now / PlanForm in-process (tests); ForceEngine ignored
+RetoldFacetingService.withPathScope(pScope, pBody)                   // the /Scope/:Scope/ body (§28.2)
+```
+
+The query `pMeta` (in-process, §18.1) gains `Cubes`, `CubeFallbacks`, `Staged`, `BindHash` and `RecordsDropped`. `Statements` is **every** SQL statement of the request (`pContext.Counters.Statements`: facets, staged key sets, label reads, Records keys and hydration), and `Labels` counts the label reads among them (the LabelResolver groups facets by label target and reads each target once, IN-list chunks of `Limits.MaxInList`).
+
+---
+
+## 29. Envelope and post-processing (A)
+
+### 29.1 FacetResult additions
+
+Present **only** on facets whose Agg `Origin` is not `'Auto'` (M1 envelopes are unchanged):
+
+```javascript
+Declared: true | false,                    // false for PathAuto
+Definition: { Facet, Version } | null,
+Path: [ '>Review.IDBook' ] | null,
+Relaxed: false, Semantics: 'NoVisibleMatch' | null,
+CountMode: 'Rows' | 'PivotDistinct' | 'KeyDistinct'
+```
+
+`MultiValued: true` (K9) → `OtherCount: null`, `SumOfCounts` = Σ displayed counts (may exceed `Total`); `MissingCount` = pivot rows with no key. Fold names: `ChildRollup`, `ExistsSplit` are new `Fold` values; K8/K9 report `Fold: 'Terms'` (or the K8 bucketed fold).
+
+### 29.2 Post-processing of the new kinds
+
+| Kind | Buckets |
+|---|---|
+| ChildRollup | every band `0…n` (zero-filled), Key = band, Label `'None'` (or `Labels['0']`) for 0, `'a–(b−1)'` integer bands, `'a+'` the open band (01 §4.6), `Start`/`End` = band edges (band 0 has none), `Clause: null`, `Selection` |
+| ExistsSplit | Key `1` then `0`, Labels from the definition (`'Yes'` / `'No'`), `Clause: null`, `Selection` |
+| K8 / K9 Terms | as M1 Terms (Top, Order, selected-zero keys); labels through `LabelLookup` (M1 §18.6, any target entity) |
+| TuplePivot facets | as their bucket kind; `Clause: null` on every bucket (a tuple count is not a count of route-entity rows, so no list clause can round-trip it) |
+
+### 29.3 Bucket clauses
+
+| Facet | Clause |
+|---|---|
+| K8, one `>` step, Terms | `{ Type: 'InternalJoinMatch', RemoteTable: T, JoinInternalConnectionColumn: c, JoinExternalConnectionColumn: <edge ToColumn>, ExternalFilterByColumns: [ Field ], ExactMatch: true, Values: [ Key ], FilterKey, ClauseKey: 'InternalJoinMatch' }`; when `Field` is the target's key column: `InternalJoinSelectedValueList` with `Values: [ Key ]` |
+| K8, one `>` step, DateHistogram / NumericHistogram / Ranges | `InternalJoinDateRange` / `InternalJoinNumericRange` with `ExternalFilterByColumns: [ Field ]`, `Values: { Start?, End? }`, `EndExclusive` as the M1 range clauses |
+| K8 over 2+ steps | `null` (Selection only) |
+| any K8 / K9 path whose steps carry a `Where`, a `TenantOnly` scope or `CheckParent`, or whose dimension carries a `Where` (`FacetClauses.pathRestricted`) | `null` (Selection only): no join clause carries the restriction, and a clause without it would select more rows than the bucket counted (I4 / O2) |
+| K9 over exactly `<J.a >J.b` ending at the target key (`KeyField` = that edge's ToColumn) | `{ Type: 'ExternalJoinSelectedValueList', CoreConnectionColumn: <edge(J.a).ToColumn>, JoinTable: J, JoinTableCoreConnectionColumn: a, JoinTableExternalConnectionColumn: b, ExternalFilterByTable: T, ExternalFilterByTableConnectionColumn: <edge(J.b).ToColumn>, ExternalFilterTableLookupColumn: KeyField, Values: [ Key ], FilterKey, ClauseKey }`; any other K9 path → `null` |
+| ChildRollup, ExistsSplit, TuplePivot | `null` |
+| auto facets, FK Terms | M1 (FK Terms keep `DistinctSelectedValueList`, §16.4) |
+
+Keys holding `~` keep `Clause: null` (M1 UnsafeKey). Every non-null clause compiles through §23.4 and selects exactly `Bucket.Count` rows (O2).
+
+### 29.4 Selected from owned path conjuncts
+
+`selectedFrom(pAgg, pOwned)` also reads owned join conjuncts: an `Exists` over the facet's own path whose `Where` is `IN` / `EQ` on the facet's field (or, L3, on the target key for an FK facet) gives the selected keys; ranges likewise. ChildRollup / ExistsSplit / TuplePivot facets select nothing in M2.
+
+---
+
+## 30. Describe, Version, Filter.Applied (wiring + A)
+
+### 30.1 Describe
+
+`Entities[E].Scopes` = `registry.scopesFor(E)` filtered to scopes whose `Entities` all pass `canFacet`: `[ { Scope, Description, Params, Relaxed } ]` (`Params` as declared, defaults included). `Entities[E].Facets` adds, after the auto facets, every enabled declared facet and sibling homed on E whose `Entities` all pass `canFacet`: `{ Facet, Declared: true, Title, Description, DisplayName, Folds: [ Fold ], DefaultFold, Selectable, ClauseType, FilterKey, Path?, MultiValued, CountMode, Relaxed, Semantics, Params, Engines: [ 'Live' ], Supported, Unsupported }`. An entity whose read-side behaviors make it Opaque (§8.1) carries `Opaque: { Reason: 'PostOperation', SafeColumns }`. PathAuto facets are listed only with `Catalog.ListOneHop: true`. Disabled definitions never appear.
+
+### 30.2 Version and ModelVersion
+
+`ModelVersion` material gains `registry.definitionsHash()` (A: `Catalog.refreshModelVersion()`, called by `rebuildCatalog` after every definitions load). The Query Version (M1 §18.5) gains `canonicalJSON({ Scopes, Params, Records })` next to `{ Facets, Total }`, the bound conjunct `Pred`s (already part of `Conjuncts[].{ Id, Pred }`), the `Captures` fingerprints of **every** captured entity, and `Plan.BindHash` (so the same request differs across principals of one tenant whenever it binds `$CurrentUser`); the envelope digest includes the Records. Records/Count/Keys Versions hash `ModelVersion | Entity | Mode | { Scopes, Params } | conjuncts | Captures (the hydration capture joins the pivot's) | ScopeValues | BindHash | <the keys (and the page and drop count) or the count>` (`RetoldFacetingService.baseVersion`).
+
+### 30.3 Filter.Applied
+
+`{ Hash }` for clauses (join clauses included), `{ String: true }`, `{ RawFilter }` as M1, and `{ Scope: '<name>' }` for every scope conjunct in conjunct order.
+
+---
+
+## 31. Fixtures: ProjectTrack and LabTrack (D)
+
+### 31.1 Models (complete; generated from 08 §1)
+
+`test/fixtures/ProjectTrack-Model.json` — Customer, User, Client, Project, ProjectMembership, Task, Issue, FormType, Document. `test/fixtures/LabTrack-Model.json` — Customer, User, LabQueue, LabQueueMember, MaterialType, MaterialIntake, LabFormType, MaterialIntakeRequirement, MaterialTypeFormRequirement, LabForm. Same Stricture-extended shape as `Bookstore-Model.json`. Every table has `ID<Table>`, `GUID<Table>` (36), the audit columns (`CreatingIDUser`/`UpdatingIDUser`/`DeletingIDUser` without `Join`) and `Deleted`, **except** `FormType` and `LabFormType` (global lookups: `ID`, `GUID`, `Name`, `Category` / `Discipline`; no audit, no `Deleted`, no `IDCustomer`). `User` = `LoginID`, `NameFirst`, `NameLast`, `IDCustomer → Customer`; `Customer` = `Name`. Every other column, type and `Join` is exactly 08 §1 (`OwnerIDUser`, `AssignedIDUser`, `IDUser` join `User.IDUser`; `IDCustomer` joins `Customer.IDCustomer` and is flagged a tenant edge). Graph facts: no bridges in ProjectTrack; in LabTrack `MaterialIntakeRequirement` is structurally a bridge (synthetic alias `MaterialIntake~LabFormType`) and stays an ordinary pivot; it carries the tenancy column, so its bridge record is `Elidable: false` (01 §5.3: a tenant-scoped join table is a regular entity for scoping; the alias is only a convenience splice); `ProjectMembership`, `LabQueueMember`, `MaterialTypeFormRequirement` carry payload (not bridges). Hubs: `User`, `Customer`. D may add columns only by regenerating both the model and this paragraph.
+
+### 31.2 Policy and behaviors
+
+Each seed module exports `FACETING_OPTIONS` (the harness deep-merges a test's `Faceting` over it):
+
+```javascript
+// ProjectTrack-Seed.FACETING_OPTIONS
+{
+	Scope: { Policy: { Column: 'IDCustomer', SessionField: 'CustomerID', Exclude: [ 'FormType' ], PersonalScopes: {} }, Guard: 'Strict' },
+	Catalog: { GlobalEntities: [ 'FormType' ] },
+	Definitions: { Path: false, Files: [ DEFINITIONS_PATH ] }
+}
+// LabTrack-Seed.FACETING_OPTIONS
+{
+	Scope:
+	{
+		Policy: { Column: 'IDCustomer', SessionField: 'CustomerID', Exclude: [ 'LabFormType' ], PersonalScopes: { LabForm: { Column: 'OwnerIDUser', SessionField: 'UserID' } } },
+		Guard: 'Strict'
+	},
+	Catalog: { GlobalEntities: [ 'LabFormType' ] },
+	Definitions: { Path: false, Files: [ DEFINITIONS_PATH ] }
+}
+```
+
+The harness installs a test tenancy behavior (chain-wrapped, M1 `installBehavior`) on `Reads-QueryConfiguration` and `Count-QueryConfiguration` of every entity that has `IDCustomer`: `addFilter('IDCustomer', SessionData.CustomerID, '=', 'AND', 'TestTenancy')`, `401` when unset; on `LabForm` additionally `addFilter('OwnerIDUser', SessionData.UserID, '=', 'AND', 'TestOwner')`, `401` when unset. Sessions come from the M1 shim (`{ Tenant, User }` → `CustomerID = IDTenant = Tenant`, `UserID = IDUser = User`).
+
+### 31.3 Seed requirements
+
+Common: deterministic (one mulberry32 stream per table, `Bookstore-Seed.prng`), explicit IDs, canonical `'YYYY-MM-DD HH:mm:ss'` dates; tenant 1 is the base, tenant 2 a smaller domain of its own (≥ 15 % of tenant 1's rows, distinct IDs, its own users / clients / queues); ≥ 1 soft-deleted row per table per tenant on both sides of every anti-join; every date compared with `$Now` (`Task.DueDate`) is `≤ '2025-12-31 23:59:59'`, `≥ '2031-01-01 00:00:00'` or NULL (so any clock in 2026–2030 and the pinned test `Now` `'2026-10-08T12:00:00Z'` give identical answers); cross-tenant references both ways (they must land in Missing / fail existence); NULL FKs; `''` in Terms columns. Small scale: ProjectTrack ≈ 60 projects, 600 tasks, 150 issues, 200 memberships, 800 documents, 30 users, 12 clients per tenant 1; LabTrack ≈ 6 queues, 40 queue members, 8 material types, 300 intakes, 900 requirements, 40 type requirements, 700 lab forms, 30 users in tenant 1; 12 form types and 12 lab form types (global). `Medium` ×4.
+
+ProjectTrack must contain: the `Lead` principal with Owner/Lead memberships on ≥ 6 projects (one inactive, one soft-deleted membership) and ownership (`OwnerIDUser`) of ≥ 3 projects without a membership (and ≥ 1 with both); overdue tasks of Lead (open; `Done`; soft-deleted; future; NULL `DueDate`) spread so the `MyOverdueBand` bands 0, 1–2, 3–9 and 10+ are all non-empty; open Blocker issues on some of Lead's projects, a closed Blocker, an open non-Blocker, a **soft-deleted open Blocker** (must not block) and a tenant-2 open Blocker referencing a tenant-1 project (invisible: must not block); `Project.Status` ∈ `Active, AtRisk, OnHold, Done, ''`; `StartDate` across 2024-01…2027-06 with NULLs; a soft-deleted client referenced by live projects and a tenant-2 client referenced from tenant 1 (an `InternalJoin` to either must fail existence); documents across 2025-01…2026-12 (NULL dates), 12 form types, NULL and dangling `IDFormType`.
+
+LabTrack must contain: `Tech` active in two queues, inactive in one, with a soft-deleted membership in another; `Colleague` active in one of Tech's queues; `Newbie` in none; a soft-deleted queue with live intakes; intakes with `Status` `Received / InProgress / Complete / ''`, `ReceivedDate` across ≥ 20 ISO weeks (NULLs), NULL `IDLabQueue`; a soft-deleted intake with live requirements (they must drop out); per requirement every LabForm case — none, `Pending` by Tech (Started), `Complete` by Tech, `Complete` by Colleague (done only through `TenantOnly`), `Complete` but soft-deleted (still to do), `Complete` in tenant 2 for a tenant-1 intake (invisible: still to do); `MaterialTypeFormRequirement` with `Required` 0 and 1, a **duplicate** `(IDMaterialType, IDLabFormType)` row (TuplePivot distinct-key trap) and a soft-deleted row; lab form types with `Discipline` `''`.
+
+`Traps` (values, not positions): ProjectTrack `{ E1ClientIDs: [ a, b ], E2FormTypeID, DeletedClientID, CrossTenantClientID, DanglingFormTypeID, TestNow: '2026-10-08T12:00:00Z' }`; LabTrack `{ TechQueueIDs, DeletedQueueID, DeletedIntakeID, DuplicateTypeRequirement: { IDMaterialType, IDLabFormType }, ColleagueCompleted: [ { IDMaterialIntake, IDLabFormType } ], TestNow }`.
+
+### 31.4 Principals
+
+`generate()` / `build()` return `Principals: { Name: { Tenant, User, Note } }`: ProjectTrack `Lead`, `Member` (Member/Reviewer roles only), `Outsider` (tenant 1, no memberships, owns nothing), `OtherLead` (tenant 2's Lead); LabTrack `Tech`, `Colleague`, `Newbie`, `OtherTech` (tenant 2).
+
+### 31.5 Definitions and the three motivating queries
+
+`ProjectTrack-Definitions.json` and `LabTrack-Definitions.json` (schema-valid) hold 08 §2.1 and §4.1–§4.3 verbatim plus coverage entries: `Project.ManyOverdue` (K19), `Document.InMyProjects` (K10 two hops), `Project.ByMember` (K9 over `ProjectMembership`), `Project.HasOpenIssues` (K20), `Document.ByClient` (K8 two hops), `MaterialIntake.ByRequiredForm` (K9 through the bridge alias). Both must load with **no** disabled entry. The request bodies every test uses (in-process callers pin `Now: Traps.TestNow`):
+
+```javascript
+// E1 — as Principals.Lead
+POST /1.0/Facet/Project/Query
+{
+	Scopes: [ { Scope: 'Project.MyProjects', Params: { Roles: [ 'Owner', 'Lead' ] } }, { Scope: 'Project.HasMyOverdue' }, { Scope: 'Project.Unblocked' } ],
+	Clauses:
+	[
+		{ Type: 'DistinctSelectedValueList', FilterByColumn: 'Status', Values: [ 'Active', 'AtRisk' ], FilterKey: 'Status', Hash: 'Status-DSVL-1' },
+		{ Type: 'InternalJoinSelectedValueList', RemoteTable: 'Client', JoinInternalConnectionColumn: 'IDClient', JoinExternalConnectionColumn: 'IDClient', Values: Traps.E1ClientIDs, FilterKey: 'IDClient', Hash: 'IDClient-IJ-1' },
+		{ Type: 'DateRange', FilterByColumn: 'StartDate', Values: { Start: '2026-01-01 00:00:00', End: '2027-01-01 00:00:00' }, EndExclusive: true, FilterKey: 'StartDate', Hash: 'StartDate-DR-1' }
+	],
+	Facets:
+	[
+		{ Key: 'Status', Facet: 'Project.Status' }, { Key: 'Client', Facet: 'Project.IDClient', Top: 20 },
+		{ Key: 'Started', Facet: 'Project.StartDate', Interval: 'month' }, { Key: 'MyOverdue', Facet: 'Project.MyOverdueBand' },
+		{ Key: 'StatusByClient', Facet: [ 'Project.Status', 'Project.IDClient' ], Fold: 'Pivot' }
+	],
+	Total: true,
+	Records: { Begin: 0, Cap: 50, Sort: [ { Field: 'StartDate', Dir: 'DESC' } ] }
+}
+// E2 — as Principals.Lead
+POST /1.0/Facet/Document/Query
+{
+	Clauses:
+	[
+		{ Type: 'InternalJoinSelectedValueList', RemoteTable: 'FormType', JoinInternalConnectionColumn: 'IDFormType', JoinExternalConnectionColumn: 'IDFormType', Values: [ Traps.E2FormTypeID ], FilterKey: 'IDFormType', Hash: 'IDFormType-IJ-1' },
+		{ Type: 'DateRange', FilterByColumn: 'DocumentDate', Values: { Start: '2026-01-01 00:00:00', End: '2026-07-01 00:00:00' }, EndExclusive: true, FilterKey: 'DocumentDate', Hash: 'DocumentDate-DR-1' }
+	],
+	Facets: [ { Key: 'ByMonth', Facet: 'Document.DocumentDate', Interval: 'month', Chart: true }, { Key: 'ByForm', Facet: 'Document.IDFormType', Top: 20 }, { Key: 'Status', Facet: 'Document.Status', Exclude: 'None' } ],
+	Records: { Begin: 0, Cap: 100 }
+}
+// E3 variant A — as Principals.Tech
+POST /1.0/Facet/MaterialIntakeRequirement/Query
+{ Facets: [ { Key: 'ToDo', Facet: 'MaterialIntakeRequirement.MyFormsToDo' }, { Key: 'Queue', Facet: 'MaterialIntakeRequirement.MyFormsToDo/ByQueue' },
+            { Key: 'Week', Facet: 'MaterialIntakeRequirement.MyFormsToDo/ByWeek' }, { Key: 'Discipline', Facet: 'MaterialIntakeRequirement.MyFormsToDo/ByDiscipline' },
+            { Key: 'Started', Facet: 'MaterialIntakeRequirement.MyFormsToDo/Started' } ] }
+// the work list (pict FilterEndpointOverride 'Facet/MaterialIntakeRequirement/Scope/MaterialIntakeRequirement.ToDoForMe/Records'):
+POST /1.0/Facet/MaterialIntakeRequirement/Scope/MaterialIntakeRequirement.ToDoForMe/Records/0/50   { Clauses: [] }
+POST /1.0/Facet/MaterialIntakeRequirement/Scope/MaterialIntakeRequirement.ToDoForMe/Records/Count  { Clauses: [] }   // == ToDo.Total
+// E3 variant B — as Principals.Tech
+POST /1.0/Facet/MaterialIntake/Query
+{ Facets: [ { Key: 'ToDo', Facet: 'MaterialIntake.FormsToDo' }, { Key: 'Queue', Facet: 'MaterialIntake.FormsToDo/ByQueue' }, { Key: 'Week', Facet: 'MaterialIntake.FormsToDo/ByWeek' } ] }
+```
+
+Hand-derived expectations (O-hand): `test/Facet-Reference-M2_tests.js` computes each motivating answer with direct SQL over the fixture database, written in the test from the definitions' prose (e.g. E3A ToDo = live tenant-1 requirement rows whose live intake is in a live queue where Tech is an active live member, intake Status in Received/InProgress, with no live tenant-1 `Complete` LabForm of **any** owner for the same intake and form type), independent of both engines. Live, the Reference and that SQL must agree.
+
+### 31.6 Seed module API
+
+```javascript
+libSeed.model()                         // deep clone of the domain model
+libSeed.generate({ Seed, Scale })       // → { Fixture, Seed, Scale, Model, Rows: { Table: [ row ] }, Order: [ tables, parents first ], Tenants: [ 1, 2 ], TenantColumn: 'IDCustomer', Traps, Principals }
+libSeed.build(pDB, { Seed, Scale })     // node:sqlite: createTables + insert → { Fixture, Seed, Scale, Model, Counts, LiveCounts, Tenants, TenantCounts, TenantLiveCounts, Traps, Principals }
+libSeed.FACETING_OPTIONS, libSeed.DEFINITIONS_PATH, libSeed.MODEL_PATH, libSeed.TENANT_COLUMN, libSeed.DEFAULT_SEED, libSeed.SCALES
+```
+
+---
+
+## 32. Harness (D) and the provider hook (E)
+
+### 32.1 `start()` (M2)
+
+```javascript
+libHarness.start(
+	{
+		Port: 19124,                                            // registry port (§32.4); ephemeral bind as M1
+		Fixture: 'Bookstore' | 'Bookstore-Tenant' | 'ProjectTrack' | 'LabTrack',   // Domain: accepted as an alias of Fixture
+		Provider: 'SQLite' | 'PostgreSQL',                      // default 'SQLite' (through the hook, §32.2)
+		Definitions: 'Auto' | false | [ path | object … ],     // 'Auto': the domain's DEFINITIONS_PATH (none for the bookstore fixtures)
+		Faceting: { },                                          // deep-merged over the domain's FACETING_OPTIONS; Definitions.Objects concatenated
+		TenancyBehavior: 'Auto' | true | false | function,     // 'Auto': on for Bookstore-Tenant, ProjectTrack, LabTrack (§31.2)
+		Seed, Scale, TenancyEntities, LogLevel, FixedPort       // M1
+	}, fDone);
+```
+
+A PostgreSQL harness whose provider is unavailable calls `fDone` with an error whose `.Skip === true`; PG suites turn it into a skipped suite.
+
+Harness object additions:
+
+| Member | Purpose |
+|---|---|
+| `provider`, `connection` | the hook's provider name and connection |
+| `principals`, `traps` | from the seed |
+| `as(pName)` | `{ Tenant, User }` of a named principal (throws on an unknown name) |
+| `query(pEntity, pBody, pOptions, cb)` | in-process Live (`queryInternal` without `ForceEngine`), honoring `pOptions.Now` / `PlanForm` |
+| `reference(…)` / `compare(…)` | M1, plus `pOptions.Now` / `PlanForm` passed as internal options; `compareInProcess(…)` pins `Now` on both sides |
+| `records(pEntity, pBody, pOptions, cb)`, `recordsPage(pEntity, pBegin, pCap, pBody, pOptions, cb)`, `recordsCount(…)`, `keys(…)`, `scopeRecords(pEntity, pScope, pBegin, pCap, pBody, pOptions, cb)`, `scopeRecordsCount(…)` | the §28 routes over HTTP |
+| `assertSelectionRoundTrip(…, { CountVia: 'Auto' \| 'List' \| 'Reference' })` | M1 O2; `'Auto'` counts through the stock list when no conjunct is Path-shaped, there are no `Scopes` and the envelope has no **declared** facet (`FacetResult.Declared === true`: its counts are under the definition `Where`), else through the Reference: the body without the facet's excluded clauses, plus `Bucket.Clause`, one probe facet (the facet itself with `Exclude: 'None'`; its `Total` is the count), `Total: true` (an excluded FilterString term or an un-removable conjunct is `Skipped`) |
+| `assertTenantIsolation(pEntity, pBody, pPrincipalNames, cb)` | per principal: Live == Reference, and every FK bucket key and every Records/Keys key belongs to that principal's tenant (from `seed.Rows`) |
+| exports `DOMAINS`, `domainSeed(pFixture)`, `domainOptions(pFixture)` | fixture → seed module / its `FACETING_OPTIONS` |
+
+`expectedExclusion` learns join clauses (FilterKey rule, as column clauses) and treats `NamedScope` clauses and request `Scopes` as never excluded.
+
+### 32.2 Provider hook (`test/support/Facet-Harness-Providers.js`)
+
+```javascript
+PROVIDERS                                                         // [ 'SQLite', 'PostgreSQL' ]
+available(pProvider)                    → { Available, Reason }  // PostgreSQL: only with RFS_TEST_POSTGRES=1 or RFS_TEST_POSTGRES_URL
+fableSettings(pProvider, pHarnessOptions) → settings for new libFable(…)   // SQLite: { SQLite: { SQLiteFilePath: ':memory:' } }; PG: { PostgreSQL: { host, port, user, password, database, max: 4 } }
+connect(pProvider, pFable, pHarnessOptions, fCallback)            // → (pError, pConnection { Provider, StorageProvider, db, pool, Database, Coerced, Schema: 'Harness' | 'Meadow' })   // pHarnessOptions.PostgresSchema 'Meadow': the production DDL (§33.3)
+seed(pConnection, pSeedModule, pSeedOptions, fCallback)           // → (pError, pSeedResult): SQLite = pSeedModule.build(db); PG = createTables from the model + insert generate().Rows
+release(pConnection, fCallback)                                   // SQLite: close; PG: end the pool, DROP DATABASE
+```
+
+The harness owns domains, principals, behaviors and oracles; the hook owns providers. SQLite is implemented (what the M1 harness did inline); E implements PostgreSQL. The harness passes `pConnection.StorageProvider` to RDS (`StorageProvider`, `loadModel(…, StorageProvider)`).
+
+### 32.3 O2 through the Reference
+
+When `CountVia` resolves to `'Reference'`, the count of a modified body is the Reference envelope `Total` for that body as the same principal (with the same pinned `Now`). This keeps O2 independent of Live; the stock list remains the oracle whenever it can express the filter.
+
+### 32.4 Port registry additions
+
+| Port | File |
+|---|---|
+| 19120 | `test/Facet-Definitions_tests.js` (A; only if it boots a server) |
+| 19121 | `test/Facet-Plan-M2_tests.js` (B) |
+| 19122 | `test/Facet-Live-M2_tests.js` (C) |
+| 19123 | `test/Facet-PlanForms_tests.js` (C) |
+| 19124 | `test/Facet-Reference-M2_tests.js` (D) |
+| 19125 | `test/Facet-Conformance-PostgreSQL_tests.js` (E) |
+| 19126 | `test/Facet-Motivating-Queries_tests.js` (wiring) |
+| 19127 | `test/Facet-Records-Keys_tests.js` (wiring) |
+| 19128 | `test/Facet-Security-M2_tests.js` (C + wiring: per-hop isolation, TenantOnly, Opaque/Staged, 403 gates) |
+| 19129 | `test/Facet-Review-M2_tests.js` (the M2 review regressions, SQLite and PostgreSQL) |
+| 19191 | `debug/m2-smoke.js` (pinned; ProjectTrack on 19191, LabTrack on an ephemeral port) |
+
+---
+
+## 33. PostgreSQL (E)
+
+### 33.1 The container (`test/support/Facet-Docker-Postgres.js`)
+
+| | |
+|---|---|
+| name | `rfs-test-postgres` — the **only** container this module creates, starts, stops or removes |
+| image | `postgres:16-alpine` |
+| port | `127.0.0.1:15433 → 5432` |
+| password | `RFS_TEST_POSTGRES_PASSWORD`, else the throwaway `'rfs-throwaway-test-only'` |
+| `ensure(pOptions, cb)` | `docker ps -a --filter name=^/rfs-test-postgres$`: absent → `docker run -d --name rfs-test-postgres -e POSTGRES_PASSWORD=… -p 127.0.0.1:15433:5432 postgres:16-alpine` (a name conflict from a concurrent run reuses that container); stopped → `docker start rfs-test-postgres`; then poll `docker exec rfs-test-postgres pg_isready -U postgres` (≤ 60 s); a wrong password (`28P01`) stops polling at once with a hint; the leftover `rfs_*` sweep never runs against `RFS_TEST_POSTGRES_URL` (a shared server: local pid liveness proves nothing) |
+| guard | `assertOwnContainer`: `exec` only with the container as the FIRST argument after the verb; `inspect` is not allowed |
+| `stop(cb)` | `docker stop rfs-test-postgres` then `docker rm rfs-test-postgres` |
+| CLI | `node test/support/Facet-Docker-Postgres.js ensure \| stop` |
+
+Never another container, image, volume or network (in particular never `sluice-dev-postgres` on 5433); never `docker system prune`, never `rm -f` of anything but this name. Test runs reuse a running container and leave it running; `npm run test:pg:down` removes it.
+
+### 33.2 Gating
+
+`RFS_TEST_POSTGRES=1` → the container; `RFS_TEST_POSTGRES_URL=postgres://user:password@host:port/database` → that server (the hook still creates and drops only its own `rfs_*` databases and never touches another database). Neither → every PG suite is skipped, so plain `npm test` stays SQLite-only and fast. The PG hook refuses to run unless the process time zone is UTC (`new Date(2020, 0, 1).getTimezoneOffset() === 0`; node-postgres parses `timestamp` in local time) with a clear error.
+
+### 33.3 Schema and data
+
+Both providers create, after the rows are in, an index on every `Join` / `ForeignKey` column (each graph edge's On / Correlate column), every GUID column and the tenancy / owner columns (`IDCustomer`, `IDTenant`, `OwnerIDUser`), then `ANALYZE` (so the planner probes a correlated hop through its correlation index, not the tenancy index); `Bookstore-Seed.indexColumns` / `createIndexes` own the rule. **Production mode** (`start({ …, Provider: 'PostgreSQL', PostgresSchema: 'Meadow' })`): the tables come from `meadow-connection-postgresql`'s `generateCreateTableStatement` (BOOLEAN NOT NULL DEFAULT false, INTEGER / VARCHAR NOT NULL defaults), NULLs are inserted as the column DEFAULT (the seed's `Rows` are updated so the JS oracles see what the database holds), and the database uses an ICU `en-US` collation; `Facet-Review-M2` runs E1 / E3A / E3B, Boolean Terms and a Records string sort (== the list's order, ≠ byte order) on it.
+
+One fresh database per harness, `rfs_<pid>_<counter>`, `CREATE DATABASE … TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'` (byte collation: the same order as SQLite BINARY and `compareKeys` for the ASCII fixtures), dropped by `release()`; `ensure()` also drops leftover `rfs_*` databases that have no connections. Tables come from the model with **nullable** columns and no defaults (seeded NULLs stay NULL): `ID → SERIAL PRIMARY KEY` (explicit IDs inserted, then `setval`), `GUID → VARCHAR(n)`, `Numeric` / FK / audit user `→ INTEGER`, `Decimal → DECIMAL(p,s)`, `String → VARCHAR(n)`, `Text` / `JSON → TEXT`, `DateTime → TIMESTAMP`, `Boolean` (incl. `Deleted`) `→ SMALLINT` (meadow's PostgreSQL convention). Rows are `seed.generate().Rows` inserted in `Order` in batches. A value a typed column cannot hold (the bookstore's `''` / `' '` in `BookStoreInventory.BookCount`) is inserted as NULL and listed in `pConnection.Coerced` (G1 is SQLite-only); `DECIMAL(10,2)` rounds the 499.996 trap to 500.00. RDS runs with `StorageProvider: 'PostgreSQL'` and the umbrella `meadow-connection-postgresql` (`MeadowPostgreSQLProvider`).
+
+### 33.4 Execution and parity
+
+PG Live == PG Reference for every M1 conformance fixture first (the requests of `Facet-Conformance-SQLite_tests.js`), then every M2 fixture of §34 on the two domains. Explicit checks: the corrected `numericIndex` on `numeric` (values exactly on an edge, decimal edges such as 8.4 / 0.2, the clause count of every bucket through the list), DateHistogram on every interval (ISO week across year ends, quarter and year starts, the boundary traps) equal to `FacetBuckets.dateKey`, exact Stats sums on `DECIMAL`, Terms over SMALLINT booleans, bigint counts arriving as strings, `IS NULL` predicates, Terms tie-break order under `C` collation, and the M2 shells (EXISTS chains, Staged `= ANY(CAST(:k AS bigint[]))` and `unnest`, the cube). Fixes go to the existing entries of `Shell-Templates-PostgreSQL.js` and to the PostgreSQL branch of `Retold-Faceting-Dialects.js`; MySQL / MSSQL are untouched.
+
+### 33.5 Scripts (`package.json`)
+
+```json
+"test:pg": "RFS_TEST_POSTGRES=1 TZ=UTC npx mocha --timeout 20000",
+"test:pg:up": "node test/support/Facet-Docker-Postgres.js ensure",
+"test:pg:down": "node test/support/Facet-Docker-Postgres.js stop"
+```
+
+`test:pg` runs the **whole** spec set with the gate on (the SQLite halves are fast), so a new PG-gated suite can never be left out. The provider hook ensures the container itself (the first harness of a process runs `ensure()`), so `test:pg:up` is optional. `npm test` is unchanged (every PG suite skips without the gate). Suites gate **only** on provider availability; any other unmet precondition is a hard failure in `suiteSetup`, never a pending test.
+
+---
+
+## 34. Oracles and conformance obligations (M2)
+
+| Oracle | M2 obligation |
+|---|---|
+| **O1** | Live == Reference (normalized envelopes) for every fixture request of §31.5 and §34 rows below, as every principal of the domain, on SQLite (and on PG under the gate) |
+| **O2** | every bucket with a Clause round-trips (`CountVia: 'Auto'`); envelope `Total` == list Count (or Reference Total when Path-shaped / scoped); E3A `ToDo.Total` == `/Scope/…ToDoForMe/Records/Count` |
+| **O-hand** | the four motivating answers equal hand-written SQL over the fixture database (§31.5) |
+| **O5** | `PlanForm` `{ Cube: 'Never', Staged: 'Never' }` == `{ Cube: 'Always' }` == `{ Staged: 'Always' }` for every cross-entity fixture (RawFacetResults and envelopes); a > 1 000-key Staged set; cube fallback == per-Variant |
+| **O6 (M2)** | two-tenant isolation on every hop (tenant-2 rows never count, cross-tenant references land in Missing / non-existence); a hop's tenancy behavior removed → Strict 500; LabForm owner scope (`Inherit` hop sees only the principal's forms, `TenantOnly` sees the tenant's, never another tenant's); relaxation refused when the owner column appears elsewhere; untrusted Opaque hop → 500; 403 for unreadable scope / join / hop entities before field validation; `$CurrentUser` unset → 401; client `'$Now'` is a literal |
+| **O9** | goldens for every new statement form per dialect (§26.4) |
+
+Per test file:
+
+- `test/Facet-Definitions_tests.js` (A): every §20.3 reason has a failing fixture (disabled, logged, dependents disabled, nothing partial); both domain files load with zero disabled entries; ajv cross-check; CheckParent forcing on / off; canonical E1 / E3A / E3B forms against hand-written expectations; hashes stable and ModelVersion moving with a definitions change; `resolvePath` for every direction, co-reference (ambiguous, `{ Via, To }`), aliases (declared, bridge, cycle), `MaxHops`; PathAuto synthesis; §29 post-processing as pure functions (band labels, ExistsSplit, MultiValued arithmetic, the clause table, selected keys from join conjuncts).
+- `test/Facet-Plan-M2_tests.js` (B): every token and its failure; params (each type and error reason); `$Now` flooring and pinning; BindHash; NamedScope (clause and request) and every join clause type incl. `UndeclaredJoin`, gate-before-validation, OR with a join clause; M1 bodies keep their conjunct Ids; every row of §24.8 (golden FoldIR for E1, E3A, E3B); Variants with W_def; the E1 CubePlan (flags `b1`–`b3`, RequireFlags per facet, Total requiring all); DepSet across hops; plan-wide unique aliases.
+- `test/Facet-Live-M2_tests.js` (C): every K kind on the domains against direct SQL and the Reference; TenantOnly; per-hop scope; Staged and Opaque; PG dry-builds and O9 goldens.
+- `test/Facet-PlanForms_tests.js` (C): O5.
+- `test/Facet-Reference-M2_tests.js` (D): O-hand, O1 and O2 on both domains for every principal, two-tenant isolation, owner scope, cross-tenant references.
+- `test/Facet-Conformance-PostgreSQL_tests.js` (E): §33.4.
+- `test/Facet-Motivating-Queries_tests.js`, `test/Facet-Records-Keys_tests.js` (wiring): E1, E2, E3A, E3B over HTTP as the principals (envelopes, Records pages and order, hydration, dropped header, `Count`, `Keys`, scope routes, pict `FilterEndpointOverride` shapes, limits, Versions differing across principals of one tenant through BindHash).
+
+---
+
+## 35. File ownership and the shared-file protocol
+
+| Owner | Files (M2) |
+|---|---|
+| **A** | `source/catalog/Retold-Faceting-DefinitionRegistry.js`, `source/catalog/Facet-Definition-Schema.json`, `source/catalog/Retold-Faceting-Graph.js` (`resolvePath`, `coReferenceSource`, `pathSignature`), `source/catalog/Retold-Faceting-Catalog.js` (`refreshModelVersion`, PathAuto descriptor support, Describe pieces of §30.1), `source/contract/Facet-Contract-Envelope.js`, `-Buckets.js`, `-Clauses.js` (§29), `test/Facet-Definitions_tests.js` |
+| **B** | `source/plan/*` (Planner, FoldIR, Binder, optional `Retold-Faceting-Lowering.js`), `source/request/Retold-Faceting-ClauseCompiler.js`, `source/request/Retold-Faceting-FilterAST.js`, `source/request/Retold-Faceting-DisjunctivePlanner.js`, `test/Facet-Plan-M2_tests.js` |
+| **C** | `source/engine/live/*` (ScopedRelationBuilder, PredicateCompiler, StagedKeys, CubeExecutor, ShellTemplates, Dialects, the M2 entries of every `Shell-Templates-<Dialect>.js`), `source/engine/Retold-Faceting-EngineLive.js`, `source/engine/Retold-Faceting-EngineBase.js`, `source/security/Retold-Faceting-ScopeCapture.js`, `source/security/Retold-Faceting-ScopeGuard.js`, `test/Facet-Live-M2_tests.js`, `test/Facet-PlanForms_tests.js`, `test/Facet-Security-M2_tests.js` (with wiring), `test/goldens/*` |
+| **D** | `test/fixtures/ProjectTrack-*`, `test/fixtures/LabTrack-*`, `source/engine/Retold-Faceting-EngineReference.js`, `test/support/Facet-Test-Harness.js`, `test/Facet-Reference-M2_tests.js` |
+| **E** | `test/support/Facet-Harness-Providers.js`, `test/support/Facet-Docker-Postgres.js`, `test/fixtures/Bookstore-Seed.js` (provider helpers only), the existing M1 entries of `source/engine/live/Shell-Templates-PostgreSQL.js`, the PostgreSQL branch of `source/engine/live/Retold-Faceting-Dialects.js`, `package.json` scripts `test:pg*`, `test/Facet-Conformance-PostgreSQL_tests.js` |
+| **wiring** | `source/Retold-Faceting-Service.js`, `-Installers.js`, `-Service-Options.js`, `-Util.js`, `source/routes/*`, `source/engine/Retold-Faceting-Router.js`, `source/security/Retold-Faceting-Authorizer.js`, `-PrincipalResolver.js`, `source/contract/Facet-Contract-Request.js`, `source/request/Retold-Faceting-RequestNormalizer.js`, `source/catalog/Retold-Faceting-LabelResolver.js`, `README.md`, `docs/internal-contracts.md` after the builders, `test/Facet-Motivating-Queries_tests.js`, `test/Facet-Records-Keys_tests.js`, `debug/m2-smoke.js`, and the M1 tests whose expectations the normalizer change alters |
+| **shared** | `test/Facet-Smoke_tests.js` (anyone ADDS assertions), `source/contract/Facet-Contract-Errors.js` (add codes only), `source/contract/Facet-Contract-Util.js` (add helpers only) |
+
+Protocol:
+
+1. Edit only your files. A contract change is made **here first**, in the same change, with a line in §36.
+2. Shared files and files two owners touch (the PostgreSQL shell file: C adds a `// M2` block, E fixes existing entries; `Retold-Faceting-Dialects.js`: C generally, E the PostgreSQL branch): string-replacement `Edit` only, re-read first, never a whole-file `Write`, add rather than remove.
+3. When your contracted change breaks an M1 assertion in someone else's test file, fix that assertion in the same change (never weaken an oracle) and say so in your report.
+4. `npm test` green after every change; PostgreSQL suites are gated.
+5. M1 rules stand: umbrella `node_modules` only (no `npm install`), Node 22 `fetch`, ephemeral ports (except smoke scripts), Retold style (tabs, Allman, `pVariable` / `tmpVariable` / `libX`, services extend `fable-serviceproviderbase` with `serviceType`), restify handlers never return promises and call `fNext` once, Mocha TDD, never `git add` / `commit` / `push`, never modify files outside this module, docker only for `rfs-test-postgres`.
+
+---
+
+## 36. Ambiguities resolved / M2 deviations from the design
+
+1. **Records routes are POST** (pict-section-recordset posts to `…/:Offset/:PageSize` and `…/Count`); "the recordset FilterEndpointOverride GET shape" in the brief is read as the URL shape. No GET forms in M2.
+2. **`Domain`** in the brief is the harness `Fixture` option; both names are accepted.
+3. **Selections / `FacetSelection` stay refused** (`422 { Milestone: 2 }`); Selection-only buckets (ChildRollup, ExistsSplit, multi-hop K8, K9 off the bridge form, TuplePivot) are checked by O1 and O-hand, not O2.
+4. **TuplePivot buckets have no Clause** and TuplePivot Records (synthetic tuples) are M3; `Records` in a TuplePivot definition is ignored with a warning.
+5. **No L4 elision** (an elided existence check differs on dangling FKs, and the list-based Reference cannot elide); `Elide: true` is a load warning; L3 only adds an implied predicate.
+6. **`$Now` binds floored to `Cache.NowBucketMS`** (the bound value equals the hashed one); seeds keep `$Now`-compared dates far from any plausible clock; tests pin `Now` in-process.
+7. **Unset `$CurrentUser` / `$Scope` values are 401**, never "matches nothing".
+8. **`Not` and `Any` are desugared, scope references inlined, at load**; there is no `Scope` or `Not` node at run time.
+9. **`NamedScope` clauses are taken out of the pict sequence** (always ANDed; `Junction: 'OR'` / `GUIDGroup` refused), so a scope can never be OR-combined with client intent (I3).
+10. **Gate granularity:** entities read by the request filter fail the whole request (403) before their fields are validated; entities read by one facet fail that facet (403).
+11. **Definition predicates may not name policy columns** (`'PolicyField'`): scope is the policy's job, and it keeps the `TenantOnly` relaxation exact.
+12. **TuplePivot Home side is SQL alias `'p'`**; definition aliases are logical names only.
+13. **Plan-wide unique aliases** with disjoint prefixes; relation memo keys exclude the alias.
+14. **Cube scope:** formed for ≥ 2 eligible members under `'Auto'`; over `CubeMaxGroups` or with a `Transformed` capture it falls back to per-Variant statements (never an error); the 01 §8.4 step 5 GROUPING SETS / UNION ALL fallback is M3.
+15. **Staged scope:** leaf existence hops with integer keys only, one scalar per key column, no chunking; a trusted Opaque query must still show the policy binds.
+16. **The Reference shares** the Planner's FoldIR, `FilterAST.applyToQuery` and `relaxPersonalScope` with Live; it evaluates column predicates by list membership, never by JS comparison.
+17. **Ignored definition keys** (`Catalog` section, `Engines`, `Freshness`, `Limits`, `Visibility`, `Missing`, `ClauseType`, `Selectable`, `Records`) load with warnings.
+18. **K12** is `count` over one `<` step; **K19** is one `<` / `=` step; a **K9** `Where` applies to the last step's entity.
+19. **ExistsSplit keys are `1` / `0`** (numbers, like Boolean Terms keys), labels from the definition (default `'Yes'` / `'No'`).
+20. **New FacetResult fields appear only on non-auto facets**, so M1 envelopes are byte-identical.
+21. **PostgreSQL test DDL** is the model with nullable columns, SMALLINT booleans and C collation, not `meadow-connection-postgresql`'s `createTables` (its NOT NULL defaults would rewrite seeded NULLs, and its BOOLEAN differs from meadow's SMALLINT convention). The production DDL (BOOLEAN, NOT NULL defaults) under an ICU collation is covered separately (§33.3 production mode).
+22. **PostgreSQL tests require `TZ=UTC`.**
+23. **Ad-hoc `Definition` stays 403** whatever `Definitions.AllowAdHoc` says.
+24. **FK Terms keep `DistinctSelectedValueList`** (M1 §16.4); one-hop K8 buckets use the `InternalJoin*` clauses.
+25. **The schema is enforced by a built-in validator** (no runtime dependency); ajv is a test-only cross-check.
+26. **`Definitions.Objects`** (in-memory definitions) is added for tests and code-built hosts.
+27. **Default `FilterKey` of a path facet is its FacetID.**
+28. **MultiValued facets report `OtherCount: null`.**
+29. **Definitions are validated per entry**; a bad file envelope disables the whole source.
+30. **The `/Scope/:Scope/` route takes that scope's params from the top-level `Params`.**
+31. **Records sort NULLs last in both directions** with the PK as the final tie-break, on every dialect.
+
+As built (the builders' and the wiring agent's additions; all additive unless noted):
+
+32. **Definitions (A).** The extra disabled reasons, the `TimeZone` unsupported feature, the extra CanonicalFacet fields and the FilterKey / Exclude / CountMode / Labels / Entities conventions are in §20.4 and §20.7. An entity on a path that is not in the catalog is a **load** error (`UnknownEntity`), not a request-time 403 (label paths are exempt); so a `NeverFacet` entity disables the definitions that read it, and the request-time 403 of §19.6 covers per-principal refusals (`Host.isFacetable`, the host authorizer). `definitionsHash()` hashes file basenames. `buildEnvelope` passes `Records`, `RecordShape`, `RecordsDropped` through; MultiValued facets report `OtherCount: null`; M2 FacetResult fields appear on non-auto facets only.
+33. **Variants and lowering (B).** `Variant.Hash` stays the M1 value (`c1,c3`) without a definition Where and becomes `c1,c3|wh:…` with one (M1 hashes and Reference fingerprints unchanged); Variants also carry `PathConjuncts`. Optional extra arguments: `Binder.bind(…, { Entity, Sides, Owner, OwnerKind })`, `ClauseCompiler.compile(…, { Bind, CanFacet })`, `FilterAST.newConjunct(…, pExtra)`. Helpers: FilterAST `scopeConjunct`, `isPathConjunct`, `hasExistence`, `entitiesOf`; ClauseCompiler `pathPlan`, `M2_CLAUSE_TYPES`; FoldIR `columnsOf`, `pivotColumns`. `Plan.Lowered` maps each Path conjunct Id to its FoldPred; CubePlan flags carry `Shape` and `Pred`, the CubePlan `CommonColumn`, `CommonPath`, `CommonPathPred`, `ConjunctPreds`. Identical K8 hop chains are shared between Aggs (one Rel, the union projection; joined once per alias); a definition Where is lowered once per WhereHash; `Multi.Where` may name any alias of its chain. A PathAuto facet may be a request pivot axis, a declared one may not (`422 DeclaredPivotAxis`). Top-level Params declared by a request scope are accepted (§22.3, the `/Scope/` form). `PolyJoinRemoteType` filters the join-table step. `planBase` reuses the request's v0. `Planner.checkRequestParams(pContext, pResolved)` is the public form of the Params check (the Records / Count / Keys pipeline). The L3 pushdown of §24.8 is not implemented (L3 only owns the join conjunct through the connection column).
+34. **Live (C).** Live widens each Rel's projection to every column its trees read on that alias. `recordKeys` / `keys` also return `Captures`; `countBase` calls back a third `pMeta { Captures }`. Captures gain `ScopeMode`, `Relaxed`, `Removed`, `RelaxRefused`, `Trusted`, `Replaced`; guard results gain `Relaxed` / `Deferred` only when they apply. Live refusals report `Milestone: 2`. The shell registry adds `M2_TEMPLATES` and `dimensionExpression()`. `PlanForm.ChildAgg` (`'Correlated'` default, or `'Restricted'`) is a test-only switch `newContext` does not pass. Error attribution follows §19.7: an error on the pivot or a Variant path-predicate hop fails the request (except `TOO_LARGE`, `FOLD_UNSUPPORTED`, `TIMEOUT`, which stay per facet as in M1); an error on a facet's own hops fails that facet (except 401). MSSQL staged binds use `NVarChar`. Upstream: FoxHound's SQLite dialect mangles qualified filter columns, so PredicateFragments stay unqualified and a column predicate outside its only FROM item goes through a 0/1 flag column. `source/engine/live/Retold-Faceting-StatementComposer.js` and the test support files `Facet-Live-M2-Kit.js` / `Facet-Live-M2-FoldIR.js` exist beyond §35.
+35. **Reference and harness (D).** O2 through the Reference counts a probe facet (`Exclude: 'None'`, its `Total`) rather than `Facets: []` (the normalizer refuses an empty list, and a W_def facet must be counted under its Where). `assertTenantIsolation(pEntity, pBody, pNames[, { Keys: false }], cb)` also checks the first Records page. Extra harness members: `facetingOptions`, `visibleRows`, `M2_BUCKETED_FOLDS`, `needsReferenceCount(pBody[, pEnvelope])`, `internalOptions`, `policyBehavior`; `build()` also returns `Rows`, `Order`, `TenantColumn`. Reference semantics: a NULL K9 `KeyField` is no key; ExistsSplit returns non-empty groups only, key 1 first; the definition Where comes from `Agg.Where`, else `Variant.Where`; a facet relation failure is per facet except 401; a Variant `PathPred` failure fails the request. Each tenant has exactly one (live) Customer row.
+36. **PostgreSQL (E).** Both conformance suites build the Bookstore fixture list from `test/fixtures/Bookstore-Conformance-Fixtures.js` (`build(Expect, countsOf, libHarness) → { Fixtures, RatingRanges }`); the PG suite applies its deltas to it. Every gated suite fails at teardown when a statement reuses an array bind or binds an empty array (meadow's PG provider binds only the first element of a reused array, and `IN ( )` is a syntax error) — no M2 statement does. On a production PG database without C collation the Terms row cap breaks ties in that collation (adding `COLLATE "C"` would change the PG goldens): M3.
+37. **Fractional range bounds on INTEGER columns** bind their integer equivalent (`GE` / `LT` → `ceil`, `GT` / `LE` → `floor`; `ClauseCompiler._rangeBound`): the same integer rows, and PostgreSQL never sees `'0.5'` bound to an integer parameter (22P02). Bucket Clauses keep their exact bounds; the compiler normalizes them, so they count identically on the list, the Reference and Live.
+38. **ChildRollup / ExistsSplit Labels** travel on the lowered FoldIR dimension (`Dim.Labels`, §24.3); without it the definition's labels were lost (`'Yes'` / `'No'`, `'None'`).
+39. **The cube is on by default** (`Execution.Cube: 'Auto'`), M1 bodies included: two or more cube-eligible facets of one pivot (the Total counts) are one grouped statement. The M1 tests that counted statements or Terms rows now pin `PlanForm: { Cube: 'Never' }` or lower `CubeMaxGroups` (the cube statement returns at most `CubeMaxGroups + 1` grain rows, then falls back to the capped per-Variant Terms statements), and assert the cube form separately (O5).
+40. **Hydration includes the Variant's column conjuncts** next to `pk IN (keys)` (§28.3), so a row that stopped matching between the two statements is dropped, not returned; the explicit soft delete follows the client exactly as the pivot relation does.
+41. **A TuplePivot's Home side and a client clause naming the delete column:** the Home side honours the client's choice like an entity pivot (no explicit soft delete when a client conjunct names the column); Live and the Reference agree (`Facet-Motivating-Queries` E3B), which settles builder B's open question.
+42. **Scopes entries are shape-checked by the normalizer** (`400 FACET_REQUEST_INVALID { Field: 'Scopes', Index }` for a non-object or a missing `Scope`), and `FACET_UNKNOWN_SCOPE` stays the FilterAST's answer for a well-formed unknown, disabled or wrong-entity name — so the two are distinguishable only by shape, never by existence.
+43. **`newContext(pEntity, pRequest, pInternalOptions, pMode)`**: the mode is a fourth argument set by the entry point, never an internal option.
+
+M2 review (`.build-notes/m2-report.md` lists every finding):
+
+44. **Read-side behaviors are audited** (06 §3.5, §8.1): Opaque `'PostOperation'` unless `TrustPostOperation` / `PostOperationSafeColumns`; the Reference stays the list's truth (it runs the PostOperation), so for such an entity Live refuses where the Reference answers — the refusal is the contract.
+45. **TenantOnly fails closed** twice: at load (`TenantOnlyNeedsTenant`, `TenantOnlyParam`) and in the guard (`TenantOnlyUnscoped`, the depth-0 OR check always on).
+46. **Trusted replaced queries are asserted on their filter and their exact rendered binds** (§26.3), never "the column appears and some bind has the value".
+47. **Gates come before graph lookups and before Supported** (§23.4, §20.8): hidden and missing entity names, hidden PathAuto targets and nonexistent paths, unsupported scopes over hidden entities are indistinguishable.
+48. **Fragments render post-behavior operators** through per-entity probes (§26.4); the cube falls back when a flag leaf is transformed.
+49. **Restricted path facets have no bucket Clause** (§29.3).
+50. **TuplePivot sides lower Home first in connectivity order**; every side must be reachable through Join-related On pairs (§20.6, §24.4).
+51. **ChildRollup Edges start at 1**; **numeric folds refuse Boolean columns** at load.
+52. **`$Now` is the StorageTimeZone wall clock**; **BindHash keeps every value of a repeated key**; **Integer params and integer filter values are range-checked**.
+53. **Stats and Missing are cube measures**; `Keys` counts only when truncated; `Statements` counts every statement (labels and Records included); the LabelResolver reads each label target once.
+54. **Test databases are indexed and analyzed** like a production schema, a production-DDL / ICU PostgreSQL mode exists, and readiness gates are gone (§33).
+
+---
+
+## 37. Seams for M3
+
+| Seam | M2 behavior |
+|---|---|
+| GROUPING SETS / UNION ALL cube fallback, grain estimates | per-Variant fallback |
+| `Selections`, `FacetSelection`, Records of a Selection-only bucket | `422 { Milestone: 2 }` / Clause `null` |
+| TuplePivot Records (`RecordShape: 'Tuple'`), TuplePivot Pivot | ignored / refused at load |
+| K13 Quantified, K15 Computed (Expressions), K16 UnionOfSources, non-count Measures, ChildRollup sum/min/max, multi-step HavingCount / ChildRollup | `Supported: false` → 422 |
+| L4 elision from the capture | never; when it comes, it may only consider bridges with `Elidable: true` (a tenant-scoped join table is never elided: eliding it would skip its tenant predicate) |
+| TuplePivot siblings in one grouped statement (or the distinct tuple set staged once per request) | one statement per TuplePivot facet (E3B: three) |
+| NumericHistogram `Nice` bounds taken from a Stats measure of the same column and Variant | a separate bounds statement |
+| `COUNT(*) OVER ()` in the truncated Keys statement (one snapshot) | a second count statement when truncated |
+| Controller-less hops (`Catalog.Controllerless`) | refused (FACET_INTERNAL from the capture, as M1) |
+| MySQL / MSSQL execution and collation (G2, C10) | dry-built only |
+| Staged chunking (MySQL 5.7, MSSQL < 2016), non-integer staged keys | refused |
+| Result cache keyed by BindHash + generations (P3) | Version hashes the representation (M1 §10.5) |
+| Explain, the GET Query form, `Experience.Projection` on Records | not mounted / ignored |
+| Keyset paging (`AfterKey`) past `MaxRecordsOffset` / `MaxKeys` | 400 / `Truncated: true` |
+| `/Scope/:Scope/Keys` | use `/Keys` with `Scopes` |
+| `COLLATE "C"` on PostgreSQL string keys (Terms tie order on non-C databases) | the test databases are C-collated |
+| CostModel, row prechecks (`LIMITS_NOT_ENFORCED`) | not enforced |

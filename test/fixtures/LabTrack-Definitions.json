@@ -1,0 +1,98 @@
+{
+	"FormatVersion": 1,
+	"Description": "LabTrack fixture definitions: E3 of design 08 §4 (variant A: stored requirements + co-reference anti-join; variant B: TuplePivot expected-minus-actual) plus a K9 coverage facet through the synthetic bridge alias (internal-contracts §31.5).",
+	"Aliases":
+	{
+		"QueueMembers": [ ">MaterialIntake.IDLabQueue", "<LabQueueMember.IDLabQueue" ]
+	},
+	"Scopes":
+	{
+		"MaterialIntake.InMyQueues":
+		{
+			"Entity": "MaterialIntake",
+			"Description": "Intakes in lab queues where I am an active member",
+			"Where":
+			[
+				{ "Exists": { "Path": [ "@QueueMembers" ],
+				              "Where": [ { "Field": "IDUser", "Op": "EQ", "Value": "$CurrentUser.IDUser" },
+				                         { "Field": "Active", "Op": "EQ", "Value": 1 } ] } },
+				{ "Field": "Status", "Op": "IN", "Value": [ "Received", "InProgress" ] }
+			]
+		},
+		"MaterialIntakeRequirement.ToDoForMe":
+		{
+			"Entity": "MaterialIntakeRequirement",
+			"Description": "Required lab forms for intakes in my queues that nobody in my lab has completed yet",
+			"Where":
+			[
+				{ "Exists": { "Path": [ ">MaterialIntakeRequirement.IDMaterialIntake" ], "Where": [ { "Scope": "MaterialIntake.InMyQueues" } ] } },
+				{ "NotExists": { "Path": [ { "Step": "=LabForm.IDMaterialIntake", "Scope": "TenantOnly",
+				                             "ScopeReason": "A form completed by any technician in my lab satisfies the requirement." } ],
+				                 "Where": [ { "Field": "Status", "Op": "EQ", "Value": "Complete" } ],
+				                 "Correlate": [ [ "IDLabFormType", "IDLabFormType" ] ] } }
+			]
+		}
+	},
+	"Facets":
+	[
+		{
+			"Facet": "MaterialIntakeRequirement.MyFormsToDo",
+			"Version": 1,
+			"Title": "Lab forms I still need to complete",
+			"Pivot": "MaterialIntakeRequirement",
+			"Where": [ { "Scope": "MaterialIntakeRequirement.ToDoForMe" } ],
+			"Dimensions": [ { "Kind": "Terms", "Field": "IDLabFormType", "Labels": { "Path": [ ">MaterialIntakeRequirement.IDLabFormType" ], "Field": "Name" } } ],
+			"Siblings":
+			{
+				"ByQueue": { "Kind": "Terms", "Path": [ ">MaterialIntakeRequirement.IDMaterialIntake", ">MaterialIntake.IDLabQueue" ], "Field": "IDLabQueue", "LabelField": "Name" },
+				"ByDiscipline": { "Kind": "Terms", "Path": [ ">MaterialIntakeRequirement.IDLabFormType" ], "Field": "Discipline" },
+				"ByWeek": { "Kind": "DateHistogram", "Path": [ ">MaterialIntakeRequirement.IDMaterialIntake" ], "Field": "ReceivedDate", "Interval": "week" },
+				"Started": { "Kind": "ExistsSplit", "Path": [ "=LabForm.IDMaterialIntake" ], "Correlate": [ [ "IDLabFormType", "IDLabFormType" ] ],
+				             "Where": [ { "Field": "Status", "Op": "NE", "Value": "Complete" } ], "Labels": { "true": "Started", "false": "Not started" } }
+			},
+			"CountMode": "Rows",
+			"Exclude": "Self"
+		},
+		{
+			"Facet": "MaterialIntake.FormsToDo",
+			"Version": 1,
+			"Title": "Lab forms I still need to complete (implied by material type)",
+			"Home": "MaterialIntake",
+			"Pivot":
+			{
+				"Tuple":
+				{
+					"From":
+					[
+						{ "As": "i", "Entity": "MaterialIntake", "Where": [ { "Scope": "MaterialIntake.InMyQueues" } ] },
+						{ "As": "r", "Entity": "MaterialTypeFormRequirement", "Where": [ { "Field": "Required", "Op": "EQ", "Value": 1 } ] }
+					],
+					"On": [ [ "i.IDMaterialType", "r.IDMaterialType" ] ],
+					"Key": [ "i.IDMaterialIntake", "r.IDLabFormType" ]
+				}
+			},
+			"Where":
+			[
+				{ "NotExists": { "From": "i", "Path": [ { "Step": "<LabForm.IDMaterialIntake", "Scope": "TenantOnly", "ScopeReason": "Any technician's completed form satisfies the requirement." } ],
+				                 "Where": [ { "Field": "Status", "Op": "EQ", "Value": "Complete" } ],
+				                 "Correlate": [ [ "r.IDLabFormType", "IDLabFormType" ] ] } }
+			],
+			"Dimensions": [ { "Kind": "Terms", "Field": "r.IDLabFormType", "Labels": { "Path": [ ">MaterialTypeFormRequirement.IDLabFormType" ], "Field": "Name" } } ],
+			"Siblings":
+			{
+				"ByQueue": { "Kind": "Terms", "Field": "i.IDLabQueue" },
+				"ByWeek": { "Kind": "DateHistogram", "Field": "i.ReceivedDate", "Interval": "week" }
+			},
+			"CountMode": "Rows",
+			"Records": { "Project": [ "i.IDMaterialIntake", "r.IDLabFormType", "i.ReceivedDate", "i.IDLabQueue" ] }
+		},
+		{
+			"Facet": "MaterialIntake.ByRequiredForm",
+			"Version": 1,
+			"Title": "Coverage K9: intakes by required form type through the synthetic bridge alias",
+			"Dimensions": [ { "Kind": "Terms", "Path": "@MaterialIntake~LabFormType", "KeyField": "IDLabFormType", "LabelField": "Name", "Top": 25 } ],
+			"CountMode": "PivotDistinct",
+			"Exclude": "Self"
+		}
+	]
+}

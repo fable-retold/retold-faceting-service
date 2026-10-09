@@ -1,0 +1,47 @@
+{
+	"name": "retold-faceting-service-example-faceting-demo",
+	"version": "0.0.1",
+	"description": "Faceting Demo - the three motivating queries of retold-faceting-service plus a Describe-driven bookstore explorer, as a pict single-page app over three seeded retold-data-service domains",
+	"main": "source/Pict-Application-FacetingDemo.js",
+	"scripts": {
+		"prestart": "node server/Ensure-Built.js",
+		"start": "node server/Faceting-Demo-Server.js",
+		"build": "npx quack build && npx quack copy && node server/Copy-Pict.js",
+		"test": "node server/Faceting-Demo-Smoke.js",
+		"check:browser": "node server/Faceting-Demo-Browser-Check.js"
+	},
+	"author": "steven velozo <steven@velozo.com>",
+	"license": "MIT",
+	"dependencies": {
+		"pict": "^1.0.394",
+		"pict-application": "^1.0.34",
+		"pict-provider": "^1.0.13",
+		"pict-router": "^1.0.10",
+		"pict-view": "^1.0.68",
+		"retold-faceting-service": "file:../../"
+	},
+	"devDependencies": {
+		"quackage": "^1.3.0"
+	},
+	"copyFilesSettings": {
+		"whenFileExists": "overwrite"
+	},
+	"copyFiles": [
+		{
+			"from": "./html/*",
+			"to": "./dist/"
+		},
+		{
+			"from": "./css/*",
+			"to": "./dist/"
+		}
+	],
+	"retold": {
+		"ExampleApplication": {
+			"Stage": false,
+			"Title": "Faceting Demo",
+			"Summary": "Projects for me, documents by form type, lab forms to fill out and a bookstore explorer: facets, histograms, pivots and the list they agree with, over three seeded domains. Needs its Node host (npm start).",
+			"Complexity": "Advanced"
+		}
+	}
+}

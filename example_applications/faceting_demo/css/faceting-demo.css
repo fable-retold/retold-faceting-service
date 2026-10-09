@@ -1,0 +1,235 @@
+/*
+ * Faceting Demo -- page-level CSS: design tokens (light + dark), base, the shared pict example header.
+ * Widget and layout CSS live in each view's configuration (pict convention); they read ONLY the tokens below.
+ *
+ *   --fd-*      demo shell tokens (layout, header, inspector)
+ *   --facet-*   widget tokens (the Facet-* views use these and nothing else, each with a hard fallback in
+ *               the view CSS, so the widgets lift into pict-section-facet unchanged; there they map onto
+ *               --theme-color-*)
+ *
+ * Theme: :root[data-fd-theme="dark" | "light"] wins; without it, prefers-color-scheme decides.
+ * DEMO-SPEC §8.
+ */
+
+:root
+{
+	color-scheme: light;
+
+	--fd-font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+	--fd-mono: "SF Mono", "Fira Code", ui-monospace, Menlo, Consolas, monospace;
+
+	--fd-bg: #f5f6f8;
+	--fd-surface: #ffffff;
+	--fd-surface-2: #f0f2f5;
+	--fd-surface-3: #e6e9ef;
+	--fd-border: #dfe3e9;
+	--fd-border-strong: #c5ccd6;
+	--fd-text: #1b2230;
+	--fd-text-muted: #5d6878;
+	--fd-text-faint: #8a94a3;
+
+	--fd-accent: #3b5bdb;
+	--fd-accent-hover: #2f4ac0;
+	--fd-accent-soft: #e8edfd;
+	--fd-accent-text: #ffffff;
+
+	--fd-ok: #2b8a3e;
+	--fd-ok-soft: #e6f4ea;
+	--fd-warn: #a8620a;
+	--fd-warn-soft: #fdf3e1;
+	--fd-error: #c92a2a;
+	--fd-error-soft: #fdecec;
+	--fd-info: #1c64b0;
+	--fd-info-soft: #e9f2fc;
+
+	/* The DEMO principal switcher is deliberately loud: it is a demo-only mechanism. */
+	--fd-demo: #c2410c;
+	--fd-demo-soft: #fff1e6;
+
+	--fd-code-bg: #f3f5f8;
+	--fd-code-text: #24292f;
+
+	--fd-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.08);
+	--fd-shadow-raised: 0 8px 24px rgba(16, 24, 40, 0.14);
+	--fd-radius: 10px;
+	--fd-radius-sm: 6px;
+	--fd-gap: 16px;
+
+	/* Widget tokens */
+	--facet-font: var(--fd-font);
+	--facet-mono: var(--fd-mono);
+	--facet-surface: var(--fd-surface);
+	--facet-surface-2: var(--fd-surface-2);
+	--facet-border: var(--fd-border);
+	--facet-text: var(--fd-text);
+	--facet-text-muted: var(--fd-text-muted);
+	--facet-text-faint: var(--fd-text-faint);
+	--facet-accent: var(--fd-accent);
+	--facet-accent-hover: var(--fd-accent-hover);
+	--facet-accent-soft: var(--fd-accent-soft);
+	--facet-accent-text: var(--fd-accent-text);
+	--facet-bar: #b4c2ea;
+	--facet-bar-hover: #8fa3e0;
+	--facet-bar-selected: var(--fd-accent);
+	--facet-bar-preview: #7b93e6;
+	--facet-bar-zero: #e4e8ef;
+	--facet-bar-disabled: #c9ced8;
+	--facet-heat: 59, 91, 219;
+	--facet-ok: var(--fd-ok);
+	--facet-ok-soft: var(--fd-ok-soft);
+	--facet-warn: var(--fd-warn);
+	--facet-warn-soft: var(--fd-warn-soft);
+	--facet-error: var(--fd-error);
+	--facet-error-soft: var(--fd-error-soft);
+	--facet-info: var(--fd-info);
+	--facet-info-soft: var(--fd-info-soft);
+	--facet-code-bg: var(--fd-code-bg);
+	--facet-code-text: var(--fd-code-text);
+	--facet-radius: var(--fd-radius);
+	--facet-radius-sm: var(--fd-radius-sm);
+}
+
+@media (prefers-color-scheme: dark)
+{
+	:root:not([data-fd-theme="light"])
+	{
+		color-scheme: dark;
+
+		--fd-bg: #0e1116;
+		--fd-surface: #161b22;
+		--fd-surface-2: #1c222b;
+		--fd-surface-3: #252c37;
+		--fd-border: #2a313c;
+		--fd-border-strong: #3a4250;
+		--fd-text: #e6e9ef;
+		--fd-text-muted: #9aa5b4;
+		--fd-text-faint: #6b7584;
+		--fd-accent: #7c93ff;
+		--fd-accent-hover: #93a6ff;
+		--fd-accent-soft: #1f2747;
+		--fd-accent-text: #0e1116;
+		--fd-ok: #51cf66;
+		--fd-ok-soft: #13291a;
+		--fd-warn: #f0b429;
+		--fd-warn-soft: #2e2410;
+		--fd-error: #ff6b6b;
+		--fd-error-soft: #321718;
+		--fd-info: #74b3f2;
+		--fd-info-soft: #14243a;
+		--fd-demo: #fb923c;
+		--fd-demo-soft: #2f1d0e;
+		--fd-code-bg: #0b0e13;
+		--fd-code-text: #d1d7e0;
+		--fd-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+		--fd-shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.55);
+
+		--facet-bar: #34416a;
+		--facet-bar-hover: #45568c;
+		--facet-bar-preview: #5d74d6;
+		--facet-bar-zero: #232a35;
+		--facet-bar-disabled: #39404c;
+		--facet-heat: 124, 147, 255;
+	}
+}
+
+:root[data-fd-theme="dark"]
+{
+	color-scheme: dark;
+
+	--fd-bg: #0e1116;
+	--fd-surface: #161b22;
+	--fd-surface-2: #1c222b;
+	--fd-surface-3: #252c37;
+	--fd-border: #2a313c;
+	--fd-border-strong: #3a4250;
+	--fd-text: #e6e9ef;
+	--fd-text-muted: #9aa5b4;
+	--fd-text-faint: #6b7584;
+	--fd-accent: #7c93ff;
+	--fd-accent-hover: #93a6ff;
+	--fd-accent-soft: #1f2747;
+	--fd-accent-text: #0e1116;
+	--fd-ok: #51cf66;
+	--fd-ok-soft: #13291a;
+	--fd-warn: #f0b429;
+	--fd-warn-soft: #2e2410;
+	--fd-error: #ff6b6b;
+	--fd-error-soft: #321718;
+	--fd-info: #74b3f2;
+	--fd-info-soft: #14243a;
+	--fd-demo: #fb923c;
+	--fd-demo-soft: #2f1d0e;
+	--fd-code-bg: #0b0e13;
+	--fd-code-text: #d1d7e0;
+	--fd-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+	--fd-shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.55);
+
+	--facet-bar: #34416a;
+	--facet-bar-hover: #45568c;
+	--facet-bar-preview: #5d74d6;
+	--facet-bar-zero: #232a35;
+	--facet-bar-disabled: #39404c;
+	--facet-heat: 124, 147, 255;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body
+{
+	margin: 0;
+	padding: 0;
+	background: var(--fd-bg);
+	color: var(--fd-text);
+	font-family: var(--fd-font);
+	font-size: 14px;
+	line-height: 1.45;
+	-webkit-font-smoothing: antialiased;
+}
+
+/* Pict example header (shared pattern across retold examples; structure unchanged) */
+.pict-example-header
+{
+	background: linear-gradient(135deg, #1f2937 0%, #374151 100%);
+	color: #f9fafb;
+	padding: 12px 24px;
+	display: flex;
+	align-items: center;
+	gap: 14px;
+}
+
+.pict-example-badge
+{
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	background: rgba(252, 211, 77, 0.15);
+	color: #fcd34d;
+	border: 1px solid rgba(252, 211, 77, 0.3);
+	padding: 3px 9px;
+	border-radius: 4px;
+	font-size: 0.72rem;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+}
+
+.pict-example-badge svg
+{
+	width: 12px;
+	height: 12px;
+	fill: currentColor;
+}
+
+.pict-example-app-name
+{
+	font-size: 1.05rem;
+	font-weight: 600;
+}
+
+.pict-example-module
+{
+	font-family: var(--fd-mono);
+	font-size: 0.78rem;
+	color: #9ca3af;
+	margin-left: auto;
+}

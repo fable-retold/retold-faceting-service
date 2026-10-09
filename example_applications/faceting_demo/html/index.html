@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Faceting Demo - retold-faceting-service</title>
+		<link rel="stylesheet" href="./faceting-demo.css" />
+		<!-- PICT Dynamic View CSS Container -->
+		<style id="PICT-CSS"></style>
+		<!-- Theme before first paint (no flash): saved choice, else the OS preference -->
+		<script type="text/javascript">
+//<![CDATA[
+		(function () { try { var t = window.localStorage.getItem('retold-faceting-demo-theme'); if (t === 'dark' || t === 'light') { document.documentElement.setAttribute('data-fd-theme', t); } } catch (e) { } })();
+//]]>
+		</script>
+		<!-- Load the PICT library -->
+		<script src="./pict.min.js" type="text/javascript"></script>
+		<!-- Bootstrap the Application -->
+		<script type="text/javascript">
+//<![CDATA[
+		Pict.safeOnDocumentReady(() => { Pict.safeLoadPictApplication(RetoldFacetingServiceExampleFacetingDemo, 0)});
+//]]>
+		</script>
+	</head>
+	<body>
+		<!-- Pict Example Header -->
+		<div class="pict-example-header">
+			<div class="pict-example-badge">
+				<svg viewBox="0 0 16 16"><polygon points="8,1 10,6 16,6 11,9.5 13,15 8,11.5 3,15 5,9.5 0,6 6,6"/></svg>
+				Pict Example
+			</div>
+			<div class="pict-example-app-name">Faceting Demo</div>
+			<div class="pict-example-module">retold-faceting-service</div>
+		</div>
+		<div id="FacetingDemo-Application-Container"></div>
+		<!-- Load the application bundle -->
+		<script src="./retold-faceting-service-example-faceting-demo.compatible.min.js" type="text/javascript"></script>
+	</body>
+</html>

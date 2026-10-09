@@ -1,0 +1,109 @@
+{
+	"FormatVersion": 1,
+	"Description": "ProjectTrack fixture definitions: E1 of design 08 §2 (scopes MyProjects / HasMyOverdue / Unblocked, the MyOverdueBand rollup) plus coverage facets for K8 multi-hop, K9, K19 and K20 (internal-contracts §31.5).",
+	"Aliases":
+	{
+		"MemberOf": [ "<ProjectMembership.IDProject" ]
+	},
+	"Scopes":
+	{
+		"Project.MyProjects":
+		{
+			"Entity": "Project",
+			"Description": "Projects where I hold one of the given roles, or that I own",
+			"Params": { "Roles": { "Type": "EnumList", "Values": [ "Owner", "Lead", "Member", "Reviewer" ], "Default": [ "Owner", "Lead", "Member" ] } },
+			"Where":
+			[
+				{ "Any":
+					[
+						{ "Exists": { "Path": [ "@MemberOf" ], "Where": [ { "Field": "IDUser", "Op": "EQ", "Value": "$CurrentUser.IDUser" },
+						                                                 { "Field": "Role", "Op": "IN", "Value": "$Param.Roles" },
+						                                                 { "Field": "Active", "Op": "EQ", "Value": 1 } ] } },
+						{ "Field": "OwnerIDUser", "Op": "EQ", "Value": "$CurrentUser.IDUser" }
+					] }
+			]
+		},
+		"Project.HasMyOverdue":
+		{
+			"Entity": "Project",
+			"Description": "Projects with at least one overdue task assigned to me",
+			"Where":
+			[
+				{ "Exists": { "Path": [ "<Task.IDProject" ], "Where": [ { "Field": "AssignedIDUser", "Op": "EQ", "Value": "$CurrentUser.IDUser" },
+				                                                     { "Field": "DueDate", "Op": "LT", "Value": "$Now" },
+				                                                     { "Field": "Status", "Op": "NE", "Value": "Done" } ] } }
+			]
+		},
+		"Project.Unblocked":
+		{
+			"Entity": "Project",
+			"Description": "Projects with no open Blocker issue (NoVisibleMatch)",
+			"Where":
+			[
+				{ "NotExists": { "Path": [ "<Issue.IDProject" ], "Where": [ { "Field": "Severity", "Op": "EQ", "Value": "Blocker" },
+				                                                         { "Field": "State", "Op": "EQ", "Value": "Open" } ] } }
+			]
+		},
+		"Project.ManyOverdue":
+		{
+			"Entity": "Project",
+			"Description": "Coverage K19: projects with at least two overdue, unfinished tasks (anyone's)",
+			"Where":
+			[
+				{ "HavingCount": { "Path": [ "<Task.IDProject" ], "Where": [ { "Field": "DueDate", "Op": "LT", "Value": "$Now" },
+				                                                         { "Field": "Status", "Op": "NE", "Value": "Done" } ], "Op": "GE", "Value": 2 } }
+			]
+		},
+		"Document.InMyProjects":
+		{
+			"Entity": "Document",
+			"Description": "Coverage K10 multi-hop: documents of projects where I am an active member",
+			"Where":
+			[
+				{ "Exists": { "Path": [ ">Document.IDProject", "@MemberOf" ], "Where": [ { "Field": "IDUser", "Op": "EQ", "Value": "$CurrentUser.IDUser" },
+				                                                                       { "Field": "Active", "Op": "EQ", "Value": 1 } ] } }
+			]
+		}
+	},
+	"Facets":
+	[
+		{
+			"Facet": "Project.MyOverdueBand",
+			"Version": 1,
+			"Title": "My overdue tasks per project",
+			"Dimensions":
+			[
+				{ "Kind": "ChildRollup",
+				  "Child": { "Path": [ "<Task.IDProject" ], "Agg": "count",
+				             "Where": [ { "Field": "AssignedIDUser", "Op": "EQ", "Value": "$CurrentUser.IDUser" },
+				                        { "Field": "DueDate", "Op": "LT", "Value": "$Now" },
+				                        { "Field": "Status", "Op": "NE", "Value": "Done" } ] },
+				  "Edges": [ 1, 3, 10 ] }
+			],
+			"Exclude": "None"
+		},
+		{
+			"Facet": "Project.ByMember",
+			"Version": 1,
+			"Title": "Coverage K9: projects by active member (multi-valued)",
+			"Dimensions": [ { "Kind": "Terms", "Path": [ "<ProjectMembership.IDProject" ], "Where": [ { "Field": "Active", "Op": "EQ", "Value": 1 } ], "KeyField": "IDUser", "Top": 25 } ],
+			"CountMode": "PivotDistinct",
+			"Exclude": "Self"
+		},
+		{
+			"Facet": "Project.HasOpenIssues",
+			"Version": 1,
+			"Title": "Coverage K20: projects with / without an open issue",
+			"Dimensions": [ { "Kind": "ExistsSplit", "Path": [ "<Issue.IDProject" ], "Where": [ { "Field": "State", "Op": "EQ", "Value": "Open" } ],
+			                  "Labels": { "true": "Has open issues", "false": "No open issues" } } ],
+			"Exclude": "None"
+		},
+		{
+			"Facet": "Document.ByClient",
+			"Version": 1,
+			"Title": "Coverage K8 multi-hop: documents by their project's client",
+			"Dimensions": [ { "Kind": "Terms", "Path": [ ">Document.IDProject", ">Project.IDClient" ], "Field": "IDClient", "LabelField": "Name", "Top": 20 } ],
+			"Exclude": "Self"
+		}
+	]
+}

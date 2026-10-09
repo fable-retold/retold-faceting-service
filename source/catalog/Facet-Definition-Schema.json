@@ -1,0 +1,419 @@
+{
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"$id": "https://github.com/fable-retold/retold-faceting-service/source/catalog/Facet-Definition-Schema.json",
+	"title": "Retold faceting definitions file",
+	"description": "Shape check of an app-owned definitions file (design 01 §4, internal-contracts §20). Shape only: names, paths, fields and scope references are validated afterwards against the FacetGraph and the catalog by RetoldFacetingDefinitionRegistry. Keywords used: type, const, enum, pattern, properties, propertyNames, required, additionalProperties, items, minItems, maxItems, minLength, maxLength, minimum, oneOf, anyOf, $ref (to #/definitions/*). The registry's built-in validator implements exactly these.",
+	"type": "object",
+	"required": [ "FormatVersion" ],
+	"additionalProperties": false,
+	"properties":
+	{
+		"FormatVersion": { "const": 1 },
+		"Description": { "type": "string", "maxLength": 1024 },
+		"Catalog": { "type": "object", "description": "Accepted and ignored in M2 (load warning CatalogSectionIgnored); catalog overrides stay in RetoldFaceting.Catalog." },
+		"Aliases":
+		{
+			"type": "object",
+			"propertyNames": { "$ref": "#/definitions/AliasName" },
+			"additionalProperties": { "$ref": "#/definitions/Path" }
+		},
+		"Expressions":
+		{
+			"type": "object",
+			"description": "Portable expression AST (01 §7). Accepted; every entry and every facet that uses one is Supported:false in M2 (422 FACET_FOLD_UNSUPPORTED, Feature Computed).",
+			"additionalProperties": { "type": "object" }
+		},
+		"Scopes":
+		{
+			"type": "object",
+			"propertyNames": { "$ref": "#/definitions/QualifiedName" },
+			"additionalProperties": { "$ref": "#/definitions/ScopeDefinition" }
+		},
+		"Facets":
+		{
+			"type": "array",
+			"items": { "$ref": "#/definitions/FacetDefinition" }
+		}
+	},
+	"definitions":
+	{
+		"Identifier": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+		"AliasName": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_~]{0,127}$" },
+		"TupleAlias": { "type": "string", "pattern": "^[a-z][a-z0-9]{0,7}$" },
+		"QualifiedName": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+		"EntityColumn": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+		"FieldReference": { "type": "string", "pattern": "^([a-z][a-z0-9]{0,7}\\.)?[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+		"StepString": { "type": "string", "pattern": "^([<>=][A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63}|@[A-Za-z_][A-Za-z0-9_~]{0,127})$" },
+		"EdgeStepString": { "type": "string", "pattern": "^[<>=][A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+		"ScopeMode": { "enum": [ "Inherit", "TenantOnly" ] },
+		"Op": { "enum": [ "EQ", "NE", "GT", "GE", "LT", "LE", "LK", "NLK", "IN", "NIN", "NULL", "NOTNULL" ] },
+		"CountOp": { "enum": [ "EQ", "NE", "GT", "GE", "LT", "LE" ] },
+		"Scalar": { "type": [ "string", "number", "boolean", "null" ] },
+		"Value":
+		{
+			"anyOf":
+			[
+				{ "$ref": "#/definitions/Scalar" },
+				{ "type": "array", "maxItems": 1000, "items": { "$ref": "#/definitions/Scalar" } }
+			]
+		},
+		"StepObject":
+		{
+			"type": "object",
+			"required": [ "Step" ],
+			"additionalProperties": false,
+			"properties":
+			{
+				"Step": { "$ref": "#/definitions/EdgeStepString" },
+				"Where": { "$ref": "#/definitions/PredList" },
+				"As": { "$ref": "#/definitions/TupleAlias" },
+				"Elide": { "type": "boolean" },
+				"CheckParent": { "type": "boolean" },
+				"Scope": { "$ref": "#/definitions/ScopeMode" },
+				"ScopeReason": { "type": "string", "minLength": 1, "maxLength": 512 }
+			}
+		},
+		"CoReferenceObject":
+		{
+			"type": "object",
+			"required": [ "Via", "To" ],
+			"additionalProperties": false,
+			"properties":
+			{
+				"Via": { "$ref": "#/definitions/EntityColumn" },
+				"To": { "$ref": "#/definitions/EntityColumn" },
+				"Where": { "$ref": "#/definitions/PredList" },
+				"CheckParent": { "type": "boolean" },
+				"Scope": { "$ref": "#/definitions/ScopeMode" },
+				"ScopeReason": { "type": "string", "minLength": 1, "maxLength": 512 }
+			}
+		},
+		"Step":
+		{
+			"oneOf":
+			[
+				{ "$ref": "#/definitions/StepString" },
+				{ "$ref": "#/definitions/StepObject" },
+				{ "$ref": "#/definitions/CoReferenceObject" }
+			]
+		},
+		"Path":
+		{
+			"oneOf":
+			[
+				{ "type": "string", "minLength": 2, "maxLength": 1024, "description": "Sugar: space-separated step strings." },
+				{ "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/definitions/Step" } }
+			]
+		},
+		"Correlate":
+		{
+			"type": "array",
+			"minItems": 1,
+			"maxItems": 8,
+			"items": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "$ref": "#/definitions/FieldReference" } }
+		},
+		"PredList": { "type": "array", "maxItems": 64, "items": { "$ref": "#/definitions/Pred" } },
+		"LeafPred":
+		{
+			"type": "object",
+			"required": [ "Field", "Op" ],
+			"additionalProperties": false,
+			"properties":
+			{
+				"Field": { "$ref": "#/definitions/FieldReference" },
+				"Op": { "$ref": "#/definitions/Op" },
+				"Value": { "$ref": "#/definitions/Value" }
+			}
+		},
+		"ExprPred":
+		{
+			"type": "object",
+			"required": [ "Expr", "Op" ],
+			"additionalProperties": false,
+			"properties":
+			{
+				"Expr": { "$ref": "#/definitions/QualifiedName" },
+				"Op": { "$ref": "#/definitions/Op" },
+				"Value": { "$ref": "#/definitions/Value" }
+			}
+		},
+		"AndPred": { "type": "object", "required": [ "And" ], "additionalProperties": false, "properties": { "And": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/definitions/Pred" } } } },
+		"OrPred": { "type": "object", "required": [ "Or" ], "additionalProperties": false, "properties": { "Or": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/definitions/Pred" } } } },
+		"AnyPred": { "type": "object", "required": [ "Any" ], "additionalProperties": false, "properties": { "Any": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/definitions/Pred" } } } },
+		"NotPred": { "type": "object", "required": [ "Not" ], "additionalProperties": false, "properties": { "Not": { "$ref": "#/definitions/Pred" } } },
+		"PathPredBody":
+		{
+			"type": "object",
+			"required": [ "Path" ],
+			"additionalProperties": false,
+			"properties":
+			{
+				"Path": { "$ref": "#/definitions/Path" },
+				"Where": { "$ref": "#/definitions/PredList" },
+				"From": { "$ref": "#/definitions/TupleAlias" },
+				"Correlate": { "$ref": "#/definitions/Correlate" }
+			}
+		},
+		"ExistsPred": { "type": "object", "required": [ "Exists" ], "additionalProperties": false, "properties": { "Exists": { "$ref": "#/definitions/PathPredBody" } } },
+		"NotExistsPred": { "type": "object", "required": [ "NotExists" ], "additionalProperties": false, "properties": { "NotExists": { "$ref": "#/definitions/PathPredBody" } } },
+		"AllPred": { "type": "object", "required": [ "All" ], "additionalProperties": false, "properties": { "All": { "$ref": "#/definitions/PathPredBody" } } },
+		"AllNonEmptyPred": { "type": "object", "required": [ "AllNonEmpty" ], "additionalProperties": false, "properties": { "AllNonEmpty": { "$ref": "#/definitions/PathPredBody" } } },
+		"HavingCountPred":
+		{
+			"type": "object",
+			"required": [ "HavingCount" ],
+			"additionalProperties": false,
+			"properties":
+			{
+				"HavingCount":
+				{
+					"type": "object",
+					"required": [ "Path", "Op", "Value" ],
+					"additionalProperties": false,
+					"properties":
+					{
+						"Path": { "$ref": "#/definitions/Path" },
+						"Where": { "$ref": "#/definitions/PredList" },
+						"From": { "$ref": "#/definitions/TupleAlias" },
+						"Correlate": { "$ref": "#/definitions/Correlate" },
+						"Op": { "$ref": "#/definitions/CountOp" },
+						"Value": { "type": "integer", "minimum": 0 }
+					}
+				}
+			}
+		},
+		"ScopePred":
+		{
+			"type": "object",
+			"required": [ "Scope" ],
+			"additionalProperties": false,
+			"properties":
+			{
+				"Scope": { "$ref": "#/definitions/QualifiedName" },
+				"Params": { "type": "object" }
+			}
+		},
+		"Pred":
+		{
+			"oneOf":
+			[
+				{ "$ref": "#/definitions/LeafPred" },
+				{ "$ref": "#/definitions/ExprPred" },
+				{ "$ref": "#/definitions/AndPred" },
+				{ "$ref": "#/definitions/OrPred" },
+				{ "$ref": "#/definitions/AnyPred" },
+				{ "$ref": "#/definitions/NotPred" },
+				{ "$ref": "#/definitions/ExistsPred" },
+				{ "$ref": "#/definitions/NotExistsPred" },
+				{ "$ref": "#/definitions/AllPred" },
+				{ "$ref": "#/definitions/AllNonEmptyPred" },
+				{ "$ref": "#/definitions/HavingCountPred" },
+				{ "$ref": "#/definitions/ScopePred" }
+			]
+		},
+		"ParamSchema":
+		{
+			"type": "object",
+			"required": [ "Type" ],
+			"additionalProperties": false,
+			"properties":
+			{
+				"Type": { "enum": [ "Enum", "EnumList", "Integer", "IntegerList", "String", "Boolean", "DateTime" ] },
+				"Values": { "type": "array", "minItems": 1, "maxItems": 1000, "items": { "type": [ "string", "number" ] } },
+				"Default": { },
+				"Min": { "type": "number" },
+				"Max": { "type": "number" },
+				"MaxLength": { "type": "integer", "minimum": 1, "maximum": 1024 },
+				"Description": { "type": "string", "maxLength": 1024 }
+			}
+		},
+		"ParamsSchema":
+		{
+			"type": "object",
+			"propertyNames": { "$ref": "#/definitions/Identifier" },
+			"additionalProperties": { "$ref": "#/definitions/ParamSchema" }
+		},
+		"Range":
+		{
+			"type": "object",
+			"required": [ "Key" ],
+			"additionalProperties": false,
+			"properties":
+			{
+				"Key": { "type": "string", "minLength": 1, "maxLength": 64 },
+				"From": { "type": [ "number", "null" ] },
+				"To": { "type": [ "number", "null" ] },
+				"Label": { "type": "string", "maxLength": 256 }
+			}
+		},
+		"LabelLookup":
+		{
+			"type": "object",
+			"required": [ "Path", "Field" ],
+			"additionalProperties": false,
+			"properties":
+			{
+				"Path": { "$ref": "#/definitions/Path" },
+				"Field": { "$ref": "#/definitions/Identifier" }
+			}
+		},
+		"Child":
+		{
+			"type": "object",
+			"required": [ "Path", "Agg" ],
+			"additionalProperties": false,
+			"properties":
+			{
+				"Path": { "$ref": "#/definitions/Path" },
+				"Agg": { "enum": [ "count", "sum", "min", "max", "avg" ] },
+				"Field": { "$ref": "#/definitions/Identifier" },
+				"Where": { "$ref": "#/definitions/PredList" }
+			}
+		},
+		"Dimension":
+		{
+			"type": "object",
+			"required": [ "Kind" ],
+			"additionalProperties": false,
+			"properties":
+			{
+				"Kind": { "enum": [ "Terms", "DateHistogram", "NumericHistogram", "Ranges", "ChildRollup", "ExistsSplit" ] },
+				"Field": { "$ref": "#/definitions/FieldReference" },
+				"Expr": { "$ref": "#/definitions/QualifiedName" },
+				"Path": { "$ref": "#/definitions/Path" },
+				"KeyField": { "$ref": "#/definitions/Identifier" },
+				"LabelField": { "$ref": "#/definitions/Identifier" },
+				"Labels":
+				{
+					"anyOf":
+					[
+						{ "const": false },
+						{ "$ref": "#/definitions/LabelLookup" },
+						{ "type": "object", "additionalProperties": { "type": "string", "maxLength": 256 } }
+					]
+				},
+				"Top": { "type": "integer", "minimum": 1 },
+				"Order": { "enum": [ "CountDesc", "KeyAsc", "KeyDesc" ] },
+				"Missing": { "type": "boolean" },
+				"Interval": { "enum": [ "day", "week", "month", "quarter", "year" ] },
+				"EmptyBuckets": { "type": "boolean" },
+				"Bounds": { },
+				"TimeZone": { "type": "string" },
+				"Mode": { "enum": [ "Nice", "Edges", "Log" ] },
+				"Buckets": { "type": "integer", "minimum": 1 },
+				"Edges": { "type": "array", "minItems": 1, "maxItems": 501, "items": { "type": "number" } },
+				"OpenEnded": { "type": "boolean" },
+				"Ranges": { "type": "array", "minItems": 1, "maxItems": 500, "items": { "$ref": "#/definitions/Range" } },
+				"Child": { "$ref": "#/definitions/Child" },
+				"Where": { "$ref": "#/definitions/PredList" },
+				"Correlate": { "$ref": "#/definitions/Correlate" }
+			}
+		},
+		"TupleSide":
+		{
+			"type": "object",
+			"required": [ "As", "Entity" ],
+			"additionalProperties": false,
+			"properties":
+			{
+				"As": { "$ref": "#/definitions/TupleAlias" },
+				"Entity": { "$ref": "#/definitions/Identifier" },
+				"Where": { "$ref": "#/definitions/PredList" }
+			}
+		},
+		"Pivot":
+		{
+			"oneOf":
+			[
+				{ "$ref": "#/definitions/Identifier" },
+				{
+					"type": "object",
+					"required": [ "Tuple" ],
+					"additionalProperties": false,
+					"properties":
+					{
+						"Tuple":
+						{
+							"type": "object",
+							"required": [ "From", "On", "Key" ],
+							"additionalProperties": false,
+							"properties":
+							{
+								"From": { "type": "array", "minItems": 2, "maxItems": 4, "items": { "$ref": "#/definitions/TupleSide" } },
+								"On": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "$ref": "#/definitions/FieldReference" } } },
+								"Key": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "$ref": "#/definitions/FieldReference" } }
+							}
+						}
+					}
+				},
+				{
+					"type": "object",
+					"required": [ "Union" ],
+					"description": "K16 UnionOfSources: accepted, Supported:false in M2.",
+					"properties": { "Union": { "type": "array" }, "MergeBy": { "type": "string" }, "Applicability": { "type": "string" } }
+				}
+			]
+		},
+		"ScopeDefinition":
+		{
+			"type": "object",
+			"required": [ "Entity", "Where" ],
+			"additionalProperties": false,
+			"properties":
+			{
+				"Entity": { "$ref": "#/definitions/Identifier" },
+				"Description": { "type": "string", "maxLength": 1024 },
+				"Params": { "$ref": "#/definitions/ParamsSchema" },
+				"Where": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/definitions/Pred" } }
+			}
+		},
+		"FacetDefinition":
+		{
+			"type": "object",
+			"required": [ "Facet", "Version", "Dimensions" ],
+			"additionalProperties": false,
+			"properties":
+			{
+				"Facet": { "$ref": "#/definitions/QualifiedName" },
+				"Version": { "type": "integer", "minimum": 1 },
+				"Title": { "type": "string", "maxLength": 256 },
+				"Description": { "type": "string", "maxLength": 1024 },
+				"DisplayName": { "type": "string", "maxLength": 256 },
+				"Pivot": { "$ref": "#/definitions/Pivot" },
+				"Home": { "$ref": "#/definitions/Identifier" },
+				"Where": { "$ref": "#/definitions/PredList" },
+				"Dimensions": { "type": "array", "minItems": 1, "maxItems": 2, "items": { "$ref": "#/definitions/Dimension" } },
+				"Siblings":
+				{
+					"type": "object",
+					"propertyNames": { "$ref": "#/definitions/Identifier" },
+					"additionalProperties": { "$ref": "#/definitions/Dimension" }
+				},
+				"Measures": { "type": "array", "items": { "type": "object" } },
+				"CountMode": { "enum": [ "Rows", "PivotDistinct", "KeyDistinct", "Approx" ] },
+				"DistinctKey": { "type": "string" },
+				"Exclude":
+				{
+					"anyOf":
+					[
+						{ "enum": [ "Self", "None" ] },
+						{ "type": "string", "pattern": "^Group:[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+						{ "type": "array", "maxItems": 100, "items": { "type": "string", "maxLength": 256 } }
+					]
+				},
+				"ExcludeGroup": { "$ref": "#/definitions/Identifier" },
+				"FilterKey": { "type": "string", "minLength": 1, "maxLength": 256 },
+				"ClauseType": { "type": "string", "maxLength": 64 },
+				"Selectable": { "type": "boolean" },
+				"Missing": { "type": "object", "additionalProperties": false, "properties": { "Values": { "type": "array", "items": { "$ref": "#/definitions/Scalar" } } } },
+				"Labels": { "anyOf": [ { "const": false }, { "$ref": "#/definitions/LabelLookup" } ] },
+				"Params": { "$ref": "#/definitions/ParamsSchema" },
+				"Engines": { "type": "object" },
+				"Freshness": { "type": "object" },
+				"Limits": { "type": "object" },
+				"Visibility": { "type": "object" },
+				"Records": { "type": "object" }
+			}
+		}
+	}
+}

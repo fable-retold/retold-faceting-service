@@ -1,0 +1,5 @@
+{
+	"FormatVersion": 1,
+	"Description": "Definitions.Path is not recursive: this file never loads.",
+	"Scopes": { "Project.NeverLoaded": { "Entity": "Project", "Where": [ { "Field": "Status", "Op": "EQ", "Value": "Active" } ] } }
+}

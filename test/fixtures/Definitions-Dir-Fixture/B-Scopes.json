@@ -1,0 +1,12 @@
+{
+	"FormatVersion": 1,
+	"Description": "Definitions.Path fixture: a scope that uses the alias of A-Aliases.json (names are global across sources).",
+	"Scopes":
+	{
+		"Project.HasOpenTasks":
+		{
+			"Entity": "Project",
+			"Where": [ { "Exists": { "Path": [ "@TaskOf" ], "Where": [ { "Field": "Status", "Op": "NE", "Value": "Done" } ] } } ]
+		}
+	}
+}

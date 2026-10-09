@@ -1,0 +1,60 @@
+{
+	"name": "retold-faceting-service",
+	"version": "0.0.1",
+	"description": "Facets (terms, histograms, stats, pivots) over any retold-data-service, computed from scoped meadow queries.",
+	"main": "source/Retold-Faceting-Service.js",
+	"scripts": {
+		"test": "npx mocha",
+		"test:pg": "RFS_TEST_POSTGRES=1 TZ=UTC npx mocha --timeout 20000",
+		"test:pg:up": "node test/support/Facet-Docker-Postgres.js ensure",
+		"test:pg:down": "node test/support/Facet-Docker-Postgres.js stop",
+		"coverage": "npx nyc npx mocha",
+		"example": "npx quack examples"
+	},
+	"mocha": {
+		"spec": [
+			"test/**/*_tests.js"
+		],
+		"ui": "tdd",
+		"timeout": 10000,
+		"reporter": "spec"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/fable-retold/retold-faceting-service.git"
+	},
+	"keywords": [
+		"retold",
+		"meadow",
+		"faceting",
+		"facets",
+		"aggregation"
+	],
+	"author": "Steven Velozo <steven@velozo.com>",
+	"license": "MIT",
+	"bugs": {
+		"url": "https://github.com/fable-retold/retold-faceting-service/issues"
+	},
+	"homepage": "https://github.com/fable-retold/retold-faceting-service",
+	"dependencies": {
+		"fable-serviceproviderbase": "^3.0.19",
+		"foxhound": "^2.0.31"
+	},
+	"devDependencies": {
+		"ajv": "^6.12.6",
+		"chai": "^4.3.10",
+		"fable": "^3.1.84",
+		"meadow": "^2.0.53",
+		"meadow-connection-postgresql": "^1.0.5",
+		"meadow-connection-sqlite": "^1.0.20",
+		"meadow-endpoints": "^4.1.8",
+		"meadow-filter": "^1.0.10",
+		"mocha": "^10.4.0",
+		"pg": "^8.20.0",
+		"pict": "^1.0.394",
+		"retold-data-service": "^2.1.2"
+	},
+	"peerDependencies": {
+		"fable": "^3.1.84"
+	}
+}

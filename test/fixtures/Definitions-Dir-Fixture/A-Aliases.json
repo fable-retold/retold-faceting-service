@@ -1,0 +1,8 @@
+{
+	"FormatVersion": 1,
+	"Description": "Definitions.Path fixture (test/Facet-Definitions_tests.js): loaded first (file names are sorted).",
+	"Aliases":
+	{
+		"TaskOf": [ "<Task.IDProject" ]
+	}
+}

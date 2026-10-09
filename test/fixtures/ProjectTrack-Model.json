@@ -1,0 +1,1905 @@
+{
+	"Tables": {
+		"Customer": {
+			"TableName": "Customer",
+			"Domain": "Default",
+			"Columns": [
+				{
+					"Column": "IDCustomer",
+					"DataType": "ID"
+				},
+				{
+					"Column": "GUIDCustomer",
+					"DataType": "GUID",
+					"Size": "36"
+				},
+				{
+					"Column": "CreateDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "CreatingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "UpdateDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "UpdatingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "Deleted",
+					"DataType": "Boolean"
+				},
+				{
+					"Column": "DeleteDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "DeletingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "Name",
+					"DataType": "String",
+					"Size": "128"
+				}
+			],
+			"Indices": [],
+			"Description": "Tenant root (hub).",
+			"MeadowSchema": {
+				"Scope": "Customer",
+				"DefaultIdentifier": "IDCustomer",
+				"Domain": "Default",
+				"Schema": [
+					{
+						"Column": "IDCustomer",
+						"Type": "AutoIdentity",
+						"Size": "Default"
+					},
+					{
+						"Column": "GUIDCustomer",
+						"Type": "AutoGUID",
+						"Size": "36"
+					},
+					{
+						"Column": "CreateDate",
+						"Type": "CreateDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "CreatingIDUser",
+						"Type": "CreateIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "UpdateDate",
+						"Type": "UpdateDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "UpdatingIDUser",
+						"Type": "UpdateIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "Deleted",
+						"Type": "Deleted",
+						"Size": "Default"
+					},
+					{
+						"Column": "DeleteDate",
+						"Type": "DeleteDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "DeletingIDUser",
+						"Type": "DeleteIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "Name",
+						"Type": "String",
+						"Size": "128"
+					}
+				],
+				"DefaultObject": {
+					"IDCustomer": 0,
+					"GUIDCustomer": "0x0000000000000000",
+					"CreateDate": null,
+					"CreatingIDUser": 0,
+					"UpdateDate": null,
+					"UpdatingIDUser": 0,
+					"Deleted": false,
+					"DeleteDate": null,
+					"DeletingIDUser": 0,
+					"Name": ""
+				},
+				"JsonSchema": {
+					"title": "Customer",
+					"type": "object",
+					"properties": {
+						"IDCustomer": {
+							"type": "integer",
+							"size": "Default"
+						},
+						"GUIDCustomer": {
+							"type": "string",
+							"size": "36"
+						},
+						"CreateDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"CreatingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"UpdateDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"UpdatingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"Deleted": {
+							"type": "boolean",
+							"size": "Default"
+						},
+						"DeleteDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"DeletingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"Name": {
+							"type": "string",
+							"size": "128"
+						}
+					},
+					"required": [
+						"IDCustomer"
+					]
+				},
+				"Authorization": {}
+			},
+			"Authorization": {}
+		},
+		"User": {
+			"TableName": "User",
+			"Domain": "Default",
+			"Columns": [
+				{
+					"Column": "IDUser",
+					"DataType": "ID"
+				},
+				{
+					"Column": "GUIDUser",
+					"DataType": "GUID",
+					"Size": "36"
+				},
+				{
+					"Column": "CreateDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "CreatingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "UpdateDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "UpdatingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "Deleted",
+					"DataType": "Boolean"
+				},
+				{
+					"Column": "DeleteDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "DeletingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "LoginID",
+					"DataType": "String",
+					"Size": "64"
+				},
+				{
+					"Column": "NameFirst",
+					"DataType": "String",
+					"Size": "64"
+				},
+				{
+					"Column": "NameLast",
+					"DataType": "String",
+					"Size": "64"
+				},
+				{
+					"Column": "IDCustomer",
+					"DataType": "Numeric",
+					"Size": "int",
+					"Join": "IDCustomer"
+				}
+			],
+			"Indices": [],
+			"Description": "Users (hub); every user belongs to one tenant.",
+			"MeadowSchema": {
+				"Scope": "User",
+				"DefaultIdentifier": "IDUser",
+				"Domain": "Default",
+				"Schema": [
+					{
+						"Column": "IDUser",
+						"Type": "AutoIdentity",
+						"Size": "Default"
+					},
+					{
+						"Column": "GUIDUser",
+						"Type": "AutoGUID",
+						"Size": "36"
+					},
+					{
+						"Column": "CreateDate",
+						"Type": "CreateDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "CreatingIDUser",
+						"Type": "CreateIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "UpdateDate",
+						"Type": "UpdateDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "UpdatingIDUser",
+						"Type": "UpdateIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "Deleted",
+						"Type": "Deleted",
+						"Size": "Default"
+					},
+					{
+						"Column": "DeleteDate",
+						"Type": "DeleteDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "DeletingIDUser",
+						"Type": "DeleteIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "LoginID",
+						"Type": "String",
+						"Size": "64"
+					},
+					{
+						"Column": "NameFirst",
+						"Type": "String",
+						"Size": "64"
+					},
+					{
+						"Column": "NameLast",
+						"Type": "String",
+						"Size": "64"
+					},
+					{
+						"Column": "IDCustomer",
+						"Type": "Integer",
+						"Size": "int"
+					}
+				],
+				"DefaultObject": {
+					"IDUser": 0,
+					"GUIDUser": "0x0000000000000000",
+					"CreateDate": null,
+					"CreatingIDUser": 0,
+					"UpdateDate": null,
+					"UpdatingIDUser": 0,
+					"Deleted": false,
+					"DeleteDate": null,
+					"DeletingIDUser": 0,
+					"LoginID": "",
+					"NameFirst": "",
+					"NameLast": "",
+					"IDCustomer": 0
+				},
+				"JsonSchema": {
+					"title": "User",
+					"type": "object",
+					"properties": {
+						"IDUser": {
+							"type": "integer",
+							"size": "Default"
+						},
+						"GUIDUser": {
+							"type": "string",
+							"size": "36"
+						},
+						"CreateDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"CreatingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"UpdateDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"UpdatingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"Deleted": {
+							"type": "boolean",
+							"size": "Default"
+						},
+						"DeleteDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"DeletingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"LoginID": {
+							"type": "string",
+							"size": "64"
+						},
+						"NameFirst": {
+							"type": "string",
+							"size": "64"
+						},
+						"NameLast": {
+							"type": "string",
+							"size": "64"
+						},
+						"IDCustomer": {
+							"type": "integer",
+							"size": "int"
+						}
+					},
+					"required": [
+						"IDUser"
+					]
+				},
+				"Authorization": {}
+			},
+			"Authorization": {}
+		},
+		"Client": {
+			"TableName": "Client",
+			"Domain": "Default",
+			"Columns": [
+				{
+					"Column": "IDClient",
+					"DataType": "ID"
+				},
+				{
+					"Column": "GUIDClient",
+					"DataType": "GUID",
+					"Size": "36"
+				},
+				{
+					"Column": "CreateDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "CreatingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "UpdateDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "UpdatingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "Deleted",
+					"DataType": "Boolean"
+				},
+				{
+					"Column": "DeleteDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "DeletingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "Name",
+					"DataType": "String",
+					"Size": "128"
+				},
+				{
+					"Column": "IDCustomer",
+					"DataType": "Numeric",
+					"Size": "int",
+					"Join": "IDCustomer"
+				}
+			],
+			"Indices": [],
+			"Description": "",
+			"MeadowSchema": {
+				"Scope": "Client",
+				"DefaultIdentifier": "IDClient",
+				"Domain": "Default",
+				"Schema": [
+					{
+						"Column": "IDClient",
+						"Type": "AutoIdentity",
+						"Size": "Default"
+					},
+					{
+						"Column": "GUIDClient",
+						"Type": "AutoGUID",
+						"Size": "36"
+					},
+					{
+						"Column": "CreateDate",
+						"Type": "CreateDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "CreatingIDUser",
+						"Type": "CreateIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "UpdateDate",
+						"Type": "UpdateDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "UpdatingIDUser",
+						"Type": "UpdateIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "Deleted",
+						"Type": "Deleted",
+						"Size": "Default"
+					},
+					{
+						"Column": "DeleteDate",
+						"Type": "DeleteDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "DeletingIDUser",
+						"Type": "DeleteIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "Name",
+						"Type": "String",
+						"Size": "128"
+					},
+					{
+						"Column": "IDCustomer",
+						"Type": "Integer",
+						"Size": "int"
+					}
+				],
+				"DefaultObject": {
+					"IDClient": 0,
+					"GUIDClient": "0x0000000000000000",
+					"CreateDate": null,
+					"CreatingIDUser": 0,
+					"UpdateDate": null,
+					"UpdatingIDUser": 0,
+					"Deleted": false,
+					"DeleteDate": null,
+					"DeletingIDUser": 0,
+					"Name": "",
+					"IDCustomer": 0
+				},
+				"JsonSchema": {
+					"title": "Client",
+					"type": "object",
+					"properties": {
+						"IDClient": {
+							"type": "integer",
+							"size": "Default"
+						},
+						"GUIDClient": {
+							"type": "string",
+							"size": "36"
+						},
+						"CreateDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"CreatingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"UpdateDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"UpdatingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"Deleted": {
+							"type": "boolean",
+							"size": "Default"
+						},
+						"DeleteDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"DeletingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"Name": {
+							"type": "string",
+							"size": "128"
+						},
+						"IDCustomer": {
+							"type": "integer",
+							"size": "int"
+						}
+					},
+					"required": [
+						"IDClient"
+					]
+				},
+				"Authorization": {}
+			},
+			"Authorization": {}
+		},
+		"Project": {
+			"TableName": "Project",
+			"Domain": "Default",
+			"Columns": [
+				{
+					"Column": "IDProject",
+					"DataType": "ID"
+				},
+				{
+					"Column": "GUIDProject",
+					"DataType": "GUID",
+					"Size": "36"
+				},
+				{
+					"Column": "CreateDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "CreatingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "UpdateDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "UpdatingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "Deleted",
+					"DataType": "Boolean"
+				},
+				{
+					"Column": "DeleteDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "DeletingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "Name",
+					"DataType": "String",
+					"Size": "128"
+				},
+				{
+					"Column": "Status",
+					"DataType": "String",
+					"Size": "32"
+				},
+				{
+					"Column": "StartDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "IDClient",
+					"DataType": "Numeric",
+					"Size": "int",
+					"Join": "IDClient"
+				},
+				{
+					"Column": "OwnerIDUser",
+					"DataType": "Numeric",
+					"Size": "int",
+					"Join": "IDUser"
+				},
+				{
+					"Column": "IDCustomer",
+					"DataType": "Numeric",
+					"Size": "int",
+					"Join": "IDCustomer"
+				}
+			],
+			"Indices": [],
+			"Description": "",
+			"MeadowSchema": {
+				"Scope": "Project",
+				"DefaultIdentifier": "IDProject",
+				"Domain": "Default",
+				"Schema": [
+					{
+						"Column": "IDProject",
+						"Type": "AutoIdentity",
+						"Size": "Default"
+					},
+					{
+						"Column": "GUIDProject",
+						"Type": "AutoGUID",
+						"Size": "36"
+					},
+					{
+						"Column": "CreateDate",
+						"Type": "CreateDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "CreatingIDUser",
+						"Type": "CreateIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "UpdateDate",
+						"Type": "UpdateDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "UpdatingIDUser",
+						"Type": "UpdateIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "Deleted",
+						"Type": "Deleted",
+						"Size": "Default"
+					},
+					{
+						"Column": "DeleteDate",
+						"Type": "DeleteDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "DeletingIDUser",
+						"Type": "DeleteIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "Name",
+						"Type": "String",
+						"Size": "128"
+					},
+					{
+						"Column": "Status",
+						"Type": "String",
+						"Size": "32"
+					},
+					{
+						"Column": "StartDate",
+						"Type": "DateTime",
+						"Size": "Default"
+					},
+					{
+						"Column": "IDClient",
+						"Type": "Integer",
+						"Size": "int"
+					},
+					{
+						"Column": "OwnerIDUser",
+						"Type": "Integer",
+						"Size": "int"
+					},
+					{
+						"Column": "IDCustomer",
+						"Type": "Integer",
+						"Size": "int"
+					}
+				],
+				"DefaultObject": {
+					"IDProject": 0,
+					"GUIDProject": "0x0000000000000000",
+					"CreateDate": null,
+					"CreatingIDUser": 0,
+					"UpdateDate": null,
+					"UpdatingIDUser": 0,
+					"Deleted": false,
+					"DeleteDate": null,
+					"DeletingIDUser": 0,
+					"Name": "",
+					"Status": "",
+					"StartDate": null,
+					"IDClient": 0,
+					"OwnerIDUser": 0,
+					"IDCustomer": 0
+				},
+				"JsonSchema": {
+					"title": "Project",
+					"type": "object",
+					"properties": {
+						"IDProject": {
+							"type": "integer",
+							"size": "Default"
+						},
+						"GUIDProject": {
+							"type": "string",
+							"size": "36"
+						},
+						"CreateDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"CreatingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"UpdateDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"UpdatingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"Deleted": {
+							"type": "boolean",
+							"size": "Default"
+						},
+						"DeleteDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"DeletingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"Name": {
+							"type": "string",
+							"size": "128"
+						},
+						"Status": {
+							"type": "string",
+							"size": "32"
+						},
+						"StartDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"IDClient": {
+							"type": "integer",
+							"size": "int"
+						},
+						"OwnerIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"IDCustomer": {
+							"type": "integer",
+							"size": "int"
+						}
+					},
+					"required": [
+						"IDProject"
+					]
+				},
+				"Authorization": {}
+			},
+			"Authorization": {}
+		},
+		"ProjectMembership": {
+			"TableName": "ProjectMembership",
+			"Domain": "Default",
+			"Columns": [
+				{
+					"Column": "IDProjectMembership",
+					"DataType": "ID"
+				},
+				{
+					"Column": "GUIDProjectMembership",
+					"DataType": "GUID",
+					"Size": "36"
+				},
+				{
+					"Column": "CreateDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "CreatingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "UpdateDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "UpdatingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "Deleted",
+					"DataType": "Boolean"
+				},
+				{
+					"Column": "DeleteDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "DeletingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "IDProject",
+					"DataType": "Numeric",
+					"Size": "int",
+					"Join": "IDProject"
+				},
+				{
+					"Column": "IDUser",
+					"DataType": "Numeric",
+					"Size": "int",
+					"Join": "IDUser"
+				},
+				{
+					"Column": "Role",
+					"DataType": "String",
+					"Size": "32"
+				},
+				{
+					"Column": "Active",
+					"DataType": "Boolean"
+				},
+				{
+					"Column": "IDCustomer",
+					"DataType": "Numeric",
+					"Size": "int",
+					"Join": "IDCustomer"
+				}
+			],
+			"Indices": [],
+			"Description": "",
+			"MeadowSchema": {
+				"Scope": "ProjectMembership",
+				"DefaultIdentifier": "IDProjectMembership",
+				"Domain": "Default",
+				"Schema": [
+					{
+						"Column": "IDProjectMembership",
+						"Type": "AutoIdentity",
+						"Size": "Default"
+					},
+					{
+						"Column": "GUIDProjectMembership",
+						"Type": "AutoGUID",
+						"Size": "36"
+					},
+					{
+						"Column": "CreateDate",
+						"Type": "CreateDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "CreatingIDUser",
+						"Type": "CreateIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "UpdateDate",
+						"Type": "UpdateDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "UpdatingIDUser",
+						"Type": "UpdateIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "Deleted",
+						"Type": "Deleted",
+						"Size": "Default"
+					},
+					{
+						"Column": "DeleteDate",
+						"Type": "DeleteDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "DeletingIDUser",
+						"Type": "DeleteIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "IDProject",
+						"Type": "Integer",
+						"Size": "int"
+					},
+					{
+						"Column": "IDUser",
+						"Type": "Integer",
+						"Size": "int"
+					},
+					{
+						"Column": "Role",
+						"Type": "String",
+						"Size": "32"
+					},
+					{
+						"Column": "Active",
+						"Type": "Boolean",
+						"Size": "Default"
+					},
+					{
+						"Column": "IDCustomer",
+						"Type": "Integer",
+						"Size": "int"
+					}
+				],
+				"DefaultObject": {
+					"IDProjectMembership": 0,
+					"GUIDProjectMembership": "0x0000000000000000",
+					"CreateDate": null,
+					"CreatingIDUser": 0,
+					"UpdateDate": null,
+					"UpdatingIDUser": 0,
+					"Deleted": false,
+					"DeleteDate": null,
+					"DeletingIDUser": 0,
+					"IDProject": 0,
+					"IDUser": 0,
+					"Role": "",
+					"Active": false,
+					"IDCustomer": 0
+				},
+				"JsonSchema": {
+					"title": "ProjectMembership",
+					"type": "object",
+					"properties": {
+						"IDProjectMembership": {
+							"type": "integer",
+							"size": "Default"
+						},
+						"GUIDProjectMembership": {
+							"type": "string",
+							"size": "36"
+						},
+						"CreateDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"CreatingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"UpdateDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"UpdatingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"Deleted": {
+							"type": "boolean",
+							"size": "Default"
+						},
+						"DeleteDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"DeletingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"IDProject": {
+							"type": "integer",
+							"size": "int"
+						},
+						"IDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"Role": {
+							"type": "string",
+							"size": "32"
+						},
+						"Active": {
+							"type": "boolean",
+							"size": "Default"
+						},
+						"IDCustomer": {
+							"type": "integer",
+							"size": "int"
+						}
+					},
+					"required": [
+						"IDProjectMembership"
+					]
+				},
+				"Authorization": {}
+			},
+			"Authorization": {}
+		},
+		"Task": {
+			"TableName": "Task",
+			"Domain": "Default",
+			"Columns": [
+				{
+					"Column": "IDTask",
+					"DataType": "ID"
+				},
+				{
+					"Column": "GUIDTask",
+					"DataType": "GUID",
+					"Size": "36"
+				},
+				{
+					"Column": "CreateDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "CreatingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "UpdateDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "UpdatingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "Deleted",
+					"DataType": "Boolean"
+				},
+				{
+					"Column": "DeleteDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "DeletingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "IDProject",
+					"DataType": "Numeric",
+					"Size": "int",
+					"Join": "IDProject"
+				},
+				{
+					"Column": "AssignedIDUser",
+					"DataType": "Numeric",
+					"Size": "int",
+					"Join": "IDUser"
+				},
+				{
+					"Column": "Status",
+					"DataType": "String",
+					"Size": "32"
+				},
+				{
+					"Column": "DueDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "IDCustomer",
+					"DataType": "Numeric",
+					"Size": "int",
+					"Join": "IDCustomer"
+				}
+			],
+			"Indices": [],
+			"Description": "",
+			"MeadowSchema": {
+				"Scope": "Task",
+				"DefaultIdentifier": "IDTask",
+				"Domain": "Default",
+				"Schema": [
+					{
+						"Column": "IDTask",
+						"Type": "AutoIdentity",
+						"Size": "Default"
+					},
+					{
+						"Column": "GUIDTask",
+						"Type": "AutoGUID",
+						"Size": "36"
+					},
+					{
+						"Column": "CreateDate",
+						"Type": "CreateDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "CreatingIDUser",
+						"Type": "CreateIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "UpdateDate",
+						"Type": "UpdateDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "UpdatingIDUser",
+						"Type": "UpdateIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "Deleted",
+						"Type": "Deleted",
+						"Size": "Default"
+					},
+					{
+						"Column": "DeleteDate",
+						"Type": "DeleteDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "DeletingIDUser",
+						"Type": "DeleteIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "IDProject",
+						"Type": "Integer",
+						"Size": "int"
+					},
+					{
+						"Column": "AssignedIDUser",
+						"Type": "Integer",
+						"Size": "int"
+					},
+					{
+						"Column": "Status",
+						"Type": "String",
+						"Size": "32"
+					},
+					{
+						"Column": "DueDate",
+						"Type": "DateTime",
+						"Size": "Default"
+					},
+					{
+						"Column": "IDCustomer",
+						"Type": "Integer",
+						"Size": "int"
+					}
+				],
+				"DefaultObject": {
+					"IDTask": 0,
+					"GUIDTask": "0x0000000000000000",
+					"CreateDate": null,
+					"CreatingIDUser": 0,
+					"UpdateDate": null,
+					"UpdatingIDUser": 0,
+					"Deleted": false,
+					"DeleteDate": null,
+					"DeletingIDUser": 0,
+					"IDProject": 0,
+					"AssignedIDUser": 0,
+					"Status": "",
+					"DueDate": null,
+					"IDCustomer": 0
+				},
+				"JsonSchema": {
+					"title": "Task",
+					"type": "object",
+					"properties": {
+						"IDTask": {
+							"type": "integer",
+							"size": "Default"
+						},
+						"GUIDTask": {
+							"type": "string",
+							"size": "36"
+						},
+						"CreateDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"CreatingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"UpdateDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"UpdatingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"Deleted": {
+							"type": "boolean",
+							"size": "Default"
+						},
+						"DeleteDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"DeletingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"IDProject": {
+							"type": "integer",
+							"size": "int"
+						},
+						"AssignedIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"Status": {
+							"type": "string",
+							"size": "32"
+						},
+						"DueDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"IDCustomer": {
+							"type": "integer",
+							"size": "int"
+						}
+					},
+					"required": [
+						"IDTask"
+					]
+				},
+				"Authorization": {}
+			},
+			"Authorization": {}
+		},
+		"Issue": {
+			"TableName": "Issue",
+			"Domain": "Default",
+			"Columns": [
+				{
+					"Column": "IDIssue",
+					"DataType": "ID"
+				},
+				{
+					"Column": "GUIDIssue",
+					"DataType": "GUID",
+					"Size": "36"
+				},
+				{
+					"Column": "CreateDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "CreatingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "UpdateDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "UpdatingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "Deleted",
+					"DataType": "Boolean"
+				},
+				{
+					"Column": "DeleteDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "DeletingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "IDProject",
+					"DataType": "Numeric",
+					"Size": "int",
+					"Join": "IDProject"
+				},
+				{
+					"Column": "Severity",
+					"DataType": "String",
+					"Size": "16"
+				},
+				{
+					"Column": "State",
+					"DataType": "String",
+					"Size": "16"
+				},
+				{
+					"Column": "IDCustomer",
+					"DataType": "Numeric",
+					"Size": "int",
+					"Join": "IDCustomer"
+				}
+			],
+			"Indices": [],
+			"Description": "",
+			"MeadowSchema": {
+				"Scope": "Issue",
+				"DefaultIdentifier": "IDIssue",
+				"Domain": "Default",
+				"Schema": [
+					{
+						"Column": "IDIssue",
+						"Type": "AutoIdentity",
+						"Size": "Default"
+					},
+					{
+						"Column": "GUIDIssue",
+						"Type": "AutoGUID",
+						"Size": "36"
+					},
+					{
+						"Column": "CreateDate",
+						"Type": "CreateDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "CreatingIDUser",
+						"Type": "CreateIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "UpdateDate",
+						"Type": "UpdateDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "UpdatingIDUser",
+						"Type": "UpdateIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "Deleted",
+						"Type": "Deleted",
+						"Size": "Default"
+					},
+					{
+						"Column": "DeleteDate",
+						"Type": "DeleteDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "DeletingIDUser",
+						"Type": "DeleteIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "IDProject",
+						"Type": "Integer",
+						"Size": "int"
+					},
+					{
+						"Column": "Severity",
+						"Type": "String",
+						"Size": "16"
+					},
+					{
+						"Column": "State",
+						"Type": "String",
+						"Size": "16"
+					},
+					{
+						"Column": "IDCustomer",
+						"Type": "Integer",
+						"Size": "int"
+					}
+				],
+				"DefaultObject": {
+					"IDIssue": 0,
+					"GUIDIssue": "0x0000000000000000",
+					"CreateDate": null,
+					"CreatingIDUser": 0,
+					"UpdateDate": null,
+					"UpdatingIDUser": 0,
+					"Deleted": false,
+					"DeleteDate": null,
+					"DeletingIDUser": 0,
+					"IDProject": 0,
+					"Severity": "",
+					"State": "",
+					"IDCustomer": 0
+				},
+				"JsonSchema": {
+					"title": "Issue",
+					"type": "object",
+					"properties": {
+						"IDIssue": {
+							"type": "integer",
+							"size": "Default"
+						},
+						"GUIDIssue": {
+							"type": "string",
+							"size": "36"
+						},
+						"CreateDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"CreatingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"UpdateDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"UpdatingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"Deleted": {
+							"type": "boolean",
+							"size": "Default"
+						},
+						"DeleteDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"DeletingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"IDProject": {
+							"type": "integer",
+							"size": "int"
+						},
+						"Severity": {
+							"type": "string",
+							"size": "16"
+						},
+						"State": {
+							"type": "string",
+							"size": "16"
+						},
+						"IDCustomer": {
+							"type": "integer",
+							"size": "int"
+						}
+					},
+					"required": [
+						"IDIssue"
+					]
+				},
+				"Authorization": {}
+			},
+			"Authorization": {}
+		},
+		"FormType": {
+			"TableName": "FormType",
+			"Domain": "Default",
+			"Columns": [
+				{
+					"Column": "IDFormType",
+					"DataType": "ID"
+				},
+				{
+					"Column": "GUIDFormType",
+					"DataType": "GUID",
+					"Size": "36"
+				},
+				{
+					"Column": "Name",
+					"DataType": "String",
+					"Size": "128"
+				},
+				{
+					"Column": "Category",
+					"DataType": "String",
+					"Size": "64"
+				}
+			],
+			"Indices": [],
+			"Description": "Global lookup: no Deleted column, no tenancy column.",
+			"MeadowSchema": {
+				"Scope": "FormType",
+				"DefaultIdentifier": "IDFormType",
+				"Domain": "Default",
+				"Schema": [
+					{
+						"Column": "IDFormType",
+						"Type": "AutoIdentity",
+						"Size": "Default"
+					},
+					{
+						"Column": "GUIDFormType",
+						"Type": "AutoGUID",
+						"Size": "36"
+					},
+					{
+						"Column": "Name",
+						"Type": "String",
+						"Size": "128"
+					},
+					{
+						"Column": "Category",
+						"Type": "String",
+						"Size": "64"
+					}
+				],
+				"DefaultObject": {
+					"IDFormType": 0,
+					"GUIDFormType": "0x0000000000000000",
+					"Name": "",
+					"Category": ""
+				},
+				"JsonSchema": {
+					"title": "FormType",
+					"type": "object",
+					"properties": {
+						"IDFormType": {
+							"type": "integer",
+							"size": "Default"
+						},
+						"GUIDFormType": {
+							"type": "string",
+							"size": "36"
+						},
+						"Name": {
+							"type": "string",
+							"size": "128"
+						},
+						"Category": {
+							"type": "string",
+							"size": "64"
+						}
+					},
+					"required": [
+						"IDFormType"
+					]
+				},
+				"Authorization": {}
+			},
+			"Authorization": {}
+		},
+		"Document": {
+			"TableName": "Document",
+			"Domain": "Default",
+			"Columns": [
+				{
+					"Column": "IDDocument",
+					"DataType": "ID"
+				},
+				{
+					"Column": "GUIDDocument",
+					"DataType": "GUID",
+					"Size": "36"
+				},
+				{
+					"Column": "CreateDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "CreatingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "UpdateDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "UpdatingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "Deleted",
+					"DataType": "Boolean"
+				},
+				{
+					"Column": "DeleteDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "DeletingIDUser",
+					"DataType": "Numeric",
+					"Size": "int"
+				},
+				{
+					"Column": "Title",
+					"DataType": "String",
+					"Size": "200"
+				},
+				{
+					"Column": "Summary",
+					"DataType": "String",
+					"Size": "1024"
+				},
+				{
+					"Column": "DocumentDate",
+					"DataType": "DateTime"
+				},
+				{
+					"Column": "Status",
+					"DataType": "String",
+					"Size": "32"
+				},
+				{
+					"Column": "IDFormType",
+					"DataType": "Numeric",
+					"Size": "int",
+					"Join": "IDFormType"
+				},
+				{
+					"Column": "IDProject",
+					"DataType": "Numeric",
+					"Size": "int",
+					"Join": "IDProject"
+				},
+				{
+					"Column": "IDCustomer",
+					"DataType": "Numeric",
+					"Size": "int",
+					"Join": "IDCustomer"
+				}
+			],
+			"Indices": [],
+			"Description": "",
+			"MeadowSchema": {
+				"Scope": "Document",
+				"DefaultIdentifier": "IDDocument",
+				"Domain": "Default",
+				"Schema": [
+					{
+						"Column": "IDDocument",
+						"Type": "AutoIdentity",
+						"Size": "Default"
+					},
+					{
+						"Column": "GUIDDocument",
+						"Type": "AutoGUID",
+						"Size": "36"
+					},
+					{
+						"Column": "CreateDate",
+						"Type": "CreateDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "CreatingIDUser",
+						"Type": "CreateIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "UpdateDate",
+						"Type": "UpdateDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "UpdatingIDUser",
+						"Type": "UpdateIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "Deleted",
+						"Type": "Deleted",
+						"Size": "Default"
+					},
+					{
+						"Column": "DeleteDate",
+						"Type": "DeleteDate",
+						"Size": "Default"
+					},
+					{
+						"Column": "DeletingIDUser",
+						"Type": "DeleteIDUser",
+						"Size": "int"
+					},
+					{
+						"Column": "Title",
+						"Type": "String",
+						"Size": "200"
+					},
+					{
+						"Column": "Summary",
+						"Type": "String",
+						"Size": "1024"
+					},
+					{
+						"Column": "DocumentDate",
+						"Type": "DateTime",
+						"Size": "Default"
+					},
+					{
+						"Column": "Status",
+						"Type": "String",
+						"Size": "32"
+					},
+					{
+						"Column": "IDFormType",
+						"Type": "Integer",
+						"Size": "int"
+					},
+					{
+						"Column": "IDProject",
+						"Type": "Integer",
+						"Size": "int"
+					},
+					{
+						"Column": "IDCustomer",
+						"Type": "Integer",
+						"Size": "int"
+					}
+				],
+				"DefaultObject": {
+					"IDDocument": 0,
+					"GUIDDocument": "0x0000000000000000",
+					"CreateDate": null,
+					"CreatingIDUser": 0,
+					"UpdateDate": null,
+					"UpdatingIDUser": 0,
+					"Deleted": false,
+					"DeleteDate": null,
+					"DeletingIDUser": 0,
+					"Title": "",
+					"Summary": "",
+					"DocumentDate": null,
+					"Status": "",
+					"IDFormType": 0,
+					"IDProject": 0,
+					"IDCustomer": 0
+				},
+				"JsonSchema": {
+					"title": "Document",
+					"type": "object",
+					"properties": {
+						"IDDocument": {
+							"type": "integer",
+							"size": "Default"
+						},
+						"GUIDDocument": {
+							"type": "string",
+							"size": "36"
+						},
+						"CreateDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"CreatingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"UpdateDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"UpdatingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"Deleted": {
+							"type": "boolean",
+							"size": "Default"
+						},
+						"DeleteDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"DeletingIDUser": {
+							"type": "integer",
+							"size": "int"
+						},
+						"Title": {
+							"type": "string",
+							"size": "200"
+						},
+						"Summary": {
+							"type": "string",
+							"size": "1024"
+						},
+						"DocumentDate": {
+							"type": "string",
+							"size": "Default"
+						},
+						"Status": {
+							"type": "string",
+							"size": "32"
+						},
+						"IDFormType": {
+							"type": "integer",
+							"size": "int"
+						},
+						"IDProject": {
+							"type": "integer",
+							"size": "int"
+						},
+						"IDCustomer": {
+							"type": "integer",
+							"size": "int"
+						}
+					},
+					"required": [
+						"IDDocument"
+					]
+				},
+				"Authorization": {}
+			},
+			"Authorization": {}
+		}
+	},
+	"TablesSequence": [
+		"Customer",
+		"User",
+		"Client",
+		"Project",
+		"ProjectMembership",
+		"Task",
+		"Issue",
+		"FormType",
+		"Document"
+	],
+	"Authorization": {},
+	"Endpoints": {
+		"Create": true,
+		"Read": true,
+		"Reads": true,
+		"ReadsBy": true,
+		"ReadMax": true,
+		"ReadSelectList": true,
+		"Update": true,
+		"Delete": true,
+		"Count": true,
+		"CountBy": true,
+		"Schema": true,
+		"Validate": true,
+		"New": true
+	},
+	"Pict": {}
+}
