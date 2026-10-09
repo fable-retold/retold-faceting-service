@@ -13,6 +13,8 @@ No `npm install`: every dependency resolves from the retold umbrella `node_modul
 
 ## What each page shows
 
+Every page also has a dashed **Make a change** card (M4, see [Live changes](#live-changes-m4)): one real write through the domain's CRUD route, after which the cards update by themselves through the server's change stream.
+
 Every page head states its question as a literal query, lists the **active filters** as removable chips (scopes with their parameters, then every selection, named the way the cards name them), and has a one-line "Try" hint. The design reference sits next to the title as a small tooltip. The summary strip on the right shows the Total, `Engine: Live`, `Exact`, the server and round-trip times, the answer's ETag, `304 from cache` when it revalidated, and how many Query POSTs the last change took (always 1).
 
 | Page | Request it sends | What it teaches | What to try |
@@ -44,6 +46,8 @@ browser ──▶ front server 127.0.0.1:19300 (server/Faceting-Demo-Front.js, p
               /                      dist/ (index.html, the bundle, pict.min.js, faceting-demo.css)
               /api/Demo/Principals   the DEMO persona table
               /api/Demo/Status       provider, scale, each domain's entities, live counts, definitions
+              /api/<Domain>/1.0/Facet/Changes  (M4) the change stream, proxied as a stream
+              /api/<Domain>/1.0/<allowlisted write>  (M4) the "Make a change" CRUD calls
               /api/<Domain>/1.0/Facet/*  ──proxy──▶ <Domain> server 127.0.0.1:<ephemeral>
                                                     (test/support/Facet-Test-Harness.js: seeded in-memory
                                                      SQLite, retold-data-service, faceting Embedded)
@@ -55,12 +59,13 @@ The browser part lives in `source/` and is structured to lift into a future `pic
 
 | File | Role |
 |---|---|
-| `providers/Pict-Provider-Facet.js` | describe / query / records / count / lookups, per-group coalescing (one POST per tick), the Version cache (never caches errors), the count check, focus capture and restore |
+| `providers/Pict-Provider-Facet.js` | describe / query / records / count / lookups, per-group coalescing (one POST per tick), the Version cache (never caches errors), the count check, focus capture and restore; M4: the change stream per domain (`subscribeChanges` / `closeChanges` / `changeState`), coalesced refetch on change events, Freshness, the Stale follow-up, `write` |
+| `providers/Facet-Changes.js` | M4, pure: the SSE parser, which groups a change refetches, Seq ordering, backoff, the stream chip |
 | `providers/Facet-Selection.js` | the pure contract: request bodies, write-back clauses, range coverage (`Full` / `Partial` / `None`), `sameRange` |
 | `providers/Facet-Display.js` | pure display helpers: labels, range text ("Jan – Jun 2026"), axis ticks with the year where it changes, badges, Server-Timing |
 | `providers/Facet-Lookup.js` | pure lookup helpers for related-row columns |
 | `views/PictView-Facet-*.js` | Scope, Terms, Histogram, Pivot, Records, Inspector |
-| `pages/FacetDemo-Pages.js`, `views/PictView-FacetDemo-*.js` | the demo's pages as data, the layout, the page head and the A/B Compare panel (not lifted) |
+| `pages/FacetDemo-Pages.js`, `views/PictView-FacetDemo-*.js` | the demo's pages as data, the layout, the page head, the A/B Compare panel and (M4) the "Make a change" card (not lifted) |
 
 The host lives in `server/` (not `source/server/`), so `source/` is exactly the liftable tree.
 
@@ -82,7 +87,9 @@ This mechanism is demo-only. A real host resolves the principal from its own ses
 
 - The front server binds **127.0.0.1** by default and, on a loopback bind, only answers loopback `Host` names (`127.0.0.1`, `localhost`, `[::1]`). A page on another origin cannot DNS-rebind to it and pick a persona (421 `DEMO_HOST_NOT_ALLOWED`).
 - The domain servers are the test harness, which trusts `x-facet-test-*` headers. They **listen on 127.0.0.1 only** (the harness's `Host` option; Orator itself has no host option), and each one also gets a restify `pre()` **loopback guard** (403 `DEMO_LOOPBACK_ONLY` to any non-loopback client), installed through the harness's `BeforeListen` hook, so it is in place before the first connection. `npm test` checks the bind address and, when the machine has a LAN address, that a request to a domain server from it is refused.
-- The proxy forwards only `GET` / `POST` under `/1.0/Facet/`, only the `content-type`, `accept` and `if-none-match` request headers, bodies up to 256 KiB, and refuses dot segments and encoded slashes, so the CRUD API of the domain servers is not reachable through it. (The list lookups use the faceting Records route, not the CRUD API.)
+- The proxy forwards only `GET` / `POST` under `/1.0/Facet/`, only the `content-type`, `accept` and `if-none-match` request headers, bodies up to 256 KiB, and refuses dot segments and encoded slashes. (The list lookups use the faceting Records route, not the CRUD API.)
+- The CRUD API of the domain servers is reachable only for the M4 "Make a change" writes. These follow an **allowlist**, `server/Faceting-Demo-Writes.js` `WRITE_ROUTES`: exactly seven method + path pairs, each with its permitted body keys, JSON only, ≤ 16 KiB. They need a signed-in persona. Anything else under `/api/<Domain>/1.0/` is 404.
+- Each domain also has **write guards** (PreOperation behaviors). A create is stamped with the session's tenant (and owner, on LabForm). A body naming another tenant or owner, a foreign key into another tenant's data (a document on another tenant's project, a review of another tenant's book, a form type that does not exist), a change to a row outside the persona's tenant, and a change to a row that is not the persona's (a project it is not an active member of, a document it neither wrote nor is a member of the project of, a review it did not write) are refused with 403. These guards apply even to a loopback client that bypasses the proxy.
 
 `DEMO_HOST=0.0.0.0` exposes the switcher to the network (the banner warns); do not.
 
@@ -108,7 +115,14 @@ This mechanism is demo-only. A real host resolves the principal from its own ses
 | Documents interval "day" | 200 with `Errors.ByMonth` = 422 `FACET_INTERVAL_TOO_FINE`, `Detail.Suggest.Interval: "week"` |
 | Stop the server while the page is open | `DEMO_NETWORK` (the fetch fails) |
 
-The demo host's own errors use the service's error shape, `{ "Error": { "Code", "Status", "Message", "Detail"? } }`: `DEMO_NOT_FOUND`, `DEMO_UNKNOWN_DOMAIN`, `DEMO_METHOD_NOT_ALLOWED`, `DEMO_BODY_TOO_LARGE` (413), `DEMO_BAD_PATH`, `DEMO_HOST_NOT_ALLOWED` (421), `DEMO_UPSTREAM_UNAVAILABLE` (502).
+The demo host's own errors use the service's error shape, `{ "Error": { "Code", "Status", "Message", "Detail"? } }`: `DEMO_NOT_FOUND`, `DEMO_UNKNOWN_DOMAIN`, `DEMO_METHOD_NOT_ALLOWED`, `DEMO_BODY_TOO_LARGE` (413), `DEMO_BAD_PATH`, `DEMO_HOST_NOT_ALLOWED` (421), `DEMO_UPSTREAM_UNAVAILABLE` (502). The writes (M4) add four more:
+
+- `DEMO_UNAUTHENTICATED` (401): a write without a persona.
+- `DEMO_WRITE_INVALID` (400): a key the allowlist does not permit, a missing or malformed value, or a body that is not JSON.
+- `DEMO_WRITE_REFUSED` (401 / 403): the domain's write guard said no.
+- `DEMO_WRITE_NOT_FOUND` / `DEMO_WRITE_FAILED`.
+
+A refused write never relays meadow's error body with its record or query.
 
 ## `npx quack examples`
 
@@ -116,9 +130,13 @@ The demo host's own errors use the service's error shape, `{ "Error": { "Code", 
 
 ## The browser check and the screenshots
 
-`npm run check:browser` (`server/Faceting-Demo-Browser-Check.js`) boots the demo in-process on 19302 (or uses `DEMO_URL=http://127.0.0.1:19300/` against a running `npm start`). It opens the **built** page in headless Chrome through puppeteer (resolved from the retold umbrella `node_modules`; the example does not depend on it) and drives every page with real mouse and keyboard gestures. After each gesture it checks that exactly one Query POST went out, that the page Total is the clicked bucket's count, and that "Verify with Records/Count" agrees with it (and the list shows `min(25, Total)` rows, "… of Total"). It also checks the review fixes: the week readout and hatched edges, the year on the axis ticks, the count verdict dropped on a principal switch, page 1 after a switch on page 2, focus staying on a bar after Enter, the work-list lookups, the A/B callout, the user44 empty state, the inspector's page context, Escape and bottom room, and 800px and 390px layouts. 141 checks in about 26 s. Needs `dist/` (`npm run build`).
+`npm run check:browser` (`server/Faceting-Demo-Browser-Check.js`) boots the demo in-process on 19302 (or uses `DEMO_URL=http://127.0.0.1:19300/` against a running `npm start`). It opens the **built** page in headless Chrome through puppeteer (resolved from the retold umbrella `node_modules`; the example does not depend on it) and drives every page with real mouse and keyboard gestures. After each gesture it checks that exactly one Query POST went out, that the page Total is the clicked bucket's count, and that "Verify with Records/Count" agrees with it (and the list shows `min(25, Total)` rows, "… of Total"). It also checks the review fixes: the week readout and hatched edges, the year on the axis ticks, the count verdict dropped on a principal switch, page 1 after a switch on page 2, focus staying on a bar after Enter, the work-list lookups, the A/B callout, the user44 empty state, the inspector's page context, Escape and bottom room, and 800px and 390px layouts.
 
-Screenshots of each state are written to `screenshots/`:
+Since M4 it also clicks every page's "Make a change" card. After each write, the affected card must update with no gesture: the change stream's event, one refetch per group, the "Live update" trigger. Undo restores the counts, and the inspector shows Cached / Stale / Version.
+
+Against the wired M4 service it runs 208 checks in about 34 s; without a change stream the cards refresh their page themselves (and `DEMO_REQUIRE_LIVE=1` fails the live checks instead of skipping them). Needs `dist/` (`npm run build`).
+
+Screenshots of each state are written to a scratch directory (the OS temp dir, or `DEMO_SCREENSHOT_DIR`), so a verification run never rewrites the tracked files; `DEMO_UPDATE_SCREENSHOTS=1 npm run check:browser` refreshes `screenshots/`:
 
 | | |
 |---|---|
@@ -129,7 +147,40 @@ Screenshots of each state are written to `screenshots/`:
 | `16`–`19` | user81, user43 empty, no roles (400), anonymous (401) |
 | `20`–`21` | the inspector (Envelope, Request) |
 | `22`–`24`, `27` | the other theme, 800px, offline (`DEMO_NETWORK`), 390px |
+| `28`–`31` | M4 live changes: Projects after "On hold", Documents after "Add document", Lab forms after "Complete a started form", Bookstore after "Add a 5-star review" with the inspector on the stream-triggered refetch |
+
+## Live changes (M4)
+
+Every domain runs faceting with the result cache on (`Cache.Enabled: true`), the interim change intake and `GET /1.0/Facet/Changes` (mounted because every demo domain has a scope policy). The page opens one change stream per domain for the persona, through the front proxy, which relays it as a stream. A write anywhere then reaches every page that depends on it:
+
+1. The intake wraps the controller's behavior dispatcher and its DAL writes (never a behavior slot, so the demo's own write guards and the intake never touch). The change is taken at the write's PostOperation, from the row as it was before any PreOperation behavior ran; a write that commits but fails afterwards is still taken, conservatively.
+2. It bumps the generations of what the write touched, before the write's response leaves.
+3. The stream tells each principal who can see that data which entity changed. It sends `{ Entity, Generation, Seq }` and nothing else: no tenant, row or count. One shared timer coalesces the events (one per entity per 250 ms).
+4. The provider waits a random 0–150 ms (so pages that heard the same event do not all ask at once), then refetches the groups whose envelope `DependsOn` names that entity. It sends `If-None-Match` and `Freshness.MinSeq`, so the server answers Exact or 304.
+
+If the stream is cut — a server restart, a deploy — the provider reconnects with jittered backoff and refetches what is on screen. The server also ends every stream at its revalidation time (5 minutes, jittered) with `closed { Reason: 'Revalidate' }`; the provider reconnects at once, through the persona's session again, so a sign-out or a persona switch takes effect on the stream too.
+
+**Demo-only settings.** The demo's domains set three switches a multi-tenant deployment leaves at their defaults: `Cache.ExposeStatus: true` (the `X-Retold-Facet-Cache` / `-Freshness` headers the inspector shows, and a truthful `Cached` on an answer another persona computed), and `Freshness.SeqHeader: true` / `SSE.IncludeSeq: true` (the node-wide `Seq` on answers and events, which makes the MinSeq flow visible). On a host with a scope policy their defaults keep the cache status and the Seq away from clients: the Seq counts every tenant's writes, and the cache status tells a user that a colleague ran the same query. Without a Seq on the event the provider refetches with `Freshness.Mode: 'Exact'` instead of a MinSeq, with the same result.
+
+| Card | Write | What to watch |
+|---|---|---|
+| Projects for me | set a listed project's status (Undo) | Active → On hold: 6 → 5, the Status counts move, the strip says "Live update: Project", the cache says Miss then Hit |
+| Documents by form type | add a Draft Form D document dated 2026-03-15; delete; undelete | 41 → 42 → 41 → 42; switch to User 43 right after a write: the shared answer comes back marked "Stale · n s old" and the page asks again by itself |
+| Lab forms (A) | complete one of my started forms; re-open | 237 → 236 (the row leaves the work list) → 237 |
+| Bookstore explorer | a 5-star review on the first listed book without one; remove | 5-star books +1, the five-star split moves one book |
+
+As User 81, nothing of tenant 7's activity arrives. The stream chip (Live / Reconnecting / Off) is on the card and in the summary strip. The inspector lists the stream's events (`Change`) and the writes (`Write`), and shows Cached / Stale / LagMS / DependsOn and the `X-Retold-Facet-Cache` / `-Seq` / `-Freshness` headers of every answer. Queries ask for `Freshness: Bounded` (5 s); after my own write (read-your-writes) or with an event's MinSeq the server answers Exact. Without a stream, for example on a host without M4, a card refreshes its page itself and says so. DEMO-SPEC §12 has the details and the measured numbers.
 
 ## The smoke test
 
-`npm test` (or `node test-server.js`) boots everything in-process on 19301 and drives it through the front server with bodies built by the client contract (`source/providers/Facet-Selection.js`, `source/pages/FacetDemo-Pages.js`). It covers static files (skipped when `dist/` is not built), the demo endpoints, Describe (and the Books facet list derived from it), every group × every persona against the expected totals, a 304 revalidation, `Records/Count == Total` and paging for every list, a write-back round trip per widget kind, forged headers, the per-facet interval error, the domain servers' loopback bind and guard, and the host's own errors. Section 11 checks the client's display logic against real answers: the client's `Full` coverage equals the server's `Selected` flags at every interval (with 2 partial weeks and 1 partial year for the Documents range, Total unchanged), the work list's Started column equals the Started facet for every row, and the A/B breakdown holds for user42, user43 and user81. 373 checks in under a second on SQLite.
+`npm test` (or `node test-server.js`) boots everything in-process on 19301 and drives it through the front server with bodies built by the client contract (`source/providers/Facet-Selection.js`, `source/pages/FacetDemo-Pages.js`). Since M4 it also checks the following:
+
+- The live-change client contract: the SSE parser, refetch selection, Seqs and Freshness.
+- The write allowlist, and the stream proxy against a stub upstream.
+- The write guards, including 403 across tenants and owners, for a foreign key into another tenant's data, a colleague's document and a project the persona is not a member of.
+- Every card's write as User 42: the event on User 42's stream and none on User 81's, the dependent refetch with its exact delta (Miss, then Hit), an unaffected group's 304, User 43's Stale answer right after a write, and the undo.
+- The browser's provider itself, run in node against the demo.
+
+Each M4 capability (stream, cache, wired pipeline) is probed separately. A missing one is skipped with a note, or fails with `DEMO_REQUIRE_LIVE=1`.
+
+It covers static files (skipped when `dist/` is not built), the demo endpoints, Describe (and the Books facet list derived from it), every group × every persona against the expected totals, a 304 revalidation, `Records/Count == Total` and paging for every list, a write-back round trip per widget kind, forged headers, the per-facet interval error, the domain servers' loopback bind and guard, and the host's own errors. Section 11 checks the client's display logic against real answers: the client's `Full` coverage equals the server's `Selected` flags at every interval (with 2 partial weeks and 1 partial year for the Documents range, Total unchanged), the work list's Started column equals the Started facet for every row, and the A/B breakdown holds for user42, user43 and user81. Against the wired M4 service it runs 583 checks in about 7 s on SQLite (most of it waiting for coalesced events) and in about 37 s on PostgreSQL (`TZ=UTC DEMO_PG=1`); a service without the stream, the cache or the wired pipeline skips those checks with a note.

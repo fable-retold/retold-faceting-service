@@ -35,6 +35,10 @@
  * UserSession.  No Tenant and no User → the anonymous default session.  In-process calls also take
  * pOptions.Now (pin the request clock: $Now / $Today) and pOptions.PlanForm ({ Cube, Staged }).
  *
+ * MeadowEndpoints: 'Installed' (default; the umbrella's meadow-endpoints, 4.0.21 today) or 'Monorepo'
+ * (modules/meadow/meadow-endpoints, 4.1.x): the version the harness's endpoints are built with (an
+ * unavailable checkout calls fDone with .Skip === true).  harness.meadowEndpointsVersion names it.
+ *
  * Tenancy: Bookstore-Tenant installs the M1 IDTenant behavior; ProjectTrack / LabTrack install the
  * domain's policy as test behaviors (internal-contracts §31.2): IDCustomer = SessionData.CustomerID
  * on every entity that has the column, and each PersonalScopes column (LabForm.OwnerIDUser =
@@ -45,7 +49,11 @@
  * @author Steven Velozo <steven@velozo.com>
  */
 const libFable = require('fable');
+const libFs = require('fs');
+const libPath = require('path');
 const libRetoldDataService = require('retold-data-service');
+// The meadow-endpoints retold-data-service builds its endpoints with (the umbrella's installed copy).
+const libInstalledMeadowEndpoints = require('meadow-endpoints');
 
 const libRetoldFacetingService = require('../../source/Retold-Faceting-Service.js');
 const libOptions = require('../../source/Retold-Faceting-Service-Options.js');
@@ -222,6 +230,38 @@ const policyBehavior = (pColumn, pSessionField, pParameter) =>
 		pRequestState.Query.addFilter(pColumn, tmpValue, '=', 'AND', pParameter);
 		return fCallback();
 	};
+};
+
+// The monorepo checkout of meadow-endpoints (4.1.x), for the write-path suites that must also run
+// against it (MeadowEndpoints: 'Monorepo'); absent on a box without the checkout (the suite skips).
+const MONOREPO_MEADOW_ENDPOINTS = libPath.resolve(__dirname, '../../../meadow-endpoints/source/Meadow-Endpoints.js');
+
+/**
+ * The meadow-endpoints module a harness builds its endpoints with: 'Installed' (the umbrella's,
+ * what retold-data-service requires) or 'Monorepo' (modules/meadow/meadow-endpoints, 4.1.x).
+ *
+ * @param {string} pWhich
+ * @return {{ Available: boolean, Reason: string|null, Module: any, Version: string|null }}
+ */
+const meadowEndpointsModule = (pWhich) =>
+{
+	if (pWhich !== 'Monorepo')
+	{
+		return { Available: true, Reason: null, Module: libInstalledMeadowEndpoints, Version: null };
+	}
+	if (!libFs.existsSync(MONOREPO_MEADOW_ENDPOINTS))
+	{
+		return { Available: false, Reason: `no monorepo checkout at ${MONOREPO_MEADOW_ENDPOINTS}`, Module: null, Version: null };
+	}
+	try
+	{
+		let tmpPackage = JSON.parse(libFs.readFileSync(libPath.resolve(MONOREPO_MEADOW_ENDPOINTS, '../../package.json'), 'utf8'));
+		return { Available: true, Reason: null, Module: require(MONOREPO_MEADOW_ENDPOINTS), Version: tmpPackage.version || null };
+	}
+	catch (pLoadError)
+	{
+		return { Available: false, Reason: `the monorepo meadow-endpoints does not load: ${pLoadError.message}`, Module: null, Version: null };
+	}
 };
 
 /**
@@ -456,7 +496,7 @@ const start = (pOptions, fDone) =>
 	{
 		tmpInput.Fixture = tmpInput.Domain;
 	}
-	let tmpOptions = Object.assign({ Fixture: 'Bookstore', Provider: 'SQLite', Definitions: 'Auto', Seed: null, Scale: 'Small', Faceting: {}, TenancyBehavior: 'Auto', TenancyEntities: null, LogLevel: 'fatal', FixedPort: false, Host: null, BeforeListen: null }, tmpInput);
+	let tmpOptions = Object.assign({ Fixture: 'Bookstore', Provider: 'SQLite', Definitions: 'Auto', Seed: null, Scale: 'Small', Faceting: {}, TenancyBehavior: 'Auto', TenancyEntities: null, LogLevel: 'fatal', FixedPort: false, Host: null, BeforeListen: null, MeadowEndpoints: 'Installed' }, tmpInput);
 	if ((typeof(tmpOptions.Port) !== 'number') || (tmpOptions.Port < 19100) || (tmpOptions.Port > 19199))
 	{
 		throw new Error('Facet-Test-Harness.start needs a unique Port in 19100-19199 (internal-contracts §14.4).');
@@ -547,6 +587,31 @@ const start = (pOptions, fDone) =>
 
 	let tmpPolicy = (tmpFacetingOptions.Scope && tmpFacetingOptions.Scope.Policy) ? tmpFacetingOptions.Scope.Policy : null;
 	let tmpPolicyColumn = (tmpPolicy && (typeof(tmpPolicy.Column) === 'string')) ? tmpPolicy.Column : libBookstoreSeed.TENANT_COLUMN;
+
+	// The meadow-endpoints version the endpoints are built with (MeadowEndpoints 'Monorepo' = 4.1.x).
+	let tmpEndpointsModule = meadowEndpointsModule(tmpOptions.MeadowEndpoints);
+	tmpHarness.meadowEndpointsVersion = tmpEndpointsModule.Version;
+	if (!tmpEndpointsModule.Available)
+	{
+		let tmpSkip = new Error(`Facet-Test-Harness: meadow-endpoints [${tmpOptions.MeadowEndpoints}] is unavailable: ${tmpEndpointsModule.Reason}`);
+		tmpSkip.Skip = true;
+		tmpHarness.stop = (fStopDone) => { tmpHarness._Stopped = true; return fStopDone(); };
+		setImmediate(() => { fDone(tmpSkip); });
+		return tmpHarness;
+	}
+	// retold-data-service builds every endpoint through libMeadowEndpoints.new(DAL) at loadModel; for
+	// the duration of this harness's model load that factory builds the selected version's endpoints.
+	let fRestoreEndpoints = () => {};
+	let fSelectEndpoints = () =>
+	{
+		if (tmpEndpointsModule.Module === libInstalledMeadowEndpoints)
+		{
+			return;
+		}
+		let fInstalledNew = libInstalledMeadowEndpoints.new;
+		libInstalledMeadowEndpoints.new = (pDAL, pControllerOptions) => { return tmpEndpointsModule.Module.new(pDAL, pControllerOptions); };
+		fRestoreEndpoints = () => { libInstalledMeadowEndpoints.new = fInstalledNew; fRestoreEndpoints = () => {}; };
+	};
 
 	// The provider hook (internal-contracts §32.2).
 	let tmpAvailability = libProviders.available(tmpOptions.Provider);
@@ -703,11 +768,13 @@ const start = (pOptions, fDone) =>
 						}
 					}
 
+					fSelectEndpoints();
 					tmpHarness.rds.initializeService(
 						(pInitError) =>
 						{
 							if (pInitError)
 							{
+								fRestoreEndpoints();
 								return fDone(pInitError);
 							}
 							// The port the server really listens on (ephemeral by default).
@@ -722,6 +789,7 @@ const start = (pOptions, fDone) =>
 							tmpHarness.rds.loadModel(tmpModelName, tmpHarness.model, tmpStorageProvider,
 								(pLoadError) =>
 								{
+									fRestoreEndpoints();
 									if (pLoadError)
 									{
 										return fDone(pLoadError);
@@ -1870,6 +1938,7 @@ module.exports = (
 		testTenancyBehavior: testTenancyBehavior,
 		policyBehavior: policyBehavior,
 		installBehavior: installBehavior,
+		meadowEndpointsModule: meadowEndpointsModule,
 		bindHost: bindHost,
 		start: start
 	});

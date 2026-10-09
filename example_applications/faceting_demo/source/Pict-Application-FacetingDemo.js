@@ -5,7 +5,7 @@
  *              Version cache), PictRouter (hash routes from FacetDemo-Pages)
  *   views      FacetDemo-Layout (header: nav, DEMO principal switcher, theme toggle; page + inspector slots)
  *              FacetDemo-Page (renders the active page's panels and asks each widget to render its panel)
- *              FacetDemo-Compare (E3 variant A vs B)
+ *              FacetDemo-Compare (E3 variant A vs B), FacetDemo-Change (M4: the "Make a change" panel)
  *              Facet-Scope, Facet-Terms, Facet-Histogram, Facet-Pivot, Facet-Records, Facet-Inspector (liftable)
  *
  * Boot: GET /api/Demo/Principals + /api/Demo/Status -> AppData.FacetDemo.Personas / .Status, pick the saved
@@ -17,6 +17,11 @@
  * Describe-driven group (FacetsFrom: 'Describe', the Bookstore) waits for its Describe: the facet list and the
  * cards come from FacetDemo-Pages.describedFacets, then the group is queried.  The inspector follows the page
  * (setContext on every route change).
+ *
+ * M4 (DEMO-SPEC §12): loadPage also opens the change stream of every domain of the page (provider.subscribeChanges:
+ * GET /api/<Domain>/1.0/Facet/Changes, read with fetch() because the persona travels in a header EventSource cannot
+ * send); a principal switch closes every stream first (closeChanges), and the page's groups are the "visible" ones
+ * (setGroupVisibility): a change event refetches them at once and marks the groups of other pages.
  *
  * @license MIT
  *
@@ -32,6 +37,7 @@ const libPictProviderFacet = require('./providers/Pict-Provider-Facet.js');
 const libViewLayout = require('./views/PictView-FacetDemo-Layout.js');
 const libViewPage = require('./views/PictView-FacetDemo-Page.js');
 const libViewCompare = require('./views/PictView-FacetDemo-Compare.js');
+const libViewChange = require('./views/PictView-FacetDemo-Change.js');
 const libViewFacetScope = require('./views/PictView-Facet-Scope.js');
 const libViewFacetTerms = require('./views/PictView-Facet-Terms.js');
 const libViewFacetHistogram = require('./views/PictView-Facet-Histogram.js');
@@ -136,11 +142,13 @@ class PictApplicationFacetingDemo extends libPictApplication
 					})
 			}, libPictRouter);
 
-		this.pict.addProvider('Facet', libPictProviderFacet.default_configuration, libPictProviderFacet);
+		// The persona travels in a request header, which EventSource cannot send: read the change stream with fetch().
+		this.pict.addProvider('Facet', Object.assign({}, libPictProviderFacet.default_configuration, { ChangesTransport: 'Fetch' }), libPictProviderFacet);
 
 		this.pict.addView('FacetDemo-Layout', libViewLayout.default_configuration, libViewLayout);
 		this.pict.addView('FacetDemo-Page', libViewPage.default_configuration, libViewPage);
 		this.pict.addView('FacetDemo-Compare', libViewCompare.default_configuration, libViewCompare);
+		this.pict.addView('FacetDemo-Change', libViewChange.default_configuration, libViewChange);
 		this.pict.addView('Facet-Scope', libViewFacetScope.default_configuration, libViewFacetScope);
 		this.pict.addView('Facet-Terms', libViewFacetTerms.default_configuration, libViewFacetTerms);
 		this.pict.addView('Facet-Histogram', libViewFacetHistogram.default_configuration, libViewFacetHistogram);
@@ -161,7 +169,9 @@ class PictApplicationFacetingDemo extends libPictApplication
 				PrincipalHeader: 'X-Retold-Facet-Demo-Principal',
 				Theme: this._currentTheme(),
 				Status: null,
-				BootError: null
+				BootError: null,
+				// M4: the "Make a change" panels' state (FacetDemo-Change).
+				Change: {}
 			};
 
 		let tmpFacet = this.pict.providers.Facet;
@@ -182,6 +192,13 @@ class PictApplicationFacetingDemo extends libPictApplication
 			(pGroupHash) =>
 			{
 				tmpFacet.defineGroup(libFacetDemoPages.Groups[pGroupHash]);
+			});
+		// A change event refetches the groups of the page on screen (both LabForms tabs: their counts both show).
+		tmpFacet.setGroupVisibility(
+			(pGroupHash) =>
+			{
+				let tmpPage = libFacetDemoPages.Pages.find((pCandidate) => { return pCandidate.Hash === this.pict.AppData.FacetDemo.ActivePage; });
+				return !!tmpPage && (tmpPage.Groups.indexOf(pGroupHash) >= 0);
 			});
 
 		let tmpDemo = this.pict.AppData.FacetDemo;
@@ -339,6 +356,8 @@ class PictApplicationFacetingDemo extends libPictApplication
 		tmpDomains.forEach(
 			(pDomain) =>
 			{
+				// M4: one change stream per domain for the current persona (kept while it stays open).
+				tmpFacet.subscribeChanges(pDomain);
 				tmpFacet.describe(pDomain,
 					(pError) =>
 					{
@@ -416,6 +435,8 @@ class PictApplicationFacetingDemo extends libPictApplication
 		}
 		storageSet(STORAGE_PRINCIPAL, pPersonaKey);
 		tmpDemo.PrincipalKey = pPersonaKey;
+		// The streams belong to the previous persona: close them (loadPage opens the new persona's).
+		this.pict.providers.Facet.closeChanges();
 		this.pict.providers.Facet.setPrincipalKey(pPersonaKey);
 		this._applyPrincipalInfo();
 		this.pict.views['FacetDemo-Layout'].renderHeader();

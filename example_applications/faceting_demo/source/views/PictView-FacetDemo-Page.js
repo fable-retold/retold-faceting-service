@@ -6,7 +6,7 @@
  *                    and every selection as a removable chip, named the way the cards name them) with Reset and
  *                    "Show internals", a "Try" line, the loading bar and the whole-request error banner
  *   #FD-Tabs         page tabs (LabForms: A | B) and #FD-Tab-Note (what the active tab is)
- *   #FD-Top          Top panels (Scope bar)
+ *   #FD-Top          Top panels (Scope bar; M4: the "Make a change" panel)
  *   #FD-Rail         Rail panels (Terms cards)
  *   #FD-Main         Main panels (Histogram, Pivot, Compare, Records)
  *
@@ -25,6 +25,13 @@
  *                     previous answer on screen (a native checkbox keeps its click until the answer arrives)
  *   Ready / Error     head + tabs + every panel of that group (and the Compare panel that reads it)
  *   Records / Count   the Records panel only
+ *   Stream (M4)       head (the Live chip) + the Change panel: the domain's change-stream status changed
+ *
+ * M4 summary strip: Stale (+ age) instead of Exact for a Bounded answer served from the cache before its refresh,
+ * the server's X-Retold-Facet-Cache (Hit / Miss / Stale / NotModified / Bypass / Off), the freshness the server
+ * applied (X-Retold-Facet-Freshness, e.g. "Exact; upgraded=MinSeq"), the trigger of an SSE-driven refetch
+ * ("Live update: Project @ e:…:15") and the domain's stream status (Live / Reconnecting / Off); the Seq with
+ * "Show internals".
  *
  * @license MIT
  *
@@ -35,6 +42,7 @@ const libPictView = require('pict-view');
 const libFacetDemoPages = require('../pages/FacetDemo-Pages.js');
 const libFacetSelection = require('../providers/Facet-Selection.js');
 const libFacetDisplay = require('../providers/Facet-Display.js');
+const libFacetChanges = require('../providers/Facet-Changes.js');
 
 // Panel widget -> view identifier.
 const WIDGET_VIEWS =
@@ -44,7 +52,20 @@ const WIDGET_VIEWS =
 		Histogram: 'Facet-Histogram',
 		Pivot: 'Facet-Pivot',
 		Records: 'Facet-Records',
-		Compare: 'FacetDemo-Compare'
+		Compare: 'FacetDemo-Compare',
+		Change: 'FacetDemo-Change'
+	};
+
+// What the server's X-Retold-Facet-Cache says (internal-contracts §44.8).
+const CACHE_TIPS =
+	{
+		Hit: 'The server answered from its result cache: the generations this answer depends on have not moved since it was computed.',
+		Miss: 'The server computed this answer (and stored it).',
+		Stale: 'Bounded freshness: the server served a cached answer computed before the latest change and is refreshing it in the background.',
+		NotModified: 'If-None-Match matched the current generation Version: the server sent no body and ran no SQL.',
+		Refresh: 'A background refresh.',
+		Bypass: 'This request is not cacheable (the server says why in its log and pMeta); it was computed.',
+		Off: 'The server\'s result cache is off: the answer was computed.'
 	};
 
 // Widgets that draw one facet (their panel id is the facet key; the rest use the widget name).
@@ -121,6 +142,7 @@ const _ViewConfiguration =
 			.fd-chip-ok { background: var(--fd-ok-soft, #e6f4ea); color: var(--fd-ok, #2b8a3e); border-color: transparent; }
 			.fd-chip-warn { background: var(--fd-warn-soft, #fdf3e1); color: var(--fd-warn, #a8620a); border-color: transparent; }
 			.fd-chip-accent { background: var(--fd-accent-soft, #e8edfd); color: var(--fd-accent, #3b5bdb); border-color: transparent; }
+			.fd-chip-info { background: var(--fd-info-soft, #e7f1fb); color: var(--fd-info, #1c64b0); border-color: transparent; }
 			.fd-chip-mono { font-family: var(--fd-mono, ui-monospace, Menlo, monospace); }
 			.fd-chip-internal { background: transparent; border-style: dotted; font-family: var(--fd-mono, ui-monospace, Menlo, monospace); }
 			.fd-pending { font-size: 13px; color: var(--fd-text-faint, #8a94a3); }
@@ -479,6 +501,13 @@ class PictViewFacetDemoPage extends libPictView
 			this.renderTabs();
 			return;
 		}
+		if (pReason === 'Stream')
+		{
+			// The domain's change stream opened, broke off or closed: the Live chip and the Change panel say so.
+			this.renderHead();
+			this.renderPanels({ Group: pGroupHash, Widgets: [ 'Change' ] });
+			return;
+		}
 		if ((pReason === 'Records') || (pReason === 'Count'))
 		{
 			this.preparePanels({ Group: pGroupHash, Widgets: [ 'Records' ] });
@@ -746,13 +775,40 @@ class PictViewFacetDemoPage extends libPictView
 		{
 			tmpChips.push({ Text: libFacetDisplay.text(`Engine: ${tmpEnvelope.Engine}`), Tone: 'accent', Tip: 'The engine that answered (Live: computed from the database for this request).', CheckSlot: [] });
 		}
-		if (tmpEnvelope.Exact === true)
+		if (tmpAnswer.Stale === true)
 		{
-			tmpChips.push({ Text: 'Exact', Tone: 'ok', Tip: 'Every count is exact.', CheckSlot: [ {} ] });
+			tmpChips.push({ Text: libFacetDisplay.text(`Stale · ${(Math.round((tmpAnswer.LagMS || 0) / 100) / 10).toFixed(1)} s old`), Tone: 'warn', Tip: 'Freshness Bounded: a cached answer computed before the latest change (never older than MaxLagMS). The server refreshes it in the background and the page asks again in a moment.', CheckSlot: [] });
+		}
+		else if (tmpEnvelope.Exact === true)
+		{
+			tmpChips.push({ Text: 'Exact', Tone: 'ok', Tip: 'Every count is exact and current.', CheckSlot: [ {} ] });
 		}
 		else
 		{
 			tmpChips.push({ Text: 'Approximate', Tone: 'warn', Tip: 'Some counts are estimates.', CheckSlot: [] });
+		}
+		// M4: what the server's cache did, the freshness it applied, and why this answer was fetched.
+		if (tmpAnswer.CacheStatus)
+		{
+			let tmpCacheTone = ((tmpAnswer.CacheStatus === 'Hit') || (tmpAnswer.CacheStatus === 'NotModified')) ? 'ok' : ((tmpAnswer.CacheStatus === 'Stale') ? 'warn' : 'neutral');
+			tmpChips.push({ Text: libFacetDisplay.text(`Cache: ${tmpAnswer.CacheStatus}`), Tone: tmpCacheTone, Tip: libFacetDisplay.text(`${CACHE_TIPS[tmpAnswer.CacheStatus] || 'X-Retold-Facet-Cache'}${tmpAnswer.Seq ? ` Covers changes up to ${tmpAnswer.Seq}.` : ''}`), CheckSlot: [] });
+		}
+		else if (tmpAnswer.Cached === true)
+		{
+			tmpChips.push({ Text: 'Cached', Tone: 'ok', Tip: 'The server answered from its result cache.', CheckSlot: [] });
+		}
+		if (tmpAnswer.Freshness)
+		{
+			tmpChips.push({ Text: libFacetDisplay.text(tmpAnswer.Freshness.replace(/;\s*upgraded=/, ' ↑ ')), Tone: /upgraded/.test(tmpAnswer.Freshness) ? 'accent' : 'neutral', Tip: libFacetDisplay.text(`X-Retold-Facet-Freshness: ${tmpAnswer.Freshness}. The page asks for Bounded (a cached answer up to 5 s old may come back marked Stale); after my own write (read-your-writes) or with a MinSeq from the change stream the server answers Exact.`), CheckSlot: [] });
+		}
+		if (tmpInternals && tmpAnswer.Seq)
+		{
+			tmpChips.push({ Text: libFacetDisplay.text(`Seq ${libFacetChanges.shortSeq(tmpAnswer.Seq) || tmpAnswer.Seq}`), Tone: 'internal', Tip: libFacetDisplay.text(`X-Retold-Facet-Seq: ${tmpAnswer.Seq} (the last change this answer covers)`), CheckSlot: [] });
+		}
+		if (tmpAnswer.Trigger)
+		{
+			let tmpFromStream = /^Live update/.test(tmpAnswer.Trigger);
+			tmpChips.push({ Text: libFacetDisplay.text(tmpAnswer.Trigger.replace(/ @ .*$/, '').replace(/ \(.*\)$/, '')), Tone: 'info', Tip: libFacetDisplay.text(tmpFromStream ? `${tmpAnswer.Trigger}: this answer was fetched because the change stream said data it depends on changed (no reload).` : `${tmpAnswer.Trigger}: why this answer was fetched (no gesture on the page).`), CheckSlot: [] });
 		}
 		let tmpFirstFacet = (Array.isArray(pState.Facets) && pState.Facets[0] && tmpEnvelope.Facets) ? tmpEnvelope.Facets[pState.Facets[0].Key] : null;
 		if (tmpInternals && (typeof(tmpEnvelope.Total) !== 'number') && tmpFirstFacet && tmpFirstFacet.CountMode && (tmpFirstFacet.CountMode !== 'Rows'))
@@ -778,7 +834,7 @@ class PictViewFacetDemoPage extends libPictView
 		}
 		if (tmpAnswer.ETag)
 		{
-			tmpChips.push({ Text: `ETag ${libFacetDisplay.shortETag(tmpAnswer.ETag)}`, Tone: 'mono', Tip: libFacetDisplay.text(`${tmpAnswer.ETag}: the Version of this answer (hashes the result, the principal's scope values and the BindHash).`), CheckSlot: [] });
+			tmpChips.push({ Text: `ETag ${libFacetDisplay.shortETag(tmpAnswer.ETag)}`, Tone: 'mono', Tip: libFacetDisplay.text(`${tmpAnswer.ETag}: the Version of this answer (with the server's cache on: the cache key and the generations it depends on, so it changes exactly when a write could change the answer; else a hash of the computed result).`), CheckSlot: [] });
 		}
 		if (tmpAnswer.NotModified)
 		{
@@ -786,6 +842,8 @@ class PictViewFacetDemoPage extends libPictView
 		}
 		let tmpPosts = (typeof(tmpAnswer.Posts) === 'number') ? tmpAnswer.Posts : 1;
 		tmpChips.push({ Text: `${tmpPosts} POST${(tmpPosts === 1) ? '' : 's'}`, Tone: (tmpPosts === 1) ? 'neutral' : 'warn', Tip: 'Query POSTs sent for the last filter change: widget requests are coalesced per group per tick.', CheckSlot: [] });
+		let tmpStream = libFacetChanges.streamLabel(this.pict.providers.Facet.changeState(pState.Domain));
+		tmpChips.push({ Text: libFacetDisplay.text(tmpStream.Text), Tone: tmpStream.Tone, Tip: libFacetDisplay.text(tmpStream.Tip), CheckSlot: (tmpStream.Tone === 'ok') ? [ {} ] : [] });
 		return { TotalText: libFacetDisplay.count(tmpTotal), NounText: libFacetDisplay.text(tmpNoun), Chips: tmpChips };
 	}
 

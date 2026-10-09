@@ -1414,7 +1414,8 @@ suite
 								Records: null,
 								Cap: null,
 								TimeoutMS: 10000,
-								Freshness: { Mode: 'Exact' },
+								// M4 (internal-contracts §44.2): the normalized Freshness.
+								Freshness: { Mode: 'Exact', MaxLagMS: 5000, MinSeq: null },
 								Warnings: []
 							});
 					});
@@ -1446,7 +1447,8 @@ suite
 						Expect(tmpRequest.FilterString).to.equal('FBV~TotalAmount~GE~10%2E5');
 						Expect(tmpRequest.Total).to.equal(false);
 						Expect(tmpRequest.TimeoutMS).to.equal(10000);
-						Expect(tmpRequest.Freshness).to.deep.equal({ Mode: 'Exact' });
+						// M4 (internal-contracts §44.2): Freshness is normalized and carried, no longer ignored.
+						Expect(tmpRequest.Freshness).to.deep.equal({ Mode: 'Bounded', MaxLagMS: 5000, MinSeq: null });
 						Expect(tmpRequest.Facets[0]).to.include({ Key: 'ByMonth', Fold: 'DateHistogram', Interval: 'month', TimeZone: 'UTC', EmptyBuckets: false, Chart: true });
 						Expect(tmpRequest.Facets[1]).to.include({ Mode: 'Edges', OpenEnded: true });
 						Expect(tmpRequest.Facets[1].Edges).to.deep.equal([ 0, 10, 50.5 ]);

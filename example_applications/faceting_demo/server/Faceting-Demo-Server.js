@@ -115,7 +115,7 @@ const statusOf = (pDemo) =>
 			Provider: pDemo.Options.Provider,
 			Scale: pDemo.Options.Scale,
 			StartedAt: pDemo.StartedAt,
-			Milestone: 'retold-faceting-service M2',
+			Milestone: 'retold-faceting-service M4',
 			Personas: libPersonas.PERSONAS.map((pPersona) => { return pPersona.Key; }),
 			Domains: tmpDomains
 		});

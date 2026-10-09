@@ -1171,7 +1171,8 @@ const buildFacetResult = (pAgg, pRaw, pPost) =>
  *
  * @param {{ Entity: string, Version: string, ModelVersion: string, Engine: string, Exact: boolean, AsOf: string, ElapsedMS: number,
  *           Total?: number, IncludesDeleted: boolean, FilterAST: Record<string, any>, Facets: Record<string, any>, Errors: Record<string, any>, Warnings: Array<any>,
- *           Records?: Array<Record<string, any>>, RecordShape?: string, RecordsDropped?: number }} pParts
+ *           Records?: Array<Record<string, any>>, RecordShape?: string, RecordsDropped?: number, DependsOn?: Array<string>,
+ *           Cached?: boolean, Stale?: boolean, LagMS?: number }} pParts
  * @return {Record<string, any>}
  */
 const buildEnvelope = (pParts) =>
@@ -1206,6 +1207,12 @@ const buildEnvelope = (pParts) =>
 	tmpEnvelope.Facets = tmpParts.Facets || {};
 	tmpEnvelope.Errors = tmpParts.Errors || {};
 	tmpEnvelope.Warnings = Array.isArray(tmpParts.Warnings) ? tmpParts.Warnings.slice() : [];
+	if (Array.isArray(tmpParts.DependsOn))
+	{
+		// M4 (internal-contracts §44.7): the sorted entity names the answer depends on (readable ones
+		// only), so a client can match change events to the groups it shows.  Not volatile.
+		tmpEnvelope.DependsOn = tmpParts.DependsOn.slice();
+	}
 	if (Array.isArray(tmpParts.Records))
 	{
 		// internal-contracts §28.4: a Query body with Records (always Live records, kept by normalizeForComparison).

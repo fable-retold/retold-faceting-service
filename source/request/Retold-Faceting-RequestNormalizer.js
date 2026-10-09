@@ -50,7 +50,26 @@ class RetoldFacetingRequestNormalizer extends libFableServiceProviderBase
 	normalize(pEntity, pBody, pMode)
 	{
 		// The legacy payload stays off (normalizeLegacy is the seam): AcceptLegacy is never set here.
-		return libFacetRequest.normalizeRequest(pEntity, pBody, { Limits: this.options.Limits, Time: this.options.Time, Mode: (typeof(pMode) === 'string') ? pMode : 'Query' });
+		return libFacetRequest.normalizeRequest(pEntity, pBody,
+			{
+				Limits: this.options.Limits,
+				Time: this.options.Time,
+				Mode: (typeof(pMode) === 'string') ? pMode : 'Query',
+				Freshness: this.freshnessSettings()
+			});
+	}
+
+	/**
+	 * The Freshness settings of the contract normalizer (internal-contracts §44.2): the configured
+	 * default mode and lag, and the cache's MaxAgeMS as the largest lag a request may ask for.
+	 *
+	 * @return {{ DefaultMode: string, MaxLagMS: number, MaxAgeMS: number }}
+	 */
+	freshnessSettings()
+	{
+		let tmpFreshness = this.options.Freshness || {};
+		let tmpCache = this.options.Cache || {};
+		return libFacetRequest.resolveFreshnessSettings({ DefaultMode: tmpFreshness.DefaultMode, MaxLagMS: tmpFreshness.MaxLagMS, MaxAgeMS: tmpCache.MaxAgeMS });
 	}
 
 	/**

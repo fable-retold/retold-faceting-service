@@ -163,13 +163,26 @@ const DEFAULTS = (
 				DefaultInterval: 'month'
 			},
 
+		// M4 (internal-contracts §38.4): the result cache and the generation Version are opt-in
+		// (Enabled: false) until the upstream DAL hook (M-1) lands: the interim intake sees only
+		// endpoint writes, so a host that writes through DALs or raw SQL must call notify() first.
+		// Generations and entries live in ONE process: Enabled is only correct when every writer of the
+		// faceted tables runs in this same process (one node serving every write); with several
+		// processes, process B never sees process A's writes until Cache.MaxAgeMS (§51.50).
+		// ExposeStatus: the X-Retold-Facet-Cache / -Freshness headers and a truthful Cached flag on
+		// another principal's entry (an operator / demo switch, S9).
 		Cache:
 			{
 				Enabled: false,
+				ExposeStatus: false,
+				MaxConcurrentRefreshes: 4,
 				MaxBytes: 67108864,
+				MaxEntries: 5000,
+				MaxEntryBytes: 4194304,
 				MaxAgeMS: 600000,
 				GenerationGranularity: 'Column',
 				MaxGenerationKeys: 'Auto',
+				MaxGenerationFloors: 50000,
 				AgentlessTTLMS: 15000,
 				OpaqueTTLMS: 0,
 				NowBucketMS: 60000,
@@ -184,10 +197,20 @@ const DEFAULTS = (
 				StatePollMS: 250,
 				FeedMaxLagMS: 2000,
 				MinSeqWaitMS: 1500,
-				ReadYourWritesMS: 10000
+				ReadYourWritesMS: 10000,
+				ReadYourWritesMaxPrincipals: 10000,
+				// true | false | 'Auto' (only on a host without a scope policy: the Seq is the node-wide
+				// change counter, which on a multi-tenant host reveals other tenants' write volume)
+				SeqHeader: 'Auto'
 			},
 
-		ChangeCapture: { Intake: 'Auto' },
+		// M4 (internal-contracts §40.1): 'Auto' = the upstream MeadowChangeBus when fable has one, else
+		// the interim intake (the wrapped behavior dispatcher and DAL write methods of each route-bound
+		// controller); 'None' installs nothing.  NotifyManaged: true or [ 'Entity', … ] — entities whose
+		// every write the host reports through notify() (else an entity no source sees is never cached).
+		// RequireNotifyTenants: refuse a notify of a tenant-scoped entity that names no tenant.
+		// MaxEventIDs / MaxEventOwners: beyond them an event's ids / owners become "unknown".
+		ChangeCapture: { Intake: 'Auto', NotifySettleMS: 1000, NotifyManaged: [], RequireNotifyTenants: false, MaxEventIDs: 10000, MaxEventOwners: 1000 },
 		Reconcile: {},
 		Stores: { ClickHouse: false, Solr: false, OpenSearch: false },
 		Materialize: {},
@@ -195,7 +218,24 @@ const DEFAULTS = (
 		Agent: { PrivateListener: false },
 		Upstream: { URL: false },
 		Edge: { Role: 'Gateway' },
-		SSE: {},
+		// M4 (internal-contracts §46): GET <RoutePrefix>/Changes.  Enabled: true | false | 'Auto' (only
+		// on a host with a scope policy: without one every write is visible to every stream).
+		// IncludeSeq: true | false | 'Auto' (as Freshness.SeqHeader).  AllowedOrigins: cross-origin
+		// pages allowed to open a stream ('*' = any; same-origin is always allowed).
+		SSE:
+			{
+				Enabled: 'Auto',
+				AllowedOrigins: [],
+				CoalesceMS: 250,
+				HeartbeatMS: 15000,
+				GlobalTickMS: 60000,
+				MaxPerPrincipal: 2,
+				MaxPerTenant: 200,
+				MaxConnections: 1000,
+				RevalidateMS: 300000,
+				RetryMS: 3000,
+				IncludeSeq: 'Auto'
+			},
 		Admin: { RebuildCooldownMS: 600000 },
 		Privacy: { MinBucketCount: 0 },
 		Compat: { SluiceAggregate: false }

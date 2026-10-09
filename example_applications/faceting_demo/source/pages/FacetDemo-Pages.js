@@ -14,8 +14,10 @@
  *                         page's EmptyHint and Try line.
  *
  * Panel kinds (DEMO-SPEC §7): Scope, Terms (Display: Checklist | Chips | Bars | Split; SortBy: 'KeyDesc' |
- * 'KeyAsc'; KeyNoun), Histogram, Pivot, Records (Columns may name a Lookup, Facet-Lookup.js), Compare, and
- * Described (the panels describedFacets() derived for a group).  Panel keys reference Facets[].Key.
+ * 'KeyAsc'; KeyNoun), Histogram, Pivot, Records (Columns may name a Lookup, Facet-Lookup.js), Compare, Change
+ * (M4, DEMO-SPEC §12: the "Make a change" panel; Action: ProjectStatus | DocumentAdd | LabFormComplete |
+ * ReviewAdd), and Described (the panels describedFacets() derived for a group).  Panel keys reference
+ * Facets[].Key.
  *
  * Initial state = the motivating requests of design 08 (E1, E2, E3) as the story principal (user 42 /
  * tenant 7), validated against the fixtures: Projects Total 6, Documents 41, Lab forms (A) 237, Books 1436.
@@ -211,7 +213,11 @@ const PAGES =
 		Tabs: null,
 		Layout:
 		{
-			Top: [ { Widget: 'Scope', Group: 'Projects', Labels: PROJECT_SCOPES.Labels, Descriptions: PROJECT_SCOPES.Descriptions, Hide: PROJECT_SCOPES.Hide } ],
+			Top:
+			[
+				{ Widget: 'Scope', Group: 'Projects', Labels: PROJECT_SCOPES.Labels, Descriptions: PROJECT_SCOPES.Descriptions, Hide: PROJECT_SCOPES.Hide },
+				{ Widget: 'Change', Group: 'Projects', Action: 'ProjectStatus' }
+			],
 			Rail:
 			[
 				{ Widget: 'Terms', Group: 'Projects', FacetKey: 'Status', Display: 'Checklist' },
@@ -251,7 +257,7 @@ const PAGES =
 		Tabs: null,
 		Layout:
 		{
-			Top: [],
+			Top: [ { Widget: 'Change', Group: 'Documents', Action: 'DocumentAdd' } ],
 			Rail:
 			[
 				{ Widget: 'Terms', Group: 'Documents', FacetKey: 'ByForm', Display: 'Checklist', Title: 'Form type', Collapse: 8 },
@@ -296,7 +302,7 @@ const PAGES =
 		{
 			A:
 			{
-				Top: [],
+				Top: [ { Widget: 'Change', Group: 'LabFormsA', Action: 'LabFormComplete' } ],
 				Rail:
 				[
 					{ Widget: 'Terms', Group: 'LabFormsA', FacetKey: 'ToDo', Display: 'Checklist', Title: 'Form type', Collapse: 8 },
@@ -361,7 +367,11 @@ const PAGES =
 		Tabs: null,
 		Layout:
 		{
-			Top: [ { Widget: 'Scope', Group: 'Books', Descriptions: { 'Book.WellReviewed': 'At least one review rated 4 or 5' } } ],
+			Top:
+			[
+				{ Widget: 'Scope', Group: 'Books', Descriptions: { 'Book.WellReviewed': 'At least one review rated 4 or 5' } },
+				{ Widget: 'Change', Group: 'Books', Action: 'ReviewAdd' }
+			],
 			Rail: [ { Widget: 'Described', Group: 'Books' } ],
 			Main:
 			[

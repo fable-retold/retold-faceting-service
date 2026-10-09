@@ -242,6 +242,13 @@ const SORT_DIRECTIONS = Object.freeze([ 'ASC', 'DESC' ]);
 // Facet Keys starting with this are reserved for the service ('#Total').
 const RESERVED_KEY_PREFIX = '#';
 
+// M4 (internal-contracts §44.2): the Freshness modes (02 §3.3), their defaults, and the local change
+// sequence grammar a MinSeq must match ('<NodeEpoch>:<n>', NodeEpoch 'e:' + 8 lowercase hex,
+// internal-contracts §39.1; Retold-Faceting-Util re-exports this pattern so there is one grammar).
+const FRESHNESS_MODES = Object.freeze([ 'Exact', 'Bounded', 'Fast' ]);
+const FRESHNESS_DEFAULTS = Object.freeze({ DefaultMode: 'Exact', MaxLagMS: 5000, MaxAgeMS: 600000 });
+const SEQ_PATTERN = /^e:[0-9a-f]{8}:(0|[1-9][0-9]{0,14})$/;
+
 /**
  * @param {any} pValue
  * @return {boolean}
@@ -444,6 +451,78 @@ const booleanOption = (pValue, pDefault, pDetail) =>
 		throw invalid(`${pDetail.Field} must be a boolean.`, pDetail);
 	}
 	return pValue;
+};
+
+/**
+ * The Freshness settings normalizeRequest reads (internal-contracts §44.2): DefaultMode, MaxLagMS
+ * (the default lag bound) and MaxAgeMS (the largest MaxLagMS a request may ask for, Cache.MaxAgeMS).
+ *
+ * @param {Record<string, any>} [pFreshness]
+ * @return {{ DefaultMode: string, MaxLagMS: number, MaxAgeMS: number }}
+ */
+const resolveFreshnessSettings = (pFreshness) =>
+{
+	let tmpFreshness = isPlainObject(pFreshness) ? pFreshness : {};
+	let tmpMaxAgeMS = (Number.isSafeInteger(tmpFreshness.MaxAgeMS) && (tmpFreshness.MaxAgeMS >= 0)) ? tmpFreshness.MaxAgeMS : FRESHNESS_DEFAULTS.MaxAgeMS;
+	let tmpMaxLagMS = (Number.isSafeInteger(tmpFreshness.MaxLagMS) && (tmpFreshness.MaxLagMS >= 0)) ? Math.min(tmpFreshness.MaxLagMS, tmpMaxAgeMS) : Math.min(FRESHNESS_DEFAULTS.MaxLagMS, tmpMaxAgeMS);
+	return (
+		{
+			DefaultMode: (FRESHNESS_MODES.indexOf(tmpFreshness.DefaultMode) >= 0) ? tmpFreshness.DefaultMode : FRESHNESS_DEFAULTS.DefaultMode,
+			MaxLagMS: tmpMaxLagMS,
+			MaxAgeMS: tmpMaxAgeMS
+		});
+};
+
+/**
+ * Normalize a request's Freshness (02 §3.3, internal-contracts §44.2): absent → { Mode: DefaultMode,
+ * MaxLagMS, MinSeq: null }; otherwise a plain object whose Mode is one of FRESHNESS_MODES, whose
+ * MaxLagMS is an integer 0 … MaxAgeMS and whose MinSeq matches SEQ_PATTERN (each optional; unknown
+ * keys are ignored).  Throws 400 FACET_REQUEST_INVALID { Field } on anything else.  Freshness is never
+ * cache key material: it chooses which answer may be served, not what the answer is.
+ *
+ * @param {any} pFreshness - the body's Freshness
+ * @param {Record<string, any>} [pSettings] - { DefaultMode, MaxLagMS, MaxAgeMS }
+ * @return {{ Mode: string, MaxLagMS: number, MinSeq: string|null }}
+ */
+const normalizeFreshness = (pFreshness, pSettings) =>
+{
+	let tmpSettings = resolveFreshnessSettings(pSettings);
+	if (isAbsent(pFreshness))
+	{
+		return { Mode: tmpSettings.DefaultMode, MaxLagMS: tmpSettings.MaxLagMS, MinSeq: null };
+	}
+	if (!isPlainObject(pFreshness))
+	{
+		throw invalid('Freshness must be an object.', { Field: 'Freshness' });
+	}
+	let tmpMode = tmpSettings.DefaultMode;
+	if (!isAbsent(pFreshness.Mode))
+	{
+		if (FRESHNESS_MODES.indexOf(pFreshness.Mode) < 0)
+		{
+			throw invalid(`Freshness.Mode must be one of ${FRESHNESS_MODES.join(', ')}.`, { Field: 'Freshness.Mode' });
+		}
+		tmpMode = pFreshness.Mode;
+	}
+	let tmpMaxLagMS = tmpSettings.MaxLagMS;
+	if (!isAbsent(pFreshness.MaxLagMS))
+	{
+		if (!Number.isSafeInteger(pFreshness.MaxLagMS) || (pFreshness.MaxLagMS < 0) || (pFreshness.MaxLagMS > tmpSettings.MaxAgeMS))
+		{
+			throw invalid(`Freshness.MaxLagMS must be an integer between 0 and ${tmpSettings.MaxAgeMS}.`, { Field: 'Freshness.MaxLagMS', Max: tmpSettings.MaxAgeMS });
+		}
+		tmpMaxLagMS = pFreshness.MaxLagMS;
+	}
+	let tmpMinSeq = null;
+	if (!isAbsent(pFreshness.MinSeq))
+	{
+		if ((typeof(pFreshness.MinSeq) !== 'string') || !SEQ_PATTERN.test(pFreshness.MinSeq))
+		{
+			throw invalid('Freshness.MinSeq must be a change sequence (\'e:<8 hex>:<n>\').', { Field: 'Freshness.MinSeq' });
+		}
+		tmpMinSeq = pFreshness.MinSeq;
+	}
+	return { Mode: tmpMode, MaxLagMS: tmpMaxLagMS, MinSeq: tmpMinSeq };
 };
 
 /**
@@ -1180,10 +1259,8 @@ const normalizeRequest = (pEntity, pBody, pSettings) =>
 		}
 		tmpTimeoutMS = Math.min(Math.floor(tmpBody.TimeoutMS), tmpLimits.TimeoutMS);
 	}
-	if (!isAbsent(tmpBody.Freshness) && !isPlainObject(tmpBody.Freshness))
-	{
-		throw invalid('Freshness must be an object.', { Field: 'Freshness' });
-	}
+	// M4 (internal-contracts §44.2): every mode shape-checks Freshness; only a Query reads it.
+	let tmpFreshness = normalizeFreshness(tmpBody.Freshness, tmpSettings.Freshness);
 
 	return (
 		{
@@ -1198,8 +1275,8 @@ const normalizeRequest = (pEntity, pBody, pSettings) =>
 			Records: tmpRecords,
 			Cap: tmpCap,
 			TimeoutMS: tmpTimeoutMS,
-			// Accepted and ignored: the Live engine is always Exact.
-			Freshness: { Mode: 'Exact' },
+			// M4: { Mode, MaxLagMS, MinSeq } (the service's Freshness stage turns it into the effective mode).
+			Freshness: tmpFreshness,
 			Warnings: tmpWarnings
 		});
 };
@@ -1235,6 +1312,11 @@ module.exports = (
 		MAX_RECORDS_SORT: MAX_RECORDS_SORT,
 		SORT_DIRECTIONS: SORT_DIRECTIONS,
 		RESERVED_KEY_PREFIX: RESERVED_KEY_PREFIX,
+		FRESHNESS_MODES: FRESHNESS_MODES,
+		FRESHNESS_DEFAULTS: FRESHNESS_DEFAULTS,
+		SEQ_PATTERN: SEQ_PATTERN,
+		resolveFreshnessSettings: resolveFreshnessSettings,
+		normalizeFreshness: normalizeFreshness,
 		checkLimits: checkLimits,
 		normalizeFacetSpec: normalizeFacetSpec,
 		normalizeRequest: normalizeRequest,

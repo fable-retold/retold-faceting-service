@@ -17,7 +17,20 @@
  * restify pre() answering 403 DEMO_LOOPBACK_ONLY to any non-loopback client) is installed through the
  * harness's BeforeListen hook, i.e. before the server accepts its first connection.  The harness's test
  * session headers (x-facet-test-*) must only ever come from the front server.  After each boot: renumber the
- * story principals (Faceting-Demo-Personas.RENUMBER).
+ * story principals (Faceting-Demo-Personas.RENUMBER), then install the write guards (Faceting-Demo-Writes,
+ * internal-contracts §47.5).
+ *
+ * M4: every domain runs faceting with FACETING_OPTIONS (Cache.Enabled: true -- the result cache, the generation
+ * Version and the 304 short-circuit; the change intake and GET /1.0/Facet/Changes run with their defaults: every
+ * demo domain has a scope policy, so SSE.Enabled 'Auto' mounts the stream).  The demo may enable the cache because
+ * every write reaches the intake and runs in this one process: the only writes are the "Make a change" calls
+ * through the stock CRUD routes, whose behavior dispatcher and DAL writes the interim intake wraps.
+ *
+ * Demo-only switches (a showcase on one loopback machine, never a multi-tenant deployment): Cache.ExposeStatus
+ * (the X-Retold-Facet-Cache / -Freshness headers the inspector shows), Freshness.SeqHeader and SSE.IncludeSeq
+ * (the Seq the MinSeq / read-your-writes flow shows).  Their defaults keep all three away from clients on a policy
+ * host (the node-wide Seq reveals other tenants' write volume; the cache status reveals a colleague's query); the
+ * client then refetches an SSE-triggered group with Freshness.Mode 'Exact' instead of a MinSeq.
  *
  * @license MIT
  *
@@ -27,6 +40,10 @@ const libPath = require('node:path');
 
 const libHarness = require('../../../test/support/Facet-Test-Harness.js');
 const libPersonas = require('./Faceting-Demo-Personas.js');
+const libWrites = require('./Faceting-Demo-Writes.js');
+
+// The RetoldFaceting options every demo domain adds over its fixture's (internal-contracts §47.5).
+const FACETING_OPTIONS = Object.freeze({ Cache: { Enabled: true, ExposeStatus: true }, Freshness: { SeqHeader: true }, SSE: { IncludeSeq: true } });
 
 const DOMAINS =
 	[
@@ -423,6 +440,16 @@ const describeDomain = (pDomain, pHarness) =>
 		tmpDefinitions.Files = tmpDefinitions.Files.map((pFile) => { return libPath.basename(String(pFile)); });
 	}
 	let tmpFaceting = (pHarness.faceting && (typeof(pHarness.faceting.status) === 'function')) ? pHarness.faceting.status() : null;
+	// M4: the cache / change-capture / stream statistics (counts only, no keys or values), when the service has them.
+	let tmpLive = {};
+	[ 'Cache', 'Changes', 'SSE', 'Generations', 'ReadYourWrites' ].forEach(
+		(pKey) =>
+		{
+			if (tmpFaceting && tmpFaceting[pKey] && (typeof(tmpFaceting[pKey]) === 'object'))
+			{
+				tmpLive[pKey] = JSON.parse(JSON.stringify(tmpFaceting[pKey]));
+			}
+		});
 	return (
 		{
 			Fixture: pHarness.options ? pHarness.options.Fixture : null,
@@ -439,7 +466,11 @@ const describeDomain = (pDomain, pHarness) =>
 			// Seed ID -> demo ID (DEMO-SPEC §2.3), and any seed IDs moved out of the way first.
 			Renumbered: pHarness.DemoRenumberMap ? { Tenants: Object.assign({}, pHarness.DemoRenumberMap.Tenants || {}), Users: Object.assign({}, pHarness.DemoRenumberMap.Users || {}), Relocated: (pHarness.DemoRenumber && pHarness.DemoRenumber.Relocated) ? pHarness.DemoRenumber.Relocated : {} } : null,
 			LoopbackGuard: !!(pHarness.DemoLoopbackGuard && pHarness.DemoLoopbackGuard.Installed),
-			LoopbackOnly: isBoundToLoopback(pHarness)
+			LoopbackOnly: isBoundToLoopback(pHarness),
+			// M4: the write guards and the live statistics.
+			WriteGuard: pHarness.DemoWriteGuard ? { Installed: !!pHarness.DemoWriteGuard.Installed, Entities: pHarness.DemoWriteGuard.Entities.length, Refused: pHarness.DemoWriteGuard.Refused } : null,
+			Writes: libWrites.WRITE_ROUTES.filter((pRoute) => { return pRoute.Domain === pDomain; }).map((pRoute) => { return `${pRoute.Method} ${pRoute.Path}`; }),
+			Live: tmpLive
 		});
 };
 
@@ -466,7 +497,8 @@ const startDomain = (pDomain, pOptions, fCallback) =>
 				LogLevel: pOptions.LogLevel || 'error',
 				// Loopback only, and the guard is in restify's pre chain before the first connection.
 				Host: BIND_HOST,
-				BeforeListen: installLoopbackGuard
+				BeforeListen: installLoopbackGuard,
+				Faceting: JSON.parse(JSON.stringify(FACETING_OPTIONS))
 			},
 			(pStartError) =>
 			{
@@ -491,6 +523,15 @@ const startDomain = (pDomain, pOptions, fCallback) =>
 						tmpHarness.DemoDomain = pDomain.Domain;
 						tmpHarness.DemoRenumberMap = tmpRenumber;
 						tmpHarness.DemoRenumber = pSummary;
+						try
+						{
+							// After boot (the faceting intake already wrapped the PostOperation slots; the guards take the PreOperation ones).
+							libWrites.installWriteGuards(pDomain.Domain, tmpHarness);
+						}
+						catch (pGuardError)
+						{
+							return fCallback(pGuardError, tmpHarness);
+						}
 						tmpHarness.DemoBootMS = Date.now() - tmpStarted;
 						return fCallback(null, tmpHarness);
 					});
@@ -571,6 +612,7 @@ const start = (pOptions, fCallback) =>
 module.exports = (
 	{
 		DOMAINS: DOMAINS,
+		FACETING_OPTIONS: FACETING_OPTIONS,
 		LOOPBACK_ADDRESSES: LOOPBACK_ADDRESSES,
 		GUARD_ERROR_CODE: GUARD_ERROR_CODE,
 		BIND_HOST: BIND_HOST,
@@ -586,5 +628,6 @@ module.exports = (
 		start: start,
 		stop: stop,
 		Harness: libHarness,
-		Personas: libPersonas
+		Personas: libPersonas,
+		Writes: libWrites
 	});

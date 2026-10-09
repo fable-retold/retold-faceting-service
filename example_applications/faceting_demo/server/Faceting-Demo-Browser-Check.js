@@ -4,7 +4,8 @@
  * Chrome (puppeteer, resolved from the retold umbrella node_modules; it is not a dependency of the demo) and
  * prove the end-to-end promise of every page: a gesture on a widget sends ONE coalesced Query POST, the page
  * Total becomes the bucket's count, and "Verify with Records/Count" (POST …/Records/Count with the same
- * filter) agrees with it.  Screenshots of each state land in screenshots/.
+ * filter) agrees with it.  Screenshots of each state land in a scratch directory (the OS temp dir, or
+ * DEMO_SCREENSHOT_DIR); DEMO_UPDATE_SCREENSHOTS=1 writes the tracked screenshots/ instead.
  *
  *   Projects   load 6 (one Describe GET + one Query POST) · OnHold -> 7 (Status counts unchanged) ·
  *              drag Feb–Jul -> 5 · reset · pivot cell Active × Iris Media -> 2 · single Started bar ->
@@ -24,6 +25,12 @@
  *              switch on page 2 goes back to page 1 · focus stays on a bar after Enter · the work list shows
  *              the looked-up intake fields · user44's empty Lab forms state names the reason
  *   Layout     the other theme · 800px and 390px wide without horizontal scroll · a #/Bookstore deep link
+ *   Live (M4)  every page's "Make a change" panel: a real write through the proxy's allowlist, then the affected
+ *              card updates with no gesture (the change stream's event -> one coalesced refetch per group, its
+ *              trigger "Live update: …"), undo restores the counts; the Live chip; the inspector shows Cached /
+ *              Stale / Version / X-Retold-Facet-Cache, the Write and the stream event (screenshots 28–31).  Without
+ *              a change stream the panels refresh their page themselves and the trigger checks are skipped
+ *              (DEMO_REQUIRE_LIVE=1 fails instead)
  *   Console    no page errors
  *
  * Boots the demo in-process on DEMO_CHECK_PORT (19302) unless DEMO_URL points at a running host.  Needs
@@ -37,7 +44,10 @@ const libFS = require('node:fs');
 const libPath = require('node:path');
 
 const EXAMPLE_ROOT = libPath.resolve(__dirname, '..');
-const SCREENSHOT_ROOT = libPath.join(EXAMPLE_ROOT, 'screenshots');
+// Screenshots go to a scratch directory unless DEMO_UPDATE_SCREENSHOTS=1 (a verification run never rewrites the
+// tracked screenshots/; DEMO_SCREENSHOT_DIR names another directory).
+const SCREENSHOT_ROOT = (process.env.DEMO_UPDATE_SCREENSHOTS === '1') ? libPath.join(EXAMPLE_ROOT, 'screenshots')
+	: (process.env.DEMO_SCREENSHOT_DIR ? libPath.resolve(process.env.DEMO_SCREENSHOT_DIR) : libPath.join(require('node:os').tmpdir(), 'retold-faceting-demo-screenshots'));
 const CHECK_PORT = parseInt(process.env.DEMO_CHECK_PORT || '19302', 10);
 const VIEWPORT = { width: 1360, height: 1000 };
 
@@ -55,6 +65,7 @@ catch (pError)
 let _Checks = 0;
 let _Failures = [];
 let _Shots = [];
+let _Skipped = [];
 
 const check = (pCondition, pLabel) =>
 {
@@ -69,8 +80,12 @@ const check = (pCondition, pLabel) =>
 
 const sleep = (pMS) => { return new Promise((fResolve) => { setTimeout(fResolve, pMS); }); };
 
+// The change stream (M4) is one long-lived GET per domain: it is not a request a gesture waits for.
+const isStreamURL = (pURL) => { return /\/1\.0\/Facet\/Changes(\?|$)/.test(pURL); };
+
 /**
- * Track facet requests the page sends (method + path), so a gesture can be checked for "one POST".
+ * Track facet requests the page sends (method + path), so a gesture can be checked for "one POST".  The change
+ * streams are tracked apart (Streams), never as in-flight requests.
  */
 class NetworkLog
 {
@@ -78,10 +93,16 @@ class NetworkLog
 	{
 		this.InFlight = 0;
 		this.Entries = [];
+		this.Streams = [];
 		pPage.on('request', (pRequest) =>
 			{
 				if (pRequest.url().indexOf('/api/') < 0)
 				{
+					return;
+				}
+				if (isStreamURL(pRequest.url()))
+				{
+					this.Streams.push({ URL: pRequest.url(), At: Date.now() });
 					return;
 				}
 				this.InFlight++;
@@ -89,7 +110,7 @@ class NetworkLog
 			});
 		const fDone = (pRequest, pStatus) =>
 			{
-				if (pRequest.url().indexOf('/api/') < 0)
+				if ((pRequest.url().indexOf('/api/') < 0) || isStreamURL(pRequest.url()))
 				{
 					return;
 				}
@@ -441,6 +462,17 @@ const runProjects = async (pPage, pNetwork) =>
 	tmpState = await groupState(pPage, 'Projects');
 	check(tmpState.Total === 6, `Projects reset: Total 6 (got ${tmpState.Total})`);
 	let tmpCellCount = await pPage.evaluate(() => { let tmpCell = document.querySelector('#FD-P-Projects-StatusByClient button.facet-pivot-cell-btn[aria-label^="Active × Iris Media"]'); return tmpCell ? parseInt(tmpCell.textContent.replace(/[^0-9]/g, ''), 10) : null; });
+	// Centered first, like clickByText: puppeteer's click only scrolls an element that is out of view, so a
+	// cell at the bottom edge sits under the fixed inspector bar and the click would open the drawer instead.
+	let tmpCellPoint = await pPage.$eval('#FD-P-Projects-StatusByClient button.facet-pivot-cell-btn[aria-label^="Active × Iris Media"]',
+		(pCell) =>
+		{
+			pCell.scrollIntoView({ block: 'center' });
+			let tmpBox = pCell.getBoundingClientRect();
+			let tmpTop = document.elementFromPoint(tmpBox.left + (tmpBox.width / 2), tmpBox.top + (tmpBox.height / 2));
+			return { Occluded: !(tmpTop === pCell || pCell.contains(tmpTop)) };
+		});
+	check(!tmpCellPoint.Occluded, 'Projects pivot cell: nothing covers it once centered');
 	await gesture(pPage, pNetwork, 'Projects pivot Active × Iris Media', async () => { await pPage.click('#FD-P-Projects-StatusByClient button.facet-pivot-cell-btn[aria-label^="Active × Iris Media"]'); });
 	tmpState = await groupState(pPage, 'Projects');
 	check((tmpState.Total === 2) && (tmpCellCount === 2), `Projects pivot cell: Total ${tmpState.Total} == cell count ${tmpCellCount} == 2`);
@@ -736,12 +768,12 @@ const runInspector = async (pPage, pNetwork) =>
 	check(/Engine/.test(tmpText) && /Exact/.test(tmpText) && /Disjunctive/.test(tmpText) && /Excluded/.test(tmpText), 'inspector: the Envelope tab shows Engine, Exact, Disjunctive, Excluded');
 	await pPage.screenshot({ path: libPath.join(SCREENSHOT_ROOT, '20-inspector-envelope.png') });
 	_Shots.push(libPath.join(SCREENSHOT_ROOT, '20-inspector-envelope.png'));
-	console.log('    screenshot screenshots/20-inspector-envelope.png');
+	console.log(`    screenshot ${libPath.join(SCREENSHOT_ROOT, '20-inspector-envelope.png')}`);
 	await clickByText(pPage, 'button.facet-insp-tab', 'Request');
 	await sleep(150);
 	await pPage.screenshot({ path: libPath.join(SCREENSHOT_ROOT, '21-inspector-request.png') });
 	_Shots.push(libPath.join(SCREENSHOT_ROOT, '21-inspector-request.png'));
-	console.log('    screenshot screenshots/21-inspector-request.png');
+	console.log(`    screenshot ${libPath.join(SCREENSHOT_ROOT, '21-inspector-request.png')}`);
 	await clickByText(pPage, 'button.facet-insp-bar', 'Request / envelope');
 	await sleep(100);
 
@@ -786,6 +818,196 @@ const runLightAndNarrow = async (pPage, pNetwork) =>
 	await pPage.setViewport(VIEWPORT);
 };
 
+/**
+ * Poll a condition inside the page (a function source evaluated with one argument) until it holds.
+ */
+const waitInPage = async (pPage, fCondition, pArgument, pTimeoutMS) =>
+{
+	let tmpUntil = Date.now() + (pTimeoutMS || 5000);
+	while (Date.now() < tmpUntil)
+	{
+		if (await pPage.evaluate(fCondition, pArgument))
+		{
+			return true;
+		}
+		await sleep(40);
+	}
+	return !!(await pPage.evaluate(fCondition, pArgument));
+};
+
+/**
+ * A real mouse click on the first element matching a selector (scrolled into view first).
+ */
+const clickSelector = async (pPage, pSelector) =>
+{
+	let tmpPoint = await pPage.evaluate(
+		(pSel) =>
+		{
+			let tmpElement = document.querySelector(pSel);
+			if (!tmpElement || tmpElement.disabled)
+			{
+				return null;
+			}
+			tmpElement.scrollIntoView({ block: 'center' });
+			let tmpBox = tmpElement.getBoundingClientRect();
+			return { X: tmpBox.left + (tmpBox.width / 2), Y: tmpBox.top + (tmpBox.height / 2) };
+		}, pSelector);
+	if (!tmpPoint)
+	{
+		throw new Error(`no enabled [${pSelector}]`);
+	}
+	await pPage.mouse.click(tmpPoint.X, tmpPoint.Y);
+};
+
+/**
+ * The stream status of a domain, the group's Total / facet counts / AnswerSeq and its latest Query exchange.
+ */
+const liveState = async (pPage, pGroup) =>
+{
+	return pPage.evaluate(
+		(pGroupHash) =>
+		{
+			let tmpState = _Pict.AppData.Facet.Groups[pGroupHash];
+			let tmpChanges = _Pict.AppData.Facet.Changes[tmpState.Domain] || null;
+			let tmpQuery = _Pict.AppData.Facet.Log.find((pExchange) => { return (pExchange.Kind === 'Query') && (pExchange.GroupHash === pGroupHash) && !pExchange.Pending; }) || null;
+			let tmpWrite = _Pict.AppData.Facet.Log.find((pExchange) => { return (pExchange.Kind === 'Write') && (pExchange.GroupHash === pGroupHash); }) || null;
+			let tmpCounts = {};
+			let tmpFacets = (tmpState.Envelope && tmpState.Envelope.Facets) ? tmpState.Envelope.Facets : {};
+			Object.keys(tmpFacets).forEach((pKey) => { tmpCounts[pKey] = {}; (tmpFacets[pKey].Buckets || []).forEach((pBucket) => { tmpCounts[pKey][String(pBucket.Key)] = pBucket.Count; }); });
+			return (
+				{
+					Stream: tmpChanges ? tmpChanges.Status : null,
+					Events: tmpChanges ? tmpChanges.Events : 0,
+					Total: (tmpState.Envelope && (typeof(tmpState.Envelope.Total) === 'number')) ? tmpState.Envelope.Total : null,
+					AnswerSeq: tmpState.AnswerSeq,
+					Status: tmpState.Status,
+					Counts: tmpCounts,
+					LastTrigger: tmpState.LastAnswer ? tmpState.LastAnswer.Trigger : null,
+					QueryID: tmpQuery ? tmpQuery.ID : null,
+					QueryTrigger: tmpQuery ? tmpQuery.Trigger : null,
+					WriteStatus: tmpWrite ? tmpWrite.Status : null,
+					WriteID: tmpWrite ? tmpWrite.ID : null,
+					Panel: (document.querySelector(`#FD-P-${pGroupHash}-Change .fd-change-status`) || { textContent: '' }).textContent.replace(/\s+/g, ' ').trim()
+				});
+		}, pGroup);
+};
+
+/**
+ * One "Make a change" click: the write answers 2xx, the group's answer changes WITHOUT a gesture (the change stream's
+ * refetch, at most one Query POST per group), the page shows it.  Returns the state after.
+ */
+const changeGesture = async (pPage, pNetwork, pLabel, pGroup, pOp, fExpect, pLive) =>
+{
+	let tmpBefore = await liveState(pPage, pGroup);
+	pNetwork.mark();
+	await clickSelector(pPage, `#FD-P-${pGroup}-Change button[data-change-op="${pOp}"]`);
+	let tmpWritten = await waitInPage(pPage, (pArg) => { let tmpWrite = _Pict.AppData.Facet.Log.find((pExchange) => { return (pExchange.Kind === 'Write') && (pExchange.GroupHash === pArg.Group); }); return !!tmpWrite && (tmpWrite.ID !== pArg.Before) && !tmpWrite.Pending; }, { Group: pGroup, Before: tmpBefore.WriteID }, 5000);
+	let tmpAfterWrite = await liveState(pPage, pGroup);
+	check(tmpWritten && (tmpAfterWrite.WriteStatus >= 200) && (tmpAfterWrite.WriteStatus < 300), `${pLabel}: the write answers 2xx (${tmpAfterWrite.WriteStatus}) [${tmpAfterWrite.Panel.slice(0, 90)}]`);
+	let tmpChanged = await waitInPage(pPage, (pArg) => { let tmpState = _Pict.AppData.Facet.Groups[pArg.Group]; return (tmpState.AnswerSeq !== pArg.AnswerSeq) && (tmpState.Status === 'Ready'); }, { Group: pGroup, AnswerSeq: tmpBefore.AnswerSeq }, 5000);
+	await settle(pPage, pNetwork);
+	let tmpAfter = await liveState(pPage, pGroup);
+	check(tmpChanged, `${pLabel}: a new answer arrived with no gesture (AnswerSeq ${tmpBefore.AnswerSeq} -> ${tmpAfter.AnswerSeq})`);
+	if (pLive)
+	{
+		check(/^Live update: /.test(tmpAfter.QueryTrigger || ''), `${pLabel}: the refetch was triggered by the change stream [${tmpAfter.QueryTrigger}]`);
+		let tmpPosts = pNetwork.queryPosts().filter((pEntry) => { return pEntry.Method === 'POST'; });
+		let tmpPerGroup = {};
+		tmpPosts.forEach((pEntry) => { let tmpKey = pEntry.URL.replace(/^.*\/api\//, ''); tmpPerGroup[tmpKey] = (tmpPerGroup[tmpKey] || 0) + 1; });
+		check(Object.keys(tmpPerGroup).every((pKey) => { return tmpPerGroup[pKey] <= 1; }), `${pLabel}: one Query POST per affected group (${JSON.stringify(tmpPerGroup)})`);
+	}
+	let tmpExpected = fExpect(tmpBefore, tmpAfter);
+	check(tmpExpected.Pass, `${pLabel}: ${tmpExpected.Text}`);
+	let tmpDomTotal = await domTotal(pPage);
+	check((tmpAfter.Total === null) || (tmpDomTotal === tmpAfter.Total), `${pLabel}: the page head shows the new Total ${tmpAfter.Total} (DOM ${tmpDomTotal})`);
+	console.log(`    ${pLabel}: write ${tmpAfterWrite.WriteStatus}; Total ${tmpBefore.Total} -> ${tmpAfter.Total}${pLive ? `; ${tmpAfter.QueryTrigger}` : ''}`);
+	return tmpAfter;
+};
+
+const runLiveChanges = async (pPage, pNetwork) =>
+{
+	console.log('  Live changes (M4): "Make a change" through the stock CRUD routes, counts follow the change stream');
+	let tmpStreamsBefore = pNetwork.Streams.length;
+	await setPersona(pPage, pNetwork, 'user42');
+	await navigate(pPage, pNetwork, '/Projects');
+	let tmpLive = await waitInPage(pPage, () => { let tmpChanges = _Pict.AppData.Facet.Changes.ProjectTrack; return !!tmpChanges && (tmpChanges.Status === 'Open'); }, null, 3000);
+	if (!tmpLive)
+	{
+		let tmpStream = await pPage.evaluate(() => { return _Pict.AppData.Facet.Changes.ProjectTrack || null; });
+		if (process.env.DEMO_REQUIRE_LIVE === '1')
+		{
+			check(false, `DEMO_REQUIRE_LIVE=1: the ProjectTrack change stream is open (${JSON.stringify(tmpStream)})`);
+		}
+		else
+		{
+			_Skipped.push(`the change stream is not available (${tmpStream ? `${tmpStream.Status}: ${tmpStream.Reason}` : 'none'}): the "Make a change" panels refresh their page themselves`);
+			console.log('    (no change stream: the panels refresh their page themselves; the live-trigger checks are skipped)');
+		}
+	}
+	let tmpChip = await pPage.evaluate(() => { let tmpChips = Array.prototype.map.call(document.querySelectorAll('#FD-Page-Head .fd-chip'), (pChip) => { return pChip.textContent.trim(); }); return tmpChips.find((pText) => { return /^Live/.test(pText); }) || null; });
+	check(tmpLive ? (tmpChip === 'Live') : /^Live: /.test(tmpChip || ''), `the page head shows the stream status chip [${tmpChip}]`);
+
+	// Projects: a listed Active project -> On hold (6 -> 5), then Undo.
+	let tmpProjects = await liveState(pPage, 'Projects');
+	let tmpSelected = await pPage.evaluate(() => { let tmpSelect = document.querySelector('#FD-P-Projects-Change select'); return tmpSelect ? tmpSelect.options[tmpSelect.selectedIndex].textContent : null; });
+	await changeGesture(pPage, pNetwork, 'Projects: a project -> On hold', 'Projects', 'Set-OnHold',
+		(pBefore, pAfter) => { return { Pass: (pAfter.Total === pBefore.Total - 1) && (pAfter.Counts.Status.OnHold === (pBefore.Counts.Status.OnHold || 0) + 1), Text: `Total ${pBefore.Total} -> ${pAfter.Total}, OnHold ${pBefore.Counts.Status.OnHold} -> ${pAfter.Counts.Status.OnHold} (${tmpSelected})` }; }, tmpLive);
+	await shot(pPage, '28-live-projects-onhold');
+	await changeGesture(pPage, pNetwork, 'Projects: Undo', 'Projects', 'Undo',
+		(pBefore, pAfter) => { return { Pass: (pAfter.Total === tmpProjects.Total) && (JSON.stringify(pAfter.Counts.Status) === JSON.stringify(tmpProjects.Counts.Status)), Text: `back to ${tmpProjects.Total} and the same Status counts (${pAfter.Total})` }; }, tmpLive);
+
+	// Documents: add (41 -> 42), delete (41), undelete (42), delete (41).
+	await navigate(pPage, pNetwork, '/Documents');
+	let tmpDocuments = await liveState(pPage, 'Documents');
+	await changeGesture(pPage, pNetwork, 'Documents: add a Draft Form D document (Mar 15)', 'Documents', 'Add',
+		(pBefore, pAfter) => { return { Pass: (pAfter.Total === pBefore.Total + 1) && (pAfter.Counts.ByMonth['2026-03-01 00:00:00'] === (pBefore.Counts.ByMonth['2026-03-01 00:00:00'] || 0) + 1), Text: `Total ${pBefore.Total} -> ${pAfter.Total}, March ${pBefore.Counts.ByMonth['2026-03-01 00:00:00']} -> ${pAfter.Counts.ByMonth['2026-03-01 00:00:00']}` }; }, tmpLive);
+	await shot(pPage, '29-live-documents-added');
+	await changeGesture(pPage, pNetwork, 'Documents: delete it', 'Documents', 'Delete', (pBefore, pAfter) => { return { Pass: pAfter.Total === tmpDocuments.Total, Text: `Total ${pAfter.Total} == ${tmpDocuments.Total}` }; }, tmpLive);
+	await changeGesture(pPage, pNetwork, 'Documents: undelete it', 'Documents', 'Undelete', (pBefore, pAfter) => { return { Pass: pAfter.Total === tmpDocuments.Total + 1, Text: `Total ${pAfter.Total} == ${tmpDocuments.Total + 1}` }; }, tmpLive);
+	await changeGesture(pPage, pNetwork, 'Documents: delete it again', 'Documents', 'Delete', (pBefore, pAfter) => { return { Pass: (pAfter.Total === tmpDocuments.Total) && (JSON.stringify(pAfter.Counts.ByMonth) === JSON.stringify(tmpDocuments.Counts.ByMonth)), Text: `back to ${tmpDocuments.Total} with the same month counts` }; }, tmpLive);
+
+	// Lab forms (A): complete one of my started forms (237 -> 236), re-open it.
+	await navigate(pPage, pNetwork, '/LabForms');
+	let tmpLabForms = await liveState(pPage, 'LabFormsA');
+	await changeGesture(pPage, pNetwork, 'Lab forms: complete a started form', 'LabFormsA', 'Complete',
+		(pBefore, pAfter) => { return { Pass: (pAfter.Total === pBefore.Total - 1) && (pAfter.Counts.Started['1'] === pBefore.Counts.Started['1'] - 1), Text: `Total ${pBefore.Total} -> ${pAfter.Total}, Started ${pBefore.Counts.Started['1']} -> ${pAfter.Counts.Started['1']}` }; }, tmpLive);
+	await shot(pPage, '30-live-labforms-completed');
+	await changeGesture(pPage, pNetwork, 'Lab forms: re-open it', 'LabFormsA', 'Reopen', (pBefore, pAfter) => { return { Pass: (pAfter.Total === tmpLabForms.Total) && (JSON.stringify(pAfter.Counts.Started) === JSON.stringify(tmpLabForms.Counts.Started)), Text: `back to ${tmpLabForms.Total} (${pAfter.Total})` }; }, tmpLive);
+
+	// Bookstore: a 5-star review on the first listed book without one (5-star books +1), remove it.
+	await navigate(pPage, pNetwork, '/Bookstore');
+	let tmpBooks = await liveState(pPage, 'Books');
+	await changeGesture(pPage, pNetwork, 'Bookstore: add a 5-star review', 'Books', 'Add',
+		(pBefore, pAfter) => { return { Pass: (pAfter.Total === pBefore.Total) && (pAfter.Counts.ReviewRating['5'] === pBefore.Counts.ReviewRating['5'] + 1), Text: `Total ${pAfter.Total}, 5-star books ${pBefore.Counts.ReviewRating['5']} -> ${pAfter.Counts.ReviewRating['5']}` }; }, tmpLive);
+	// The inspector on the refetch: Cached / Stale / Version / the trigger, and the stream event in the list.
+	await clickSelector(pPage, '.facet-insp-bar');
+	await sleep(150);
+	let tmpItem = await pPage.evaluate(() => { let tmpQuery = _Pict.AppData.Facet.Log.find((pExchange) => { return (pExchange.Kind === 'Query') && (pExchange.GroupHash === 'Books'); }); return tmpQuery ? tmpQuery.ID : null; });
+	await clickSelector(pPage, `.facet-insp-item[onclick*="select(${tmpItem})"]`);
+	await sleep(100);
+	await clickByText(pPage, 'button.facet-insp-tab', 'Envelope');
+	await sleep(150);
+	let tmpDetail = await pPage.evaluate(() => { let tmpDetail = document.querySelector('.facet-insp-detail'); return tmpDetail ? tmpDetail.textContent.replace(/\s+/g, ' ') : ''; });
+	check(/Cached/.test(tmpDetail) && /Stale/.test(tmpDetail) && /Version/.test(tmpDetail) && /X-Retold-Facet-Cache/.test(tmpDetail), `inspector Envelope tab shows Cached / Stale / Version / X-Retold-Facet-Cache [${tmpDetail.slice(0, 160)}]`);
+	if (tmpLive)
+	{
+		check(/Live update: Review/.test(tmpDetail), 'inspector: the latest Query names its trigger (Live update: Review)');
+		let tmpList = await pPage.evaluate(() => { return Array.prototype.map.call(document.querySelectorAll('.facet-insp-item'), (pItem) => { return pItem.textContent.replace(/\s+/g, ' ').trim(); }); });
+		check(tmpList.some((pText) => { return /^Change/.test(pText) && /generation/.test(pText) && /Review/.test(pText); }) && tmpList.some((pText) => { return /^Write/.test(pText); }), `inspector lists the Write and the stream's generation event (${tmpList.slice(0, 4).join(' | ')})`);
+	}
+	await shot(pPage, '31-live-bookstore-review-inspector');
+	await pPage.keyboard.press('Escape');
+	await sleep(100);
+	await changeGesture(pPage, pNetwork, 'Bookstore: remove it', 'Books', 'Remove', (pBefore, pAfter) => { return { Pass: JSON.stringify(pAfter.Counts.ReviewRating) === JSON.stringify(tmpBooks.Counts.ReviewRating), Text: `the rating counts are back (${pAfter.Counts.ReviewRating['5']})` }; }, tmpLive);
+	if (tmpLive)
+	{
+		let tmpStreams = await pPage.evaluate(() => { let tmpChanges = _Pict.AppData.Facet.Changes; return Object.keys(tmpChanges).map((pDomain) => { return `${pDomain}:${tmpChanges[pDomain].Status}:${tmpChanges[pDomain].Events}`; }); });
+		check(tmpStreams.every((pText) => { return /:Open:/.test(pText); }), `every visited domain's stream is open (${tmpStreams.join(', ')})`);
+		check((pNetwork.Streams.length - tmpStreamsBefore) <= 4, `streams opened for this section: ${pNetwork.Streams.length - tmpStreamsBefore} (at most one per domain for the persona, plus the page shown at the switch: no reconnect storm)`);
+	}
+	await navigate(pPage, pNetwork, '/Projects');
+};
+
 const run = async (pBaseURL) =>
 {
 	if (!libFS.existsSync(SCREENSHOT_ROOT))
@@ -817,6 +1039,7 @@ const run = async (pBaseURL) =>
 		await runPrincipals(tmpPage, tmpNetwork);
 		await runInspector(tmpPage, tmpNetwork);
 		await runLightAndNarrow(tmpPage, tmpNetwork);
+		await runLiveChanges(tmpPage, tmpNetwork);
 
 		// A deep link straight to a page (fresh tab): only that page's Describe + Query go out.
 		console.log('  Deep link');
@@ -852,6 +1075,7 @@ const main = () =>
 				process.exit(1);
 			}
 			console.log(`\n${_Shots.length} screenshots in ${libPath.relative(process.cwd(), SCREENSHOT_ROOT) || SCREENSHOT_ROOT}`);
+			_Skipped.forEach((pSkip) => { console.log(`  skipped: ${pSkip}`); });
 			if (_Failures.length > 0)
 			{
 				console.log(`Faceting-Demo-Browser-Check: ${_Failures.length} of ${_Checks} checks FAILED:\n  - ${_Failures.join('\n  - ')}`);

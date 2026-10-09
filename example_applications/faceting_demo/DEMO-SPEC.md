@@ -1,4 +1,4 @@
-# Faceting Demo — build spec (Milestone 3)
+# Faceting Demo — build spec (Milestones 3 and 4)
 
 > **Done means:** `cd example_applications/faceting_demo && npm start` boots ONE user-facing server on `127.0.0.1:19300`, prints the URL, and the browser shows a polished pict SPA with four pages (Projects for me, Documents by form type, Lab forms I still have to fill out, Bookstore explorer), a DEMO "Signed in as" switcher that visibly changes counts, a request/envelope inspector, and honest empty and error states. Every facet click writes back a Clause the server put on a bucket, so the list total and the clicked bucket always agree.
 
@@ -648,3 +648,85 @@ These rules supersede the earlier sections where they differ.
 - **Inspector.** `setContext({ Label, Groups, Domains })` on every route and tab change. The drawer lists the page's exchanges, with an "All pages" toggle. The bar names the page's latest answer and marks it "kept" when the page was shown from state. Escape closes the drawer. `html[data-facet-inspector="open"]` gives the page bottom room. The Server-Timing header is parsed into a stacked bar; for a 304 it carries no service time.
 - **Focus** survives re-renders (`data-focus-key` + provider `captureFocus` / `restoreFocus`).
 - **Domain servers** listen on 127.0.0.1 only and get the loopback guard before they listen, through the harness's new `Host` and `BeforeListen` options. The boot window from §2.2 is gone.
+
+## 12. Live changes (M4)
+
+These rules extend the earlier sections; the contract is `docs/internal-contracts.md` §47 (and §39–§46 for the service side).
+
+### 12.1 What the reader sees
+
+Every page gets a dashed **Make a change** card under its scope bar. Each card makes one real write through the domain's stock meadow-endpoints CRUD route, as the persona. The page then updates itself: the server's change stream (`GET /1.0/Facet/Changes`) says the entity changed, and the provider refetches the cards that depend on it. There is no reload and no refresh after the write.
+
+| Page | Card | Request (browser → front proxy → domain) | What moves (user42, Small seed) |
+|---|---|---|---|
+| Projects for me | Set the status of a listed project (Active / At risk / On hold / Done), Undo | `PUT /api/ProjectTrack/1.0/Project { IDProject, Status }` | the first listed project, Active → On hold: Total 6 → 5, Status Active −1, OnHold +1. Undo → 6 |
+| Documents by form type | Add document (Draft, the first selected form type, dated 2026-03-15, the first listed document's project), Delete it, Undelete it | `POST …/1.0/Document`, `DELETE …/1.0/Document/<ID>`, `GET …/1.0/Document/Undelete/<ID>` | 41 → 42 (March +1, Draft +1); delete → 41; undelete → 42 |
+| Lab forms (tab A) | Complete a started form, Re-open it | `PUT /api/LabTrack/1.0/LabForm { IDLabForm, Status: 'Complete', CompletedDate }`, then `{ Status: 'Pending', CompletedDate: null }` | the row leaves the work list: 237 → 236, Started −1; re-open → 237 |
+| Bookstore explorer | Add a 5-star review, Remove it | `POST /api/Bookstore/1.0/Review { IDBook, Rating: 5, Text }`, `DELETE …/1.0/Review/<ID>` | 5-star books 931 → 932, one book moves from "No 5-star review" to "Has a 5-star review"; Total stays 1436 |
+
+- **The started form.** The card looks for a Pending LabForm of the persona's that matches a work-list row (same intake and form type), so that row counts as Started. It checks the rows on screen first and then every row of the list, reading forms through the work list's own `LabForm` lookup. It then reads the form once more through `POST /1.0/Facet/LabForm/Records/0/1`, filtered on that intake, that form type and Status Pending. The personal scope makes that read return only the persona's own forms.
+- **The reviewed book** is the first listed book that has no 5-star review yet. The card reads the listed books' reviews through the faceting Records route of `Review` (a Lookup exchange). The contract says only "the first listed book"; with this rule the 5-star counts always move. If every listed book already has a 5-star review, the card uses the first listed book. On the Small seed the first two books share a title ("A Bright Clock"); #1103 has a 5-star review and #1314 does not, so the review goes to #1314.
+- **Without a stream** the card refetches its page's groups itself and says so. This happens on a host without M4, or when the stream was refused, for example for the anonymous persona.
+- The card's head shows the stream status chip (Live / Reconnecting / Off), the same chip as the summary strip.
+
+### 12.2 Provider (liftable, `Pict-Provider-Facet.js` + pure `Facet-Changes.js`)
+
+- **`subscribeChanges(Domain)`** opens one stream per domain for the current principal; a second call reuses it. `loadPage` subscribes to every domain of the page. A principal switch calls `closeChanges()` first, so streams always belong to the persona on screen.
+- **Transport.** The demo uses `fetch()` with a stream reader (`ChangesTransport: 'Fetch'`), because the persona travels in `X-Retold-Facet-Demo-Principal` and `EventSource` cannot send headers. `Facet-Changes.createParser` parses the stream. It handles chunk splits and CR / LF / CRLF line ends, skips comments, keeps `retry:` and `id:`, and drops data-less blocks the way the HTML rules do. A cookie-session host gets `EventSource` with `'Auto'`. No persona or ID ever goes into a URL.
+- **Reconnects.** The stream reconnects with jittered backoff: the server's `retry:` (itself jittered) doubled per attempt, at most 30 s, then × [½, 1], so streams cut together do not come back together. A `closed` event reconnects too: `Revalidate` (the server ends every stream at its revalidation time so the client re-authenticates) at once, `Shutdown` with backoff. Some answers stop it until the next principal change: 401 / 403 / 429, or 404 / 405 / 501 (no stream on this host). An SSE-triggered refetch first waits a random 0–150 ms (`ChangeJitterMS`). `AppData.Facet.Changes[Domain]` records `{ Status, PrincipalKey, LastSeq, LastEventAt, Events, Reconnects, Reason, Error, NodeEpoch, Transport }`.
+- **`generation(Entity, Seq)`** first drops the principal's lookup rows of that entity. It then refetches every group of the domain whose last envelope's `DependsOn` names the entity (`groupsToRefetch`). A group whose answer has no `DependsOn` is refetched for any change of its domain, because it cannot rule anything out. A group that is on screen (`setGroupVisibility`: the active page's groups, both LabForms tabs) is refetched through the usual per-group coalescing: one POST per group per tick, `If-None-Match` from the Version cache, `Freshness.MinSeq: Seq`, and the trigger `"Live update: Project @ e:…:15"` on the exchange. A group of another page is marked (`ChangedSince`, so `isStale` is true) and refetched with that MinSeq when it is shown.
+- **`ready` and `model`.** A `ready` after the first one (a reconnect; events are not replayed) refetches every group of the domain, and so does `model`. Every event is logged as an exchange of Kind `Change`.
+- **Freshness.** Every Query sends `Freshness: { Mode: 'Bounded', MaxLagMS: 5000 }` (`Facet-Selection.DEFAULT_FRESHNESS`). `Freshness` is not part of the client's Version-cache key, matching the server, so an SSE refetch revalidates the answer it replaces.
+- **Stale answers.** An answer that comes back `Stale: true` is fetched once more after `StaleRefetchMS` (1 s), at most 3 times in a row, so the page converges without an event. This covers, for example, user43 opening Documents right after user42's write.
+- **`write(Domain, Method, Path, Body)`** is a host write. It is logged as an exchange of Kind `Write`, never cached, and Ok for any 2xx.
+
+### 12.3 Page and inspector
+
+- **Summary strip.** The strip shows "Stale · 1.2 s old" instead of Exact for a Stale answer. It also shows `Cache: Hit | Miss | Stale | NotModified | Bypass | Off` (the `X-Retold-Facet-Cache` header), the freshness the server applied (`Exact ↑ MinSeq`, `Exact ↑ ReadYourWrites`), the trigger chip ("Live update: Project"), and the stream chip. The `X-Retold-Facet-Seq` chip appears with "Show internals". 304s keep "304 from cache".
+- **Inspector list.** It holds `Change` exchanges (event, entity, which groups it refetched or marked) and `Write` exchanges. A refetch has a `live` flag and the cache header as a flag.
+- **Envelope tab.** Adds Cached, Stale (+ LagMS), AsOf, DependsOn, the three `X-Retold-Facet-*` headers and the trigger. For a `Change` it shows the event data, which is only `{ Entity, Generation, Seq }`.
+- **Inspector bar.** Names the stream state of the page's domains ("stream: Bookstore live").
+
+### 12.4 Host
+
+- **Domain options.** Every domain runs with `Faceting: { Cache: { Enabled: true, ExposeStatus: true }, Freshness: { SeqHeader: true }, SSE: { IncludeSeq: true } }` (`Faceting-Demo-Domains.FACETING_OPTIONS`); the change intake and the rest of the stream use their defaults. The demo may turn the cache on because every write reaches the intake in this one process: the only writes are the cards' CRUD calls, whose behavior dispatcher and DAL writes the interim intake wraps. `ExposeStatus`, `SeqHeader` and `IncludeSeq` are demo-only (the inspector shows the cache status and the Seq); a multi-tenant deployment keeps their defaults, which hide both on a policy host.
+- **Write guards.** `Faceting-Demo-Writes.installWriteGuards` runs after boot and chain-wraps through `harness.installBehavior`, on every entity:
+  - `Create-PreOperation` stamps the tenant column (`IDCustomer`, or `IDTenant` for the Bookstore), and `OwnerIDUser` on LabForm, from the session, and refuses with 403 a body that names another tenant or owner.
+  - `Create-PreOperation` also reads every foreign key (`ID<Table>` of another table: `IDProject`, `IDBook`, `IDFormType`, …) and refuses with 403 one whose row is not in the session's tenant (a shared lookup: does not exist).
+  - `Update-`, `Delete-` and `Undelete-PreOperation` refuse with 403 a row outside the session's tenant (or owner, on LabForm), an update that would move a row out of them, and a row the persona does not own (`OWNERSHIP_RULES`): a Project it is not an active member of, a Document it neither wrote nor is an active member of the project of, a Review it did not write.
+  - Global entities are not writable (403). No session is 401.
+  - The intake wraps the behavior dispatcher and the DAL writes, never a slot: the guards and the intake never touch each other.
+- **Front server.** Two additions:
+  - `GET /api/<Domain>/1.0/Facet/Changes` is proxied as a stream. The persona resolves as for other facet calls, and only Accept and Last-Event-ID are forwarded. Headers are flushed at once, chunks are piped with backpressure, Nagle is off, and there is no timeout. The browser leaving aborts the upstream request; the upstream ending ends the browser's response. Refusals (401, 429, 404) are relayed whole.
+  - The write allowlist is exactly the requests of §12.1: method + path pattern + permitted body keys, JSON only, ≤ 16 KiB. The checked object, not the raw body, is what goes upstream. An answer other than 2xx becomes `{ Error: { Code: DEMO_WRITE_REFUSED | DEMO_WRITE_NOT_FOUND | DEMO_WRITE_FAILED, Status, Message } }`, never the meadow error body with its record or query.
+
+  New demo errors: `DEMO_UNAUTHENTICATED` (401, a write without a persona), `DEMO_WRITE_INVALID` (400), and `DEMO_BODY_TOO_LARGE` for a write over 16 KiB.
+- **`/api/Demo/Status`.** Each domain adds `WriteGuard { Installed, Entities, Refused }`, `Writes` (the allowlist) and `Live { Cache, Changes, SSE, Generations, ReadYourWrites }`: the service's own `status()` counters, never keys or values.
+
+### 12.5 Checks and measured numbers
+
+- **`npm test`** (smoke, 19301), section 12, needs no M4 server. It checks:
+  - the parser;
+  - refetch selection, Seqs, backoff and freshness;
+  - the allowlist, through `matchWrite` / `checkBody`;
+  - the stream proxy against a stub upstream: streamed not buffered; persona resolved, forged session headers dropped; Set-Cookie not relayed; the upstream aborted when the client leaves; the 401 relayed; 405 for POST.
+- **Section 13** checks the allowlist and the guards end to end: 404 / 401 / 400 / 413, and 403 across tenants and owners, for a foreign key into another tenant's data, a colleague's document and a project the persona is not a member of, both through the proxy and straight at a domain server. Nothing a refused write asked for happens.
+- **Section 14** runs every card's write as user42 and checks:
+  - the 2xx;
+  - a `generation` event on user42's stream within 2 s, carrying only `{ Entity, Generation, Seq }`, with nothing on user81's;
+  - the dependent refetch with its pre-write ETag: 200, the exact delta, `Miss`, `Exact; upgraded=MinSeq`, the Seq header and `DependsOn`;
+  - a repeat `Hit`, the ETag changed once and then stable;
+  - an unaffected group's old ETag answering 304 `NotModified`;
+  - user43's E2 request right after user42's delete answering `Stale: true` (the shared key), then fresh with `Hit`;
+  - undo restoring every count.
+- **Section 15** runs the browser's provider in node against the demo. It checks the Freshness body, one stream per domain, a write refetching Documents by itself (If-None-Match + MinSeq + trigger), an off-screen group marked and refetched when shown, a 401 stream stopping, `closeChanges`, and, with the cache, the Stale follow-up.
+- Each M4 capability is probed separately: the stream, the result cache (`X-Retold-Facet-Cache`) and the wired pipeline (`Describe.Changes`, `DependsOn`). A missing one skips its own checks with a note. `DEMO_REQUIRE_LIVE=1` turns those skips into failures. The writes, deltas and undo always run, and the smoke leaves every count as it found it.
+- **`npm run check:browser`** (19302) runs every page's card with real clicks. After each write the affected card updates with no gesture: a new answer arrives, its trigger is "Live update: …", and there is at most one Query POST per group. Undo restores the counts. The Live chip, the inspector's Cached / Stale / Version / `X-Retold-Facet-Cache` rows, the Write exchange and the `generation` exchange are checked. Screenshots: `28-live-projects-onhold`, `29-live-documents-added`, `30-live-labforms-completed`, `31-live-bookstore-review-inspector`. The change stream is excluded from the "one POST" and "settled" bookkeeping.
+- **Measured** on SQLite, Small, against the wired M4 service (intake, generations, result cache, SSE; the demo's `Cache.Enabled: true`), with `DEMO_REQUIRE_LIVE=1` (no skips):
+  - every write's `generation` event reached user42 in 162–253 ms, within `SSE.CoalesceMS` (250);
+  - user81 received nothing;
+  - smoke: 575 checks in 7.4 s; ProjectTrack's cache after it: 23 hits, 24 misses, 1 stale;
+  - browser check: 208 checks in 32 s (the pivot cell is centered before its click, so the fixed inspector bar never takes it);
+  - PostgreSQL smoke (`TZ=UTC DEMO_PG=1`): 575 checks in 37 s.
+
+  Before the wiring pass (history): with builder B's intake and C's stream wired by hand and no cache stage, smoke 520 / browser check 207; with no stream at all, smoke 475 in 1.3 s and browser check 183, the cards refreshing their page themselves.

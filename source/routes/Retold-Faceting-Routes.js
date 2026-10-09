@@ -14,6 +14,7 @@
  *   GET  /1.0/Facet/Describe
  *   GET  /1.0/Facet/Describe/:Entity     (design form, 02 §2.1)
  *   GET  /1.0/Facet/:Entity/Describe     (M1 brief form; same handler)
+ *   GET  /1.0/Facet/Changes              (M4: the SSE change stream, mounted through RetoldFacetingSSE)
  *
  * The Records routes are POST only: pict-section-recordset posts { Clauses, Experience } to
  * `${FilterEndpointOverride}/${Offset}/${PageSize}` and `…/Count` (internal-contracts §36.1).
@@ -95,6 +96,11 @@ class RetoldFacetingRoutes extends libFableServiceProviderBase
 		pServiceServer.get(`${tmpPrefix}/Describe`, this.handleDescribe.bind(this));
 		pServiceServer.get(`${tmpPrefix}/Describe/:Entity`, this.handleDescribe.bind(this));
 		pServiceServer.get(`${tmpPrefix}/:Entity/Describe`, this.handleDescribe.bind(this));
+		// M4 (internal-contracts §44.10, §46.1): GET <RoutePrefix>/Changes when SSE.Enabled.
+		if (this.fable.RetoldFacetingSSE && this.options.SSE && (this.options.SSE.Enabled !== false))
+		{
+			this.fable.RetoldFacetingSSE.connect(pServiceServer);
+		}
 
 		this._Connected = true;
 		return true;
@@ -272,6 +278,41 @@ class RetoldFacetingRoutes extends libFableServiceProviderBase
 	}
 
 	/**
+	 * The M4 response headers (internal-contracts §44.8): X-Retold-Facet-Seq (the Seq the answer
+	 * covers; Freshness.SeqHeader, 'Auto' = only on a host without a scope policy, never when no change
+	 * source is installed), and — only with Cache.ExposeStatus — on a Query X-Retold-Facet-Cache
+	 * (Off | Bypass | Miss | Hit | Stale | NotModified) and X-Retold-Facet-Freshness (the effective
+	 * mode, '; upgraded=<why>' when read-your-writes or a MinSeq upgraded it).
+	 *
+	 * @param {any} pResponse
+	 * @param {Record<string, any>} [pMeta]
+	 * @param {boolean} pQuery - a Query answer (the Cache and Freshness headers)
+	 */
+	setChangeHeaders(pResponse, pMeta, pQuery)
+	{
+		let tmpMeta = pMeta || {};
+		let tmpService = this.fable.RetoldFacetingService;
+		if (tmpService && (typeof(tmpMeta.Seq) === 'string') && (tmpMeta.Seq.length > 0) && tmpService.seqHeaderEnabled())
+		{
+			pResponse.header('X-Retold-Facet-Seq', tmpMeta.Seq);
+		}
+		if (!pQuery || !tmpService || !tmpService.exposeCacheStatus())
+		{
+			// Cache.ExposeStatus off (the default): which answers came from an entry, and whether this
+			// principal's freshness was upgraded, stay server-side (pMeta) — S9.
+			return;
+		}
+		if (tmpMeta.Cache && (typeof(tmpMeta.Cache.Status) === 'string'))
+		{
+			pResponse.header('X-Retold-Facet-Cache', tmpMeta.Cache.Status);
+		}
+		if (tmpMeta.Freshness && (typeof(tmpMeta.Freshness.Mode) === 'string'))
+		{
+			pResponse.header('X-Retold-Facet-Freshness', tmpMeta.Freshness.Upgrade ? `${tmpMeta.Freshness.Mode}; upgraded=${tmpMeta.Freshness.Upgrade}` : tmpMeta.Freshness.Mode);
+		}
+	}
+
+	/**
 	 * X-Retold-Facet-Scope-Repaired: 1 when ScopeGuard Repair mode re-applied a missing policy
 	 * predicate on any capture of the answer (06 §3.3).
 	 *
@@ -333,9 +374,21 @@ class RetoldFacetingRoutes extends libFableServiceProviderBase
 				{
 					return this.sendError(pResponse, pError, fNext);
 				}
+				let tmpMeta = pMeta || {};
+				if (tmpMeta.NotModified === true)
+				{
+					// M4 (internal-contracts §44.3 step 4): decided before anything executed.
+					this.setStandardHeaders(pResponse, tmpMeta.Version);
+					this.setChangeHeaders(pResponse, tmpMeta, true);
+					pResponse.send(304);
+					return fNext();
+				}
 				this.setStandardHeaders(pResponse, pEnvelope.Version);
-				this.setRepairedHeader(pResponse, pMeta);
-				if (this.matchesETag(pRequest, pEnvelope.Version))
+				this.setRepairedHeader(pResponse, tmpMeta);
+				this.setChangeHeaders(pResponse, tmpMeta, true);
+				// A Stale answer's Version is not the current one: never a 304 (internal-contracts §51.17).
+				let tmpStale = !!(tmpMeta.Cache && (tmpMeta.Cache.Status === 'Stale'));
+				if (!tmpStale && this.matchesETag(pRequest, pEnvelope.Version))
 				{
 					pResponse.send(304);
 					return fNext();
@@ -432,6 +485,7 @@ class RetoldFacetingRoutes extends libFableServiceProviderBase
 				let tmpMeta = pMeta || {};
 				this.setStandardHeaders(pResponse, tmpMeta.Version);
 				this.setRepairedHeader(pResponse, tmpMeta);
+				this.setChangeHeaders(pResponse, tmpMeta, false);
 				if (tmpMeta.Dropped > 0)
 				{
 					pResponse.header('X-Retold-Facet-Records-Dropped', String(tmpMeta.Dropped));
@@ -471,6 +525,7 @@ class RetoldFacetingRoutes extends libFableServiceProviderBase
 				let tmpVersion = (pMeta && pMeta.Version) ? pMeta.Version : undefined;
 				this.setStandardHeaders(pResponse, tmpVersion);
 				this.setRepairedHeader(pResponse, pMeta);
+				this.setChangeHeaders(pResponse, pMeta, false);
 				if (this.matchesETag(pRequest, tmpVersion))
 				{
 					pResponse.send(304);
@@ -505,6 +560,7 @@ class RetoldFacetingRoutes extends libFableServiceProviderBase
 				}
 				this.setStandardHeaders(pResponse, pResult.Version);
 				this.setRepairedHeader(pResponse, pMeta);
+				this.setChangeHeaders(pResponse, pMeta, false);
 				if (this.matchesETag(pRequest, pResult.Version))
 				{
 					pResponse.send(304);

@@ -10,6 +10,7 @@
 const libCrypto = require('crypto');
 
 const libFacetUtil = require('./contract/Facet-Contract-Util.js');
+const libFacetRequest = require('./contract/Facet-Contract-Request.js');
 
 /**
  * Hex SHA-1 of a string (model / definition hashes; one implementation for the server services).
@@ -117,8 +118,88 @@ const isUnsetScopeValue = (pValue, pUnsetValues) =>
 	return false;
 };
 
+// ------------------------------------------------------------------ M4 (internal-contracts §38.5)
+
+// The local change-sequence grammar (internal-contracts §39.1): '<NodeEpoch>:<n>', NodeEpoch 'e:' + 8
+// lowercase hex (one per process), n a non-negative safe integer without leading zeros.
+// One grammar: the pure request contract owns SEQ_PATTERN (a client validates Freshness.MinSeq with it).
+const NODE_EPOCH_PATTERN = /^e:[0-9a-f]{8}$/;
+const SEQ_PATTERN = libFacetRequest.SEQ_PATTERN;
+
+/**
+ * Parse a Seq ('e:4f0c2b9e:88121') into { Epoch, N }, or null when it does not match SEQ_PATTERN.
+ *
+ * @param {any} pSeq
+ * @return {{ Epoch: string, N: number }|null}
+ */
+const parseSeq = (pSeq) =>
+{
+	if ((typeof(pSeq) !== 'string') || !SEQ_PATTERN.test(pSeq))
+	{
+		return null;
+	}
+	let tmpIndex = pSeq.lastIndexOf(':');
+	let tmpN = parseInt(pSeq.slice(tmpIndex + 1), 10);
+	if (!Number.isSafeInteger(tmpN))
+	{
+		return null;
+	}
+	return { Epoch: pSeq.slice(0, tmpIndex), N: tmpN };
+};
+
+/**
+ * Format a Seq from its NodeEpoch and counter.
+ *
+ * @param {string} pEpoch - 'e:' + 8 hex
+ * @param {number} pN
+ * @return {string}
+ */
+const formatSeq = (pEpoch, pN) =>
+{
+	return `${pEpoch}:${pN}`;
+};
+
+/**
+ * The stable identity of a principal for read-your-writes tracking, SSE connection limits and logs
+ * (internal-contracts §38.5): 'pk:' + 16 hex of sha256 over the canonical { Kind, IDUser, IDCustomer,
+ * ScopeValues, RoleSetHash } (every value normalized like a scope value).  Never the SessionID, never
+ * ResolvedAt / Source, so the principal built for a write (Host.buildPrincipal over the write's
+ * SessionData) and the one resolved for a read of the same session get the same key.
+ *
+ * @param {Record<string, any>} pPrincipal
+ * @return {string|null} null when pPrincipal is not an object
+ */
+const principalKey = (pPrincipal) =>
+{
+	if ((typeof(pPrincipal) !== 'object') || (pPrincipal === null) || Array.isArray(pPrincipal))
+	{
+		return null;
+	}
+	let tmpScopeValues = {};
+	let tmpSource = ((typeof(pPrincipal.ScopeValues) === 'object') && (pPrincipal.ScopeValues !== null)) ? pPrincipal.ScopeValues : {};
+	Object.keys(tmpSource).sort().forEach(
+		(pColumn) =>
+		{
+			tmpScopeValues[pColumn] = normalizeScopeValue(tmpSource[pColumn]);
+		});
+	let tmpMaterial = JSON.stringify(
+		[
+			(typeof(pPrincipal.Kind) === 'string') ? pPrincipal.Kind : '',
+			normalizeScopeValue(pPrincipal.IDUser),
+			normalizeScopeValue(pPrincipal.IDCustomer),
+			tmpScopeValues,
+			(typeof(pPrincipal.RoleSetHash) === 'string') ? pPrincipal.RoleSetHash : ''
+		]);
+	return `pk:${libCrypto.createHash('sha256').update(tmpMaterial, 'utf8').digest('hex').slice(0, 16)}`;
+};
+
 module.exports = (
 	{
+		NODE_EPOCH_PATTERN: NODE_EPOCH_PATTERN,
+		SEQ_PATTERN: SEQ_PATTERN,
+		parseSeq: parseSeq,
+		formatSeq: formatSeq,
+		principalKey: principalKey,
 		isPlainObject: libFacetUtil.isPlainObject,
 		hasOwn: libFacetUtil.hasOwn,
 		isPresent: libFacetUtil.isPresent,

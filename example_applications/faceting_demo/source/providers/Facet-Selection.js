@@ -5,7 +5,9 @@
  * browser provider and the node smoke test (server/Faceting-Demo-Smoke.js) build byte-identical bodies:
  *
  *   initialGroupState(pDefinition)          group definition (source/pages/FacetDemo-Pages.js) -> group state
- *   buildQueryBody(pState)                  POST …/Query body: Scopes, Clauses, Facets, Total, Records
+ *   buildQueryBody(pState, pOptions)        POST …/Query body: Scopes, Clauses, Facets, Total, Records (+ Freshness
+ *                                           when pOptions.Freshness is given: DEFAULT_FRESHNESS is what the browser sends)
+ *   freshnessBody(pBase, pMinSeq, pExact)   the Freshness block of a Query (M4: Mode, MaxLagMS, MinSeq)
  *   buildRecordsBody(pState)                POST …/Records/:Begin/:Cap and …/Records/Count body
  *   routePath(pState, pKind, pBegin, pCap)  '/1.0/Facet/<E>[/Scope/<S>]/Query' | '/Records/<b>/<c>' | '/Records/Count'
  *   termsClause / toggleTermsKey            Terms write-back: the bucket's own Clause, Values = the selected keys
@@ -31,6 +33,10 @@ const libFacetContract = require('../Facet-Contract.js');
 const KIND_QUERY = 'Query';
 const KIND_RECORDS = 'Records';
 const KIND_COUNT = 'Count';
+
+// The Freshness a Query asks for by default (internal-contracts §47.5): Bounded, so a cached answer up to 5 s old
+// may come back marked Stale while the server refreshes it; an SSE-triggered refetch adds MinSeq (-> Exact).
+const DEFAULT_FRESHNESS = Object.freeze({ Mode: 'Bounded', MaxLagMS: 5000 });
 
 /**
  * Deep copy of plain JSON data.
@@ -492,13 +498,16 @@ const clausesOf = (pState) =>
  * POST …/Query body for a group (one per filter change; DEMO-SPEC §5.1).  The Query always asks for the FIRST
  * page of records: a new answer (a filter change, another principal, a retry) may have fewer rows than the
  * page the list was on, and later pages come from POST …/Records/:Begin/:Cap (the provider's loadRecordsPage),
- * which never writes the paging cursor back into the request state.
+ * which never writes the paging cursor back into the request state.  pOptions.Freshness (M4) adds the Freshness
+ * block verbatim (the provider sends DEFAULT_FRESHNESS, plus MinSeq on an SSE-triggered refetch).
  *
  * @param {Record<string, any>} pState
+ * @param {{ Freshness?: Record<string, any> }} [pOptions]
  * @return {Record<string, any>}
  */
-const buildQueryBody = (pState) =>
+const buildQueryBody = (pState, pOptions) =>
 {
+	let tmpOptions = pOptions || {};
 	let tmpBody = {};
 	let tmpScopes = scopesOf(pState);
 	if (tmpScopes.length > 0)
@@ -517,7 +526,36 @@ const buildQueryBody = (pState) =>
 		}
 		tmpBody.Records = tmpRecords;
 	}
+	if (tmpOptions.Freshness && (typeof(tmpOptions.Freshness) === 'object'))
+	{
+		tmpBody.Freshness = cloneJSON(tmpOptions.Freshness);
+	}
 	return tmpBody;
+};
+
+/**
+ * The Freshness block of a Query (internal-contracts §44.2): the base mode (DEFAULT_FRESHNESS when none), plus
+ * MinSeq when a change event named one (the server then answers Exact), or Mode 'Exact' when the caller wants an
+ * exact answer without a Seq (an event of a stream that does not send Seqs).  Never key material: the client's
+ * Version cache key leaves it out as the server does.
+ *
+ * @param {Record<string, any>|null} pBase - { Mode, MaxLagMS }
+ * @param {string|null} [pMinSeq]
+ * @param {boolean} [pExact]
+ * @return {Record<string, any>}
+ */
+const freshnessBody = (pBase, pMinSeq, pExact) =>
+{
+	let tmpFreshness = cloneJSON((pBase && (typeof(pBase) === 'object')) ? pBase : DEFAULT_FRESHNESS);
+	if ((typeof(pMinSeq) === 'string') && (pMinSeq.length > 0))
+	{
+		tmpFreshness.MinSeq = pMinSeq;
+	}
+	else if (pExact === true)
+	{
+		tmpFreshness.Mode = 'Exact';
+	}
+	return tmpFreshness;
 };
 
 /**
@@ -573,7 +611,8 @@ const routePath = (pState, pKind, pBegin, pCap) =>
 
 /**
  * The Version-cache key of a request: everything that can change the answer except the server's own
- * generations (the ETag revalidates those).  Never includes a response.
+ * generations (the ETag revalidates those).  Never includes a response, and never the body's Freshness (it is
+ * not key material on the server either: an SSE refetch with MinSeq revalidates the same cached answer).
  *
  * @param {string} pDomain
  * @param {string} pPrincipalKey
@@ -584,7 +623,13 @@ const routePath = (pState, pKind, pBegin, pCap) =>
  */
 const requestKey = (pDomain, pPrincipalKey, pMethod, pPath, pBody) =>
 {
-	return libFacetContract.Clauses.canonicalJSON({ Domain: pDomain, Principal: pPrincipalKey || '', Method: pMethod, Path: pPath, Body: (typeof(pBody) === 'undefined') ? null : pBody });
+	let tmpBody = (typeof(pBody) === 'undefined') ? null : pBody;
+	if (tmpBody && (typeof(tmpBody) === 'object') && !Array.isArray(tmpBody) && Object.prototype.hasOwnProperty.call(tmpBody, 'Freshness'))
+	{
+		tmpBody = Object.assign({}, tmpBody);
+		delete tmpBody.Freshness;
+	}
+	return libFacetContract.Clauses.canonicalJSON({ Domain: pDomain, Principal: pPrincipalKey || '', Method: pMethod, Path: pPath, Body: tmpBody });
 };
 
 module.exports = (
@@ -592,6 +637,7 @@ module.exports = (
 		KIND_QUERY: KIND_QUERY,
 		KIND_RECORDS: KIND_RECORDS,
 		KIND_COUNT: KIND_COUNT,
+		DEFAULT_FRESHNESS: DEFAULT_FRESHNESS,
 		cloneJSON: cloneJSON,
 		sameKey: sameKey,
 		selectionHash: selectionHash,
@@ -610,6 +656,7 @@ module.exports = (
 		scopesOf: scopesOf,
 		clausesOf: clausesOf,
 		buildQueryBody: buildQueryBody,
+		freshnessBody: freshnessBody,
 		buildRecordsBody: buildRecordsBody,
 		routePath: routePath,
 		requestKey: requestKey

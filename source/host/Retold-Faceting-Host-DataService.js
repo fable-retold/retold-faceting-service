@@ -298,7 +298,7 @@ class RetoldFacetingHostDataService extends libRetoldFacetingHostBase
 		}
 		if (this.getScopePolicy().Kind !== 'Policy')
 		{
-			this.fable.log.warn(`RetoldFaceting host: no scope policy is configured; facets equal anonymous lists (ScopeAssurance 'Unscoped').`);
+			this.fable.log.warn(`RetoldFaceting host: no scope policy is configured (ScopeAssurance 'Unscoped'): facets equal the lists the entities' own Reads behaviors produce, but the service cannot tell tenants apart — every write invalidates every principal's cached answers over its entity, and the change stream stays off unless SSE.Enabled is true.`);
 		}
 
 		this._Bound = true;

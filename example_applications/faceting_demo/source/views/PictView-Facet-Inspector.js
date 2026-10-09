@@ -17,6 +17,10 @@
  *             proxy resolved, then one row per facet: Key, Fold, Disjunctive, Excluded, KeptMixed, CountMode,
  *             Total / Σ / Missing / Other, flags, error; Filter.Applied; Warnings; Errors
  *   Raw       the response JSON
+ * M4: the list also holds the change stream's events (Kind 'Change': event, entity, the groups it refetched or
+ * marked) and the host's writes (Kind 'Write'); a Query fetched because of a change event carries its trigger
+ * ("Live update: Project @ e:…:15", a 'live' flag in the list).  The Envelope tab adds Cached, Stale (+ LagMS),
+ * AsOf, DependsOn, X-Retold-Facet-Cache, -Seq and -Freshness; the bar adds the stream status of the page's domains.
  * State: AppData.Facet.Inspector = { Open, SelectedID, Tab, AllPages, Context } (+ View: the display model).
  * Re-renders on every exchange (provider.subscribeLog); the list and detail are only built while open.  The
  * Escape listener is the one window listener, and it exists only while the drawer is open.
@@ -28,12 +32,13 @@
 const libPictView = require('pict-view');
 
 const libFacetDisplay = require('../providers/Facet-Display.js');
+const libFacetChanges = require('../providers/Facet-Changes.js');
 
 const VIEW_IDENTIFIER = 'Facet-Inspector';
 
 const TABS = [ 'Request', 'Envelope', 'Raw' ];
 
-const KIND_TONES = { Query: 'accent', Records: 'neutral', Count: 'ok', Describe: 'warn', Lookup: 'muted' };
+const KIND_TONES = { Query: 'accent', Records: 'neutral', Count: 'ok', Describe: 'warn', Lookup: 'muted', Change: 'info', Write: 'internal' };
 
 const _ViewConfiguration =
 	{
@@ -442,6 +447,11 @@ class PictViewFacetInspector extends libPictView
 	 */
 	_line(pExchange)
 	{
+		if (pExchange.Kind === 'Change')
+		{
+			let tmpSummary = pExchange.Summary || {};
+			return libFacetDisplay.text(`SSE ${pExchange.Event}${tmpSummary.Entity ? ` ${tmpSummary.Entity}` : ''}${tmpSummary.Seq ? ` @ ${tmpSummary.Seq}` : ''}`);
+		}
 		let tmpParts = [ `${pExchange.Method} ${pExchange.UpstreamPath}`, this._statusText(pExchange) ];
 		if (typeof(pExchange.ElapsedMS) === 'number')
 		{
@@ -462,6 +472,10 @@ class PictViewFacetInspector extends libPictView
 	 */
 	_statusText(pExchange)
 	{
+		if (pExchange.Kind === 'Change')
+		{
+			return pExchange.Event || 'event';
+		}
 		if (pExchange.Pending)
 		{
 			return '…';
@@ -515,6 +529,13 @@ class PictViewFacetInspector extends libPictView
 				tmpLastText = `${tmpLastText} · ${libFacetDisplay.text(`answered at ${tmpAt}, kept (no new request)`)}`;
 			}
 		}
+		// M4: the change stream of each of the page's domains.
+		let tmpProvider = this.pict.providers.Facet;
+		let tmpStreams = (tmpContext && tmpProvider && (typeof(tmpProvider.changeState) === 'function')) ? tmpContext.Domains.map((pDomain) => { return `${pDomain} ${libFacetChanges.streamLabel(tmpProvider.changeState(pDomain)).Text.replace(/^Live: /, '').replace(/^Live$/, 'live')}`; }) : [];
+		if (tmpStreams.length > 0)
+		{
+			tmpLastText = `${tmpLastText} · ${libFacetDisplay.text(`stream: ${tmpStreams.join(', ')}`)}`;
+		}
 		let tmpModel =
 			{
 				ViewHash: VIEW_IDENTIFIER,
@@ -545,6 +566,19 @@ class PictViewFacetInspector extends libPictView
 					{
 						tmpFlags.push({ Text: 'superseded', Tone: 'muted', Tip: 'A newer request for the same group replaced this one; its answer was not applied.' });
 					}
+					if (pExchange.Trigger)
+					{
+						tmpFlags.push({ Text: /^Live update/.test(pExchange.Trigger) ? 'live' : 'refetch', Tone: 'info', Tip: libFacetDisplay.text(pExchange.Trigger) });
+					}
+					let tmpCacheHeader = (pExchange.ResponseHeaders || {})['X-Retold-Facet-Cache'];
+					if (tmpCacheHeader && (tmpCacheHeader !== 'Off'))
+					{
+						tmpFlags.push({ Text: libFacetDisplay.text(tmpCacheHeader), Tone: ((tmpCacheHeader === 'Hit') || (tmpCacheHeader === 'NotModified')) ? 'ok' : ((tmpCacheHeader === 'Stale') ? 'warn' : 'muted'), Tip: 'X-Retold-Facet-Cache' });
+					}
+					if ((pExchange.Kind === 'Change') && pExchange.Summary && pExchange.Summary.Entity)
+					{
+						tmpFlags.push({ Text: libFacetDisplay.text(pExchange.Summary.Entity), Tone: 'info', Tip: libFacetDisplay.text(`Refetched: ${(pExchange.Summary.Refetched || []).join(', ') || 'nothing on screen'}`) });
+					}
 					let tmpIsSelected = !!tmpSelected && (tmpSelected.ID === pExchange.ID);
 					return (
 						{
@@ -553,7 +587,7 @@ class PictViewFacetInspector extends libPictView
 							Kind: libFacetDisplay.text(pExchange.Kind),
 							KindTone: KIND_TONES[pExchange.Kind] || 'neutral',
 							Method: libFacetDisplay.text(pExchange.Method),
-							Path: libFacetDisplay.text(pExchange.UpstreamPath),
+							Path: libFacetDisplay.text((pExchange.Kind === 'Change') ? `${pExchange.UpstreamPath} · ${pExchange.Event}` : pExchange.UpstreamPath),
 							Group: libFacetDisplay.text(pExchange.GroupHash || pExchange.Domain),
 							StatusText: libFacetDisplay.text(this._statusText(pExchange)),
 							Tone: pExchange.Pending ? 'muted' : libFacetDisplay.statusTone(pExchange.NotModified ? 304 : pExchange.Status),
@@ -608,7 +642,8 @@ class PictViewFacetInspector extends libPictView
 								tmpKV('Browser request', `${pExchange.Method} ${pExchange.URL}`),
 								tmpKV('Upstream path', pExchange.UpstreamPath),
 								tmpKV('Kind / group', `${pExchange.Kind} · ${pExchange.GroupHash || pExchange.Domain}`),
-								tmpKV('Sent at', pExchange.At)
+								tmpKV((pExchange.Kind === 'Change') ? 'Received at' : 'Sent at', pExchange.At),
+								tmpKV('Trigger', pExchange.Trigger || ((pExchange.Kind === 'Change') ? 'a server-sent event on the open change stream (no request)' : 'a gesture on the page'))
 							],
 						Headers: Object.keys(pExchange.RequestHeaders || {}).map((pName) => { return tmpKV(pName, pExchange.RequestHeaders[pName]); }),
 						BodyJSON: (pExchange.Body === null) ? libFacetDisplay.text('(no body)') : libFacetDisplay.json(pExchange.Body)
@@ -624,6 +659,32 @@ class PictViewFacetInspector extends libPictView
 
 		let tmpHeaders = pExchange.ResponseHeaders || {};
 		let tmpSummary = pExchange.Summary || {};
+		if (pExchange.Kind === 'Change')
+		{
+			// A server-sent event: what it said and what the client did about it.
+			tmpDetail.EnvelopeSlot =
+				[
+					{
+						ErrorSlot: [],
+						Facts:
+							[
+								tmpKV('Event', pExchange.Event),
+								tmpKV('Entity', tmpSummary.Entity),
+								tmpKV('Generation', tmpSummary.Generation),
+								tmpKV('Seq', tmpSummary.Seq),
+								tmpKV('Reason', tmpSummary.Reason),
+								tmpKV('Refetched', (tmpSummary.Refetched || []).join(', ') || 'nothing on screen depends on it'),
+								tmpKV('Marked (refetched when shown)', (tmpSummary.Marked || []).join(', ')),
+								tmpKV('Received at', pExchange.At)
+							],
+						TimingSlot: [],
+						FacetsSlot: [],
+						Sections: [ { Title: 'Event data (only Entity, Generation and Seq: no tenant, row or count)', Code: libFacetDisplay.json(pExchange.Response) } ],
+						Headers: []
+					}
+				];
+			return tmpDetail;
+		}
 		let tmpTiming = this._timing(pExchange);
 		let tmpFacts =
 			[
@@ -633,6 +694,15 @@ class PictViewFacetInspector extends libPictView
 				tmpKV('ModelVersion', tmpSummary.ModelVersion),
 				tmpKV('Engine', tmpSummary.Engine),
 				tmpKV('Exact', (typeof(tmpSummary.Exact) === 'boolean') ? String(tmpSummary.Exact) : null),
+				// M4 (internal-contracts §44.7–§44.8)
+				tmpKV('Cached', (typeof(tmpSummary.Cached) === 'boolean') ? String(tmpSummary.Cached) : null),
+				tmpKV('Stale', (typeof(tmpSummary.Stale) === 'boolean') ? `${tmpSummary.Stale}${(tmpSummary.Stale && (typeof(tmpSummary.LagMS) === 'number')) ? ` (LagMS ${tmpSummary.LagMS})` : ''}` : null),
+				tmpKV('AsOf', tmpSummary.AsOf),
+				tmpKV('DependsOn', Array.isArray(tmpSummary.DependsOn) ? tmpSummary.DependsOn.join(', ') : null),
+				tmpKV('X-Retold-Facet-Cache', tmpHeaders['X-Retold-Facet-Cache']),
+				tmpKV('X-Retold-Facet-Seq', tmpHeaders['X-Retold-Facet-Seq']),
+				tmpKV('X-Retold-Facet-Freshness', tmpHeaders['X-Retold-Facet-Freshness']),
+				tmpKV('Trigger', pExchange.Trigger),
 				tmpKV('Timing', tmpTiming.Facts),
 				tmpKV('Demo session', tmpHeaders['X-Retold-Facet-Demo-Session']),
 				tmpKV('Total', (typeof(tmpSummary.Total) === 'number') ? tmpSummary.Total : null)
@@ -648,6 +718,10 @@ class PictViewFacetInspector extends libPictView
 		if (typeof(tmpSummary.Entities) === 'number')
 		{
 			tmpFacts.push(tmpKV('Entities described', tmpSummary.Entities));
+		}
+		if (tmpSummary.Written === true)
+		{
+			tmpFacts.push(tmpKV('Wrote', tmpSummary.IDField ? `${tmpSummary.IDField} ${tmpSummary.ID}` : ((typeof(tmpSummary.Count) === 'number') ? `${tmpSummary.Count} row(s)` : 'yes')));
 		}
 		let tmpError = pExchange.Error;
 		let tmpFacetRows = Array.isArray(tmpSummary.Facets) ? tmpSummary.Facets.map(

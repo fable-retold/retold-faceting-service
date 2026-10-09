@@ -385,6 +385,121 @@ class RetoldFacetingHostBase extends libFableServiceProviderBase
 	}
 
 	/**
+	 * The scope columns of one entity under the policy (internal-contracts §41.2), for change capture
+	 * (which row values name the tenant / owner of a write) and generations (which tenant keys a write
+	 * bumps and a fold reads):
+	 *
+	 *   Kind          'Unscoped' (no policy) | 'Personal' (has its PersonalScopes column) |
+	 *                 'Tenant' (has the policy Column and is not Excluded) | 'Global' (anything else:
+	 *                 a global lookup, an Excluded entity, or one scoped only by Required columns)
+	 *   TenantColumn  the policy Column when the entity has it and is not Excluded, else null
+	 *   OwnerColumn   PersonalScopes[E].Column when the entity has it, else null
+	 *   RequiredColumns  Required[E] columns other than the two above
+	 *   DeleteColumn, PrimaryKey
+	 *   RowColumns    the columns whose change moves a row in or out of a scope or a fold
+	 *                 (delete, tenant, owner, identity, Required): a write of one bumps '#row'
+	 *
+	 * @param {string} pEntity
+	 * @return {Readonly<{ Entity: string, Kind: string, TenantColumn: string|null, OwnerColumn: string|null, RequiredColumns: Array<string>, DeleteColumn: string|null, PrimaryKey: string|null, RowColumns: Array<string> }>}
+	 */
+	entityScopeColumns(pEntity)
+	{
+		let tmpPolicy = this.getScopePolicy();
+		// Memoized per policy object (a model load builds a new one, so the memo follows it): the write
+		// path asks this several times per record (P13).
+		let tmpMemo = null;
+		if (tmpPolicy && (typeof(tmpPolicy) === 'object'))
+		{
+			if (!this._ScopeColumnsMemo)
+			{
+				this._ScopeColumnsMemo = new WeakMap();
+			}
+			tmpMemo = this._ScopeColumnsMemo.get(tmpPolicy);
+			if (!tmpMemo)
+			{
+				tmpMemo = new Map();
+				this._ScopeColumnsMemo.set(tmpPolicy, tmpMemo);
+			}
+			if (tmpMemo.has(pEntity))
+			{
+				return tmpMemo.get(pEntity);
+			}
+		}
+		let tmpDescriptor = this._entityScopeColumns(pEntity, tmpPolicy);
+		if (tmpMemo && (tmpMemo.size < 4096))
+		{
+			tmpMemo.set(pEntity, tmpDescriptor);
+		}
+		return tmpDescriptor;
+	}
+
+	/**
+	 * entityScopeColumns without the memo.
+	 *
+	 * @param {string} pEntity
+	 * @param {Record<string, any>} pPolicy - getScopePolicy()
+	 * @return {Readonly<Record<string, any>>}
+	 */
+	_entityScopeColumns(pEntity, pPolicy)
+	{
+		let tmpPolicy = pPolicy;
+		let tmpTenantColumn = null;
+		let tmpOwnerColumn = null;
+		let tmpRequiredColumns = [];
+		if (tmpPolicy && (tmpPolicy.Kind === 'Policy'))
+		{
+			let tmpExclude = Array.isArray(tmpPolicy.Exclude) ? tmpPolicy.Exclude : [];
+			if (tmpPolicy.Column && (tmpExclude.indexOf(pEntity) < 0) && this.entityHasColumn(pEntity, tmpPolicy.Column))
+			{
+				tmpTenantColumn = tmpPolicy.Column;
+			}
+			let tmpPersonal = isPlainObject(tmpPolicy.PersonalScopes) ? tmpPolicy.PersonalScopes : {};
+			if (hasOwn(tmpPersonal, pEntity) && tmpPersonal[pEntity] && this.entityHasColumn(pEntity, tmpPersonal[pEntity].Column))
+			{
+				tmpOwnerColumn = tmpPersonal[pEntity].Column;
+			}
+			let tmpRequired = isPlainObject(tmpPolicy.Required) ? tmpPolicy.Required : {};
+			if (hasOwn(tmpRequired, pEntity) && Array.isArray(tmpRequired[pEntity]))
+			{
+				tmpRequired[pEntity].forEach(
+					(pEntry) =>
+					{
+						if (pEntry && (typeof(pEntry.Column) === 'string') && (pEntry.Column !== tmpTenantColumn) && (pEntry.Column !== tmpOwnerColumn) && (tmpRequiredColumns.indexOf(pEntry.Column) < 0))
+						{
+							tmpRequiredColumns.push(pEntry.Column);
+						}
+					});
+			}
+		}
+		let tmpKind = (!tmpPolicy || (tmpPolicy.Kind !== 'Policy')) ? 'Unscoped'
+			: tmpOwnerColumn ? 'Personal'
+			: tmpTenantColumn ? 'Tenant'
+			: 'Global';
+		let tmpDeleteColumn = this.getDeleteColumn(pEntity);
+		let tmpPrimaryKey = this.getPrimaryKey(pEntity);
+		let tmpRowColumns = [];
+		[ tmpDeleteColumn, tmpTenantColumn, tmpOwnerColumn, tmpPrimaryKey ].concat(tmpRequiredColumns).forEach(
+			(pColumn) =>
+			{
+				if ((typeof(pColumn) === 'string') && (pColumn.length > 0) && (tmpRowColumns.indexOf(pColumn) < 0))
+				{
+					tmpRowColumns.push(pColumn);
+				}
+			});
+		return Object.freeze(
+			{
+				Entity: pEntity,
+				Kind: tmpKind,
+				TenantColumn: tmpTenantColumn,
+				OwnerColumn: tmpOwnerColumn,
+				RequiredColumns: Object.freeze(tmpRequiredColumns),
+				DeleteColumn: tmpDeleteColumn || null,
+				PrimaryKey: tmpPrimaryKey || null,
+				RowColumns: Object.freeze(tmpRowColumns)
+			});
+	}
+
+	/**
 	 * Validate a Scope section; returns a list of human-readable problems (empty when valid).
 	 * Hosts refuse to bind when this is non-empty (fail closed on a mis-configured policy).
 	 *

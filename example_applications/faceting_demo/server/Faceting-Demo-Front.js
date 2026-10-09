@@ -8,6 +8,13 @@
  *   GET  /api/Demo/Principals                 Faceting-Demo-Personas.publicList()
  *   GET  /api/Demo/Status                     { Provider, Scale, StartedAt, Domains: { <Domain>: { Fixture, Entities, LiveCounts, Definitions, … } } }
  *   GET|POST /api/<Domain>/1.0/Facet/<rest>   proxied to <harness.baseURL>/1.0/Facet/<rest> (+ query string)
+ *   GET  /api/<Domain>/1.0/Facet/Changes      (M4) proxied as a STREAM (text/event-stream): no buffering, no upstream
+ *                                             timeout, the upstream request is aborted when the browser disconnects
+ *   the "Make a change" writes                (M4) exactly the Faceting-Demo-Writes.WRITE_ROUTES allowlist (method +
+ *                                             path pattern + permitted body keys; JSON only, ≤ 16 KiB) proxied to the
+ *                                             domain's stock meadow-endpoints CRUD routes as the persona; anything else
+ *                                             under /api/<Domain>/1.0/ stays 404 DEMO_NOT_FOUND, a body with another key
+ *                                             is 400 DEMO_WRITE_INVALID, a write without a persona 401 DEMO_UNAUTHENTICATED
  *   anything else under /api/                 404 { Error: { Code: 'DEMO_NOT_FOUND' } }
  *
  * Proxy rules: forward ONLY content-type, accept, if-none-match (and the body, ≤ 256 KiB, else 413
@@ -35,8 +42,15 @@ const libFS = require('node:fs');
 const libPath = require('node:path');
 
 const libPersonas = require('./Faceting-Demo-Personas.js');
+const libWrites = require('./Faceting-Demo-Writes.js');
 
 const MAX_BODY_BYTES = 256 * 1024;
+
+// The change stream's upstream path (internal-contracts §46.1).
+const CHANGES_PATH = '/1.0/Facet/Changes';
+
+// Request headers the stream proxy forwards (lower case).
+const FORWARD_STREAM_HEADERS = [ 'accept', 'last-event-id' ];
 
 // Upstream requests that take longer than this answer 504 DEMO_UPSTREAM_TIMEOUT (a Medium-scale query takes well under 1 s).
 const UPSTREAM_TIMEOUT_MS = 60000;
@@ -247,13 +261,19 @@ const serveStatic = (pContext, pRequest, pResponse, pPathname) =>
 };
 
 /**
- * Read the whole request body (≤ MAX_BODY_BYTES).
+ * Read the whole request body (≤ pMaxBytes, default MAX_BODY_BYTES).
  *
  * @param {import('node:http').IncomingMessage} pRequest
- * @param {(pError?: Error & { TooLarge?: boolean }, pBody?: Buffer) => void} fCallback
+ * @param {number|((pError?: Error & { TooLarge?: boolean }, pBody?: Buffer) => void)} pMaxBytes
+ * @param {(pError?: Error & { TooLarge?: boolean }, pBody?: Buffer) => void} [fCallback]
  */
-const readBody = (pRequest, fCallback) =>
+const readBody = (pRequest, pMaxBytes, fCallback) =>
 {
+	if (typeof(pMaxBytes) === 'function')
+	{
+		return readBody(pRequest, MAX_BODY_BYTES, pMaxBytes);
+	}
+	let tmpMaxBytes = pMaxBytes;
 	let tmpChunks = [];
 	let tmpBytes = 0;
 	let tmpDone = false;
@@ -267,9 +287,9 @@ const readBody = (pRequest, fCallback) =>
 		return fCallback(pError, pBody);
 	};
 	let tmpDeclared = parseInt(pRequest.headers['content-length'], 10);
-	if (!isNaN(tmpDeclared) && (tmpDeclared > MAX_BODY_BYTES))
+	if (!isNaN(tmpDeclared) && (tmpDeclared > tmpMaxBytes))
 	{
-		let tmpError = new Error(`The request body exceeds ${MAX_BODY_BYTES} bytes.`);
+		let tmpError = new Error(`The request body exceeds ${tmpMaxBytes} bytes.`);
 		tmpError.TooLarge = true;
 		// Drain (do not buffer) so the 413 can still be read by the client.
 		pRequest.resume();
@@ -283,9 +303,9 @@ const readBody = (pRequest, fCallback) =>
 				return;
 			}
 			tmpBytes += pChunk.length;
-			if (tmpBytes > MAX_BODY_BYTES)
+			if (tmpBytes > tmpMaxBytes)
 			{
-				let tmpError = new Error(`The request body exceeds ${MAX_BODY_BYTES} bytes.`);
+				let tmpError = new Error(`The request body exceeds ${tmpMaxBytes} bytes.`);
 				tmpError.TooLarge = true;
 				tmpChunks = [];
 				return fFinish(tmpError);
@@ -479,6 +499,375 @@ const proxyFacet = (pContext, pRequest, pResponse, pDomain, pUpstreamPath, pSear
 };
 
 /**
+ * The proxy's own response headers on an answer (kept upstream headers + the demo's provenance headers).
+ *
+ * @param {Record<string, any>} pUpstreamHeaders
+ * @param {string} pMethod
+ * @param {string} pUpstreamPath
+ * @param {Record<string, any>|null} pPersona
+ * @param {number} pElapsedMS
+ * @param {Array<string>} pKeep - lower-case header names to keep (plus every x-retold-facet-*)
+ * @return {Record<string, any>}
+ */
+const answerHeaders = (pUpstreamHeaders, pMethod, pUpstreamPath, pPersona, pElapsedMS, pKeep) =>
+{
+	let tmpOut = {};
+	Object.keys(pUpstreamHeaders || {}).forEach(
+		(pHeader) =>
+		{
+			let tmpLower = pHeader.toLowerCase();
+			if ((pKeep.indexOf(tmpLower) >= 0) || (tmpLower.indexOf('x-retold-facet-') === 0))
+			{
+				tmpOut[pHeader] = pUpstreamHeaders[pHeader];
+			}
+		});
+	let tmpVaryKey = Object.keys(tmpOut).find((pHeader) => { return pHeader.toLowerCase() === 'vary'; });
+	let tmpVary = tmpVaryKey ? String(tmpOut[tmpVaryKey]) : '';
+	if (tmpVaryKey)
+	{
+		delete tmpOut[tmpVaryKey];
+	}
+	tmpOut['Vary'] = (tmpVary.length > 0) ? `${tmpVary}, ${libPersonas.HEADER}` : libPersonas.HEADER;
+	tmpOut['X-Retold-Facet-Demo-Upstream'] = `${pMethod} ${pUpstreamPath}`;
+	tmpOut['X-Retold-Facet-Demo-Session'] = pPersona ? `tenant=${pPersona.Tenant}; user=${pPersona.User}` : 'anonymous';
+	if (typeof(pElapsedMS) === 'number')
+	{
+		tmpOut['Server-Timing'] = `upstream;dur=${pElapsedMS.toFixed(1)}`;
+	}
+	tmpOut['X-Content-Type-Options'] = 'nosniff';
+	return tmpOut;
+};
+
+/**
+ * GET /api/<Domain>/1.0/Facet/Changes: proxy the domain's change stream (internal-contracts §46, §47.5).
+ *
+ * The persona resolves exactly as for every other facet call (no persona: no session upstream, so the service
+ * answers 401).  Forwards only Accept (default text/event-stream) and Last-Event-ID.  A 200 text/event-stream
+ * answer is relayed chunk by chunk (headers flushed at once, no buffering, Nagle off, no timeout on either
+ * side); anything else is relayed whole, like a facet answer.  The browser going away aborts the upstream
+ * request (the service then drops the connection and its per-principal slot); the upstream ending ends the
+ * browser's response.
+ *
+ * @param {Record<string, any>} pContext
+ * @param {import('node:http').IncomingMessage} pRequest
+ * @param {import('node:http').ServerResponse} pResponse
+ * @param {string} pDomain
+ * @param {string} pUpstreamPath - CHANGES_PATH
+ * @param {string} pSearch - '' or '?…'
+ */
+const proxyChanges = (pContext, pRequest, pResponse, pDomain, pUpstreamPath, pSearch) =>
+{
+	let tmpHarness = pContext.Domains[pDomain];
+	if (!tmpHarness || (typeof(tmpHarness.baseURL) !== 'string'))
+	{
+		return sendError(pResponse, 502, 'DEMO_UPSTREAM_UNAVAILABLE', `The ${pDomain} domain is not running.`, { Domain: pDomain });
+	}
+	if (pRequest.method !== 'GET')
+	{
+		return sendError(pResponse, 405, 'DEMO_METHOD_NOT_ALLOWED', `${CHANGES_PATH} answers GET only.`, undefined, { 'Allow': 'GET' });
+	}
+	// A GET has no body; drop anything the client sent anyway.
+	pRequest.resume();
+	let tmpHeaders = { 'accept': 'text/event-stream', 'cache-control': 'no-cache' };
+	FORWARD_STREAM_HEADERS.forEach(
+		(pHeader) =>
+		{
+			if ((typeof(pRequest.headers[pHeader]) === 'string') && (pRequest.headers[pHeader].length > 0) && (pRequest.headers[pHeader].length <= 512))
+			{
+				tmpHeaders[pHeader] = pRequest.headers[pHeader];
+			}
+		});
+	let tmpPersona = sessionPersona(pRequest);
+	if (tmpPersona)
+	{
+		tmpHeaders[UPSTREAM_TENANT_HEADER] = String(tmpPersona.Tenant);
+		tmpHeaders[UPSTREAM_USER_HEADER] = String(tmpPersona.User);
+	}
+	let tmpUpstreamURL = new URL(`${pUpstreamPath}${pSearch}`, tmpHarness.baseURL);
+	let tmpStarted = process.hrtime.bigint();
+	let tmpDone = false;
+	let tmpUpstreamResponse = null;
+	let tmpUpstream = libHttp.request(
+		{
+			protocol: tmpUpstreamURL.protocol,
+			hostname: tmpUpstreamURL.hostname,
+			port: tmpUpstreamURL.port,
+			method: 'GET',
+			path: `${tmpUpstreamURL.pathname}${tmpUpstreamURL.search}`,
+			headers: tmpHeaders
+		},
+		(pUpstreamResponse) =>
+		{
+			tmpUpstreamResponse = pUpstreamResponse;
+			let tmpElapsedMS = Number(process.hrtime.bigint() - tmpStarted) / 1e6;
+			let tmpType = String(pUpstreamResponse.headers['content-type'] || '');
+			let tmpIsStream = (pUpstreamResponse.statusCode === 200) && /text\/event-stream/i.test(tmpType);
+			if (!tmpIsStream)
+			{
+				// A refusal (401, 429, …) or a host without a stream: relay it whole, like a facet answer.
+				let tmpChunks = [];
+				pUpstreamResponse.on('data', (pChunk) => { tmpChunks.push(pChunk); });
+				pUpstreamResponse.on('error', () => { if (!tmpDone) { tmpDone = true; sendError(pResponse, 502, 'DEMO_UPSTREAM_UNAVAILABLE', `The ${pDomain} domain broke off its answer.`, { Domain: pDomain }); } });
+				pUpstreamResponse.on('end',
+					() =>
+					{
+						if (tmpDone)
+						{
+							return;
+						}
+						tmpDone = true;
+						let tmpOut = answerHeaders(pUpstreamResponse.headers, 'GET', pUpstreamPath, tmpPersona, tmpElapsedMS, KEEP_RESPONSE_HEADERS);
+						let tmpBody = Buffer.concat(tmpChunks);
+						tmpOut['Content-Length'] = tmpBody.length;
+						if (!Object.keys(tmpOut).some((pHeader) => { return pHeader.toLowerCase() === 'cache-control'; }))
+						{
+							tmpOut['Cache-Control'] = 'no-store';
+						}
+						pResponse.writeHead(pUpstreamResponse.statusCode, tmpOut);
+						pResponse.end(tmpBody);
+					});
+				return;
+			}
+			let tmpOut = answerHeaders(pUpstreamResponse.headers, 'GET', pUpstreamPath, tmpPersona, tmpElapsedMS, [ 'content-type' ]);
+			tmpOut['Cache-Control'] = 'no-cache, no-transform';
+			tmpOut['X-Accel-Buffering'] = 'no';
+			tmpOut['Connection'] = 'keep-alive';
+			pResponse.writeHead(200, tmpOut);
+			if (typeof(pResponse.flushHeaders) === 'function')
+			{
+				pResponse.flushHeaders();
+			}
+			if (pResponse.socket)
+			{
+				pResponse.socket.setNoDelay(true);
+				pResponse.socket.setTimeout(0);
+			}
+			if (pUpstreamResponse.socket)
+			{
+				pUpstreamResponse.socket.setTimeout(0);
+			}
+			// pipe(): each chunk is written as it arrives, with backpressure (a slow browser pauses the upstream read).
+			pUpstreamResponse.pipe(pResponse);
+			pUpstreamResponse.on('end', () => { tmpDone = true; });
+			pUpstreamResponse.on('error', () => { tmpDone = true; pResponse.end(); });
+			pUpstreamResponse.on('aborted', () => { tmpDone = true; pResponse.end(); });
+		});
+	tmpUpstream.on('error',
+		(pError) =>
+		{
+			if (tmpDone)
+			{
+				return;
+			}
+			tmpDone = true;
+			if (pResponse.headersSent)
+			{
+				return pResponse.end();
+			}
+			if (pResponse.destroyed)
+			{
+				return;
+			}
+			return sendError(pResponse, 502, 'DEMO_UPSTREAM_UNAVAILABLE', `The ${pDomain} domain did not answer: ${pError.message}`, { Domain: pDomain });
+		});
+	// The browser went away (tab closed, principal switched, AbortController): end the upstream stream too.
+	pResponse.on('close',
+		() =>
+		{
+			if (tmpUpstreamResponse && !tmpUpstreamResponse.complete)
+			{
+				tmpUpstreamResponse.destroy();
+			}
+			if (!tmpDone || !pResponse.writableFinished)
+			{
+				tmpDone = true;
+				tmpUpstream.destroy();
+			}
+		});
+	tmpUpstream.end();
+};
+
+/**
+ * The service-shaped error of a refused or failed write (a meadow-endpoints error body is { Error: '<message>',
+ * StatusCode, Record?, Query? }: only the message of a 4xx goes back, never the record or the query).
+ *
+ * @param {number} pStatus
+ * @param {Buffer} pBody
+ * @param {string} pAction
+ * @return {Record<string, any>}
+ */
+const writeError = (pStatus, pBody, pAction) =>
+{
+	let tmpParsed = null;
+	try
+	{
+		tmpParsed = JSON.parse(pBody.toString('utf8'));
+	}
+	catch (pError)
+	{
+		tmpParsed = null;
+	}
+	let tmpMessage = (tmpParsed && (typeof(tmpParsed.Error) === 'string')) ? tmpParsed.Error : null;
+	let tmpCode = 'DEMO_WRITE_FAILED';
+	if ((pStatus === 401) || (pStatus === 403))
+	{
+		tmpCode = 'DEMO_WRITE_REFUSED';
+	}
+	else if (pStatus === 404)
+	{
+		tmpCode = 'DEMO_WRITE_NOT_FOUND';
+	}
+	if (!tmpMessage || (pStatus >= 500) || (tmpMessage.length > 300))
+	{
+		tmpMessage = (pStatus >= 500) ? 'The domain server could not complete the write.' : `The domain server refused the write (HTTP ${pStatus}).`;
+	}
+	return { Error: { Code: tmpCode, Status: pStatus, Message: tmpMessage, Detail: { Action: pAction, UpstreamStatus: pStatus } } };
+};
+
+/**
+ * One allowlisted "Make a change" write (Faceting-Demo-Writes.WRITE_ROUTES), proxied to the domain's stock
+ * meadow-endpoints CRUD route as the persona.  Only signed-in personas write (401 DEMO_UNAUTHENTICATED); a body
+ * route takes application/json only (≤ 16 KiB, 413 beyond); the body is checked against the route
+ * (checkBody: permitted keys, required keys, value shapes; 400 DEMO_WRITE_INVALID) and the CHECKED object is what
+ * goes upstream.  A 2xx answer is relayed (the record, or { Count }); anything else becomes a service-shaped error
+ * (writeError).  The domain's write guard (installWriteGuards) still checks tenant and owner upstream.
+ *
+ * @param {Record<string, any>} pContext
+ * @param {import('node:http').IncomingMessage} pRequest
+ * @param {import('node:http').ServerResponse} pResponse
+ * @param {string} pDomain
+ * @param {string} pUpstreamPath - '/1.0/<Entity>…'
+ * @param {Record<string, any>} pRoute - the matched WRITE_ROUTES row
+ */
+const proxyWrite = (pContext, pRequest, pResponse, pDomain, pUpstreamPath, pRoute) =>
+{
+	let tmpHarness = pContext.Domains[pDomain];
+	if (!tmpHarness || (typeof(tmpHarness.baseURL) !== 'string'))
+	{
+		pRequest.resume();
+		return sendError(pResponse, 502, 'DEMO_UPSTREAM_UNAVAILABLE', `The ${pDomain} domain is not running.`, { Domain: pDomain });
+	}
+	let tmpPersona = sessionPersona(pRequest);
+	if (!tmpPersona)
+	{
+		pRequest.resume();
+		return sendError(pResponse, 401, 'DEMO_UNAUTHENTICATED', 'A demo write needs a signed-in persona (the DEMO principal switcher).', { Action: pRoute.Action });
+	}
+	let tmpTakesBody = (pRoute.Fields.length > 0);
+	let tmpType = String(pRequest.headers['content-type'] || '').toLowerCase();
+	if (tmpTakesBody && !/^application\/json(\s*;|$)/.test(tmpType))
+	{
+		pRequest.resume();
+		return sendError(pResponse, 400, libWrites.ERROR_CODE, 'A demo write body must be application/json.', { ContentType: tmpType || null });
+	}
+	readBody(pRequest, libWrites.MAX_WRITE_BODY_BYTES,
+		(pReadError, pBuffer) =>
+		{
+			if (pReadError)
+			{
+				if (pReadError.TooLarge)
+				{
+					return sendError(pResponse, 413, 'DEMO_BODY_TOO_LARGE', pReadError.message, { MaxBytes: libWrites.MAX_WRITE_BODY_BYTES }, { 'Connection': 'close' });
+				}
+				return sendError(pResponse, 400, 'DEMO_BAD_REQUEST', `The request body could not be read: ${pReadError.message}`);
+			}
+			let tmpBody = undefined;
+			let tmpText = pBuffer.toString('utf8');
+			if (tmpText.trim().length > 0)
+			{
+				try
+				{
+					tmpBody = JSON.parse(tmpText);
+				}
+				catch (pParseError)
+				{
+					return sendError(pResponse, 400, libWrites.ERROR_CODE, 'The write body is not valid JSON.');
+				}
+			}
+			let tmpInvalid = libWrites.checkBody(pRoute, tmpBody);
+			if (tmpInvalid)
+			{
+				return sendError(pResponse, 400, tmpInvalid.Code, tmpInvalid.Message, tmpInvalid.Detail);
+			}
+			let tmpPayload = tmpTakesBody ? Buffer.from(JSON.stringify(tmpBody), 'utf8') : null;
+			let tmpHeaders = { 'accept': 'application/json' };
+			tmpHeaders[UPSTREAM_TENANT_HEADER] = String(tmpPersona.Tenant);
+			tmpHeaders[UPSTREAM_USER_HEADER] = String(tmpPersona.User);
+			if (tmpPayload)
+			{
+				tmpHeaders['content-type'] = 'application/json';
+				tmpHeaders['content-length'] = String(tmpPayload.length);
+			}
+			let tmpUpstreamURL = new URL(pUpstreamPath, tmpHarness.baseURL);
+			let tmpStarted = process.hrtime.bigint();
+			let tmpAnswered = false;
+			let tmpUpstream = libHttp.request(
+				{
+					protocol: tmpUpstreamURL.protocol,
+					hostname: tmpUpstreamURL.hostname,
+					port: tmpUpstreamURL.port,
+					method: pRoute.Method,
+					path: tmpUpstreamURL.pathname,
+					headers: tmpHeaders,
+					timeout: UPSTREAM_TIMEOUT_MS
+				},
+				(pUpstreamResponse) =>
+				{
+					let tmpChunks = [];
+					pUpstreamResponse.on('data', (pChunk) => { tmpChunks.push(pChunk); });
+					pUpstreamResponse.on('error', () => { if (!tmpAnswered) { tmpAnswered = true; sendError(pResponse, 502, 'DEMO_UPSTREAM_UNAVAILABLE', `The ${pDomain} domain broke off its answer.`, { Domain: pDomain }); } });
+					pUpstreamResponse.on('end',
+						() =>
+						{
+							if (tmpAnswered)
+							{
+								return;
+							}
+							tmpAnswered = true;
+							let tmpElapsedMS = Number(process.hrtime.bigint() - tmpStarted) / 1e6;
+							let tmpOut = answerHeaders(pUpstreamResponse.headers, pRoute.Method, pUpstreamPath, tmpPersona, tmpElapsedMS, []);
+							tmpOut['X-Retold-Facet-Demo-Write'] = pRoute.Action;
+							tmpOut['Cache-Control'] = 'no-store';
+							let tmpStatus = pUpstreamResponse.statusCode;
+							let tmpRaw = Buffer.concat(tmpChunks);
+							let tmpOutBody = null;
+							if ((tmpStatus >= 200) && (tmpStatus < 300))
+							{
+								tmpOutBody = (tmpRaw.length > 0) ? tmpRaw : Buffer.from('{}', 'utf8');
+							}
+							else
+							{
+								tmpOutBody = Buffer.from(JSON.stringify(writeError(tmpStatus, tmpRaw, pRoute.Action)), 'utf8');
+							}
+							tmpOut['Content-Type'] = 'application/json; charset=utf-8';
+							tmpOut['Content-Length'] = tmpOutBody.length;
+							pResponse.writeHead(tmpStatus, tmpOut);
+							return pResponse.end(tmpOutBody);
+						});
+				});
+			tmpUpstream.on('timeout', () => { tmpUpstream.destroy(new Error(`no answer within ${UPSTREAM_TIMEOUT_MS} ms`)); });
+			tmpUpstream.on('error',
+				(pError) =>
+				{
+					if (tmpAnswered || pResponse.headersSent || pResponse.destroyed)
+					{
+						return;
+					}
+					tmpAnswered = true;
+					return sendError(pResponse, 502, 'DEMO_UPSTREAM_UNAVAILABLE', `The ${pDomain} domain did not answer: ${pError.message}`, { Domain: pDomain });
+				});
+			if (tmpPayload)
+			{
+				tmpUpstream.end(tmpPayload);
+			}
+			else
+			{
+				tmpUpstream.end();
+			}
+		});
+};
+
+/**
  * Is the Host header acceptable?  On a loopback bind only loopback host names (any port) are.
  *
  * @param {Record<string, any>} pContext
@@ -551,6 +940,13 @@ const route = (pContext, pRequest, pResponse) =>
 	let tmpMatch = /^\/api\/([^/]+)(\/1\.0\/Facet(?:\/.*)?)$/.exec(tmpPathname);
 	if (!tmpMatch)
 	{
+		// ---- (M4) one of the allowlisted "Make a change" writes, else nothing
+		let tmpWriteMatch = /^\/api\/([^/]+)(\/1\.0\/.+)$/.exec(tmpPathname);
+		let tmpRoute = tmpWriteMatch ? libWrites.matchWrite(tmpWriteMatch[1], pRequest.method, tmpWriteMatch[2]) : null;
+		if (tmpRoute && (DOMAIN_NAMES.indexOf(tmpWriteMatch[1]) >= 0) && !tmpURL.search)
+		{
+			return proxyWrite(pContext, pRequest, pResponse, tmpWriteMatch[1], tmpWriteMatch[2], tmpRoute);
+		}
 		return sendError(pResponse, 404, 'DEMO_NOT_FOUND', 'No such demo API route. The facet API is under /api/<Domain>/1.0/Facet/…', { Path: tmpPathname, Domains: DOMAIN_NAMES.slice() });
 	}
 	let tmpDomain = tmpMatch[1];
@@ -576,6 +972,10 @@ const route = (pContext, pRequest, pResponse) =>
 		{
 			return sendError(pResponse, 400, 'DEMO_BAD_PATH', 'Dot segments and encoded slashes are not allowed in facet paths.');
 		}
+	}
+	if (tmpUpstreamPath === CHANGES_PATH)
+	{
+		return proxyChanges(pContext, pRequest, pResponse, tmpDomain, tmpUpstreamPath, tmpURL.search || '');
 	}
 	if ((pRequest.method !== 'GET') && (pRequest.method !== 'POST'))
 	{
@@ -625,11 +1025,14 @@ const create = (pOptions) =>
 module.exports = (
 	{
 		MAX_BODY_BYTES: MAX_BODY_BYTES,
+		CHANGES_PATH: CHANGES_PATH,
+		FORWARD_STREAM_HEADERS: FORWARD_STREAM_HEADERS,
 		UPSTREAM_TIMEOUT_MS: UPSTREAM_TIMEOUT_MS,
 		DOMAIN_NAMES: DOMAIN_NAMES,
 		FORWARD_REQUEST_HEADERS: FORWARD_REQUEST_HEADERS,
 		KEEP_RESPONSE_HEADERS: KEEP_RESPONSE_HEADERS,
 		MIME_TYPES: MIME_TYPES,
 		create: create,
-		Personas: libPersonas
+		Personas: libPersonas,
+		Writes: libWrites
 	});

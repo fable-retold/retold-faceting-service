@@ -14,8 +14,33 @@
  *                                                (state writes; each schedules ONE refresh)
  *   applyDescribedFacets(pGroupHash, …)          a group whose facet list comes from Describe (FacetsFrom: 'Describe')
  *   labelOf(pGroupHash, pFacetKey, pKey)         every label this principal has seen for a facet's key (stable source)
- *   subscribe(pGroupHash, fListener)             views re-render on state transitions
+ *   subscribe(pGroupHash, fListener)             views re-render on state transitions (+ reason 'Stream': the domain's
+ *                                                change-stream status changed)
  *   subscribeLog(fListener)                      the inspector re-renders on every exchange
+ *
+ * M4 (internal-contracts §47.1–§47.3):
+ *   subscribeChanges(pDomain)                    open (or reuse) ONE stream per domain for the current principal key:
+ *                                                GET <prefix>/1.0/Facet/Changes (EventSource when the host sends no
+ *                                                request headers, else a fetch() stream reader parsed by Facet-Changes;
+ *                                                no persona or ID ever goes into a URL).  Reconnects with jittered
+ *                                                backoff (the server's retry:, doubled, ≤ 30 s, × [½, 1]), also after a
+ *                                                'closed' event (Shutdown: a restart; Revalidate: at once, through the
+ *                                                host's authentication); a 401 / 403 / 404 / 429 answer stops it until
+ *                                                the next principal change
+ *   closeChanges(pDomain)                        one domain, or every domain when omitted (a principal switch)
+ *   changeState(pDomain)                         AppData.Facet.Changes[pDomain] = { Status: 'Connecting' | 'Open' |
+ *                                                'Closed' | 'Error', PrincipalKey, LastSeq, LastEventAt, Events,
+ *                                                Reconnects, Reason, Error, NodeEpoch }
+ *   setGroupVisibility(fIsVisible)               which groups are on screen: a change refetches a visible group at once
+ *                                                and marks the others (ChangedSince: refetched when shown, isStale)
+ *   refreshForChange(pGroupHash, pSeq, pTrigger) the SSE refetch: the group's normal coalesced POST with
+ *                                                Freshness.MinSeq (and If-None-Match from the Version cache)
+ *   write(pDomain, pMethod, pPath, pBody, …)     a host write (logged Kind 'Write'; never cached)
+ * Events: generation(Entity, Seq) refetches every group of the domain whose last DependsOn names Entity (and drops
+ * the principal's lookup rows of Entity); ready (after the first) and model refetch every group of the domain.
+ * Every event is logged as an exchange of Kind 'Change'.  Query bodies carry Freshness (options.Freshness, Bounded
+ * by default); an answer that comes back Stale is refetched once more after StaleRefetchMS (the server refreshes
+ * it in the background), at most MaxStaleRefetches times in a row.
  *
  * State: AppData.Facet = { PrincipalKey, Groups: { <Hash>: <group state, Facet-Selection.initialGroupState> },
  *                          Log: [ <exchange> ], LogSeq, Inspector: { Open, SelectedID, Tab, AllPages },
@@ -29,11 +54,11 @@
  * aborted (AbortController), its exchange is logged Superseded / Aborted, its callbacks move to the newer
  * flight, and its answer is never applied.
  *
- * Cache: Version-keyed.  Key = Facet-Selection.requestKey(Domain, PrincipalKey, Method, Path, Body); value =
- * { ETag, Body }.  A repeat request sends If-None-Match: <ETag>; a 304 serves the cached body (the exchange is
+ * Cache: Version-keyed.  Key = Facet-Selection.requestKey(Domain, PrincipalKey, Method, Path, Body) (Body without
+ * Freshness: an SSE refetch revalidates the answer it replaces); value = { ETag, Body }.  A repeat request sends If-None-Match: <ETag>; a 304 serves the cached body (the exchange is
  * logged NotModified).  Only 200 answers are stored; any other status deletes the entry (errors are never cached).
- * The server's Version hashes the computed answer, the principal's scope values and the BindHash, so a 304
- * is never stale and never crosses principals.
+ * The server's Version hashes the computed answer, the principal's scope values and the BindHash (M4, cache on:
+ * the cache key and the generation vector), so a 304 is never stale and never crosses principals.
  *
  * @license MIT
  *
@@ -44,6 +69,7 @@ const libPictProvider = require('pict-provider');
 const libFacetSelection = require('./Facet-Selection.js');
 const libFacetDisplay = require('./Facet-Display.js');
 const libFacetLookup = require('./Facet-Lookup.js');
+const libFacetChanges = require('./Facet-Changes.js');
 
 const _DEFAULT_CONFIGURATION =
 	{
@@ -52,13 +78,28 @@ const _DEFAULT_CONFIGURATION =
 		AutoInitializeOrdinal: 0,
 		// Facet requests issued within this window for one group merge into one POST (design 02 §13: 10 ms).
 		CoalesceMS: 10,
-		// Exchanges kept for the inspector (newest first).
-		MaxLog: 30,
+		// Exchanges kept for the inspector (newest first; M4 adds the change stream's events and the host's writes).
+		MaxLog: 40,
 		// Version-cache entries kept (LRU).
 		MaxCache: 60,
 		// Records page size when a group does not say.
-		DefaultRecordsCap: 25
+		DefaultRecordsCap: 25,
+		// M4: the Freshness every Query asks for (null: the server's default, Exact).
+		Freshness: libFacetSelection.DEFAULT_FRESHNESS,
+		// M4: the change-stream transport: 'Auto' (EventSource when no request headers are needed, else fetch),
+		// 'EventSource' or 'Fetch'.
+		ChangesTransport: 'Auto',
+		// M4: a Stale answer is refetched once more after this long (0: never), at most this many times in a row.
+		StaleRefetchMS: 1000,
+		MaxStaleRefetches: 3,
+		// M4: an SSE-triggered refetch waits a random 0..ChangeJitterMS first, so every page that heard one event
+		// does not refetch in the same tick (0: at once).
+		ChangeJitterMS: 150
 	};
+
+// Stream answers that stop reconnecting until the next principal change (§47.1): no session / not allowed, no stream
+// on this server, over a connection limit.
+const STREAM_STOP_STATUSES = [ 400, 401, 403, 404, 405, 406, 429, 501 ];
 
 // Response headers an exchange keeps (canonical spelling for the inspector).
 const KEPT_HEADERS =
@@ -195,6 +236,11 @@ class PictProviderFacet extends libPictProvider
 		this._Labels = {};             // Principal|Group|FacetKey -> { '<key>': { Key, Label, LabelResolved } }
 		this._LookupCache = {};        // Domain|Principal|Entity|KeyField -> { '<key>': [ rows ] }
 		this._PrincipalInfo = {};      // what the host knows about the principal (e.g. { User: 42 }) for "(you)"
+		this._Streams = {};            // Domain -> the change stream (M4): { Domain, PrincipalKey, Controller, Source, Timer, … }
+		this._PendingFreshness = {};   // GroupHash -> { MinSeq, Exact, Trigger } for the next flush (an SSE refetch)
+		this._StaleTimers = {};        // GroupHash -> the follow-up refetch of a Stale answer
+		this._ChangeTimers = {};       // GroupHash -> the jittered SSE-triggered refetch
+		this._IsGroupVisible = () => { return true; };
 
 		if (!this.pict.AppData.Facet)
 		{
@@ -215,6 +261,10 @@ class PictProviderFacet extends libPictProvider
 		if (!this.pict.AppData.FacetCapabilities)
 		{
 			this.pict.AppData.FacetCapabilities = {};
+		}
+		if (!this.pict.AppData.Facet.Changes)
+		{
+			this.pict.AppData.Facet.Changes = {};
 		}
 
 		// Shared widget chrome (providers register CSS and templates themselves; views get theirs from configuration).
@@ -470,7 +520,8 @@ class PictProviderFacet extends libPictProvider
 
 	/**
 	 * Does the group need a (re)load for the current principal?  True when it never loaded, last answered
-	 * for another principal, or ended in an error -- and nothing for the current principal is in flight.
+	 * for another principal, ended in an error, or a change event arrived while it was not on screen
+	 * (ChangedSince) -- and nothing for the current principal is in flight.
 	 *
 	 * @param {string} pGroupHash
 	 * @return {boolean}
@@ -491,7 +542,7 @@ class PictProviderFacet extends libPictProvider
 		{
 			return false;
 		}
-		return (tmpState.Status === 'Idle') || (tmpState.Status === 'Error') || (tmpState.PrincipalKey !== tmpPrincipal);
+		return (tmpState.Status === 'Idle') || (tmpState.Status === 'Error') || (tmpState.PrincipalKey !== tmpPrincipal) || !!tmpState.ChangedSince;
 	}
 
 	/**
@@ -514,7 +565,7 @@ class PictProviderFacet extends libPictProvider
 
 	/**
 	 * @param {string} pGroupHash
-	 * @param {string} pReason - 'Loading' | 'Ready' | 'Error' | 'Records' | 'Count' | 'State'
+	 * @param {string} pReason - 'Loading' | 'Ready' | 'Error' | 'Records' | 'Count' | 'State' | 'Stream'
 	 */
 	notify(pGroupHash, pReason)
 	{
@@ -745,6 +796,715 @@ class PictProviderFacet extends libPictProvider
 		return true;
 	}
 
+	// ------------------------------------------------------------------ change stream (M4, internal-contracts §47)
+
+	/**
+	 * Tell the provider which groups are on screen.  A change event refetches a visible group at once; any other
+	 * group of the domain is marked (ChangedSince) and refetched when it is shown (isStale is true for it).
+	 *
+	 * @param {(pGroupHash: string) => boolean} fIsVisible
+	 */
+	setGroupVisibility(fIsVisible)
+	{
+		this._IsGroupVisible = (typeof(fIsVisible) === 'function') ? fIsVisible : () => { return true; };
+	}
+
+	/**
+	 * @param {string} pDomain
+	 * @return {Record<string, any>|null} AppData.Facet.Changes[pDomain]
+	 */
+	changeState(pDomain)
+	{
+		return this.pict.AppData.Facet.Changes[pDomain] || null;
+	}
+
+	/**
+	 * Refetch a group because data it depends on changed (an SSE event): the group's normal coalesced POST (one per
+	 * group per tick, If-None-Match from the Version cache) with Freshness.MinSeq = pSeq (Mode 'Exact' when the
+	 * event carried no Seq).  A group that is not on screen is only marked; a group that never asked is left alone.
+	 *
+	 * @param {string} pGroupHash
+	 * @param {string|null} pSeq
+	 * @param {string} [pTrigger] - logged on the exchange and shown on the page ("Live update: Project @ e:…:15")
+	 * @return {boolean} true when a refetch was scheduled
+	 */
+	refreshForChange(pGroupHash, pSeq, pTrigger)
+	{
+		let tmpState = this.group(pGroupHash);
+		if (!tmpState || ((tmpState.Status === 'Idle') && !tmpState.Envelope))
+		{
+			return false;
+		}
+		let tmpSeq = libFacetChanges.parseSeq(pSeq) ? pSeq : null;
+		let tmpTrigger = pTrigger || libFacetChanges.triggerText(null, tmpSeq);
+		if (!this._IsGroupVisible(pGroupHash))
+		{
+			let tmpChanged = tmpState.ChangedSince || {};
+			tmpState.ChangedSince = { Seq: libFacetChanges.laterSeq(tmpChanged.Seq || null, tmpSeq), Exact: (!tmpSeq || !!tmpChanged.Exact), Trigger: tmpTrigger };
+			return false;
+		}
+		let tmpPending = this._PendingFreshness[pGroupHash] || {};
+		this._PendingFreshness[pGroupHash] = { MinSeq: libFacetChanges.laterSeq(tmpPending.MinSeq || null, tmpSeq), Exact: (!tmpSeq || !!tmpPending.Exact), Trigger: tmpTrigger };
+		let tmpJitterMS = Number(this.options.ChangeJitterMS);
+		if (!(tmpJitterMS > 0))
+		{
+			return this.refresh(pGroupHash);
+		}
+		if (!this._ChangeTimers[pGroupHash])
+		{
+			// One jittered refetch per group: later events before it fires merge into its pending freshness.
+			this._ChangeTimers[pGroupHash] = setTimeout(
+				() =>
+				{
+					delete this._ChangeTimers[pGroupHash];
+					this.refresh(pGroupHash);
+				}, Math.round(Math.random() * tmpJitterMS));
+		}
+		return true;
+	}
+
+	/**
+	 * Refetch every group of a domain (a reconnect or a model change: anything may have changed).
+	 *
+	 * @param {string} pDomain
+	 * @param {string|null} pSeq
+	 * @param {string} pTrigger
+	 * @return {Array<string>} the groups refetched now
+	 */
+	refetchDomain(pDomain, pSeq, pTrigger)
+	{
+		let tmpGroups = this.pict.AppData.Facet.Groups;
+		return Object.keys(tmpGroups).sort().filter(
+			(pGroupHash) =>
+			{
+				return (tmpGroups[pGroupHash].Domain === pDomain) && this.refreshForChange(pGroupHash, pSeq, pTrigger);
+			});
+	}
+
+	/**
+	 * A host write (e.g. a demo's "Make a change" call through its CRUD API): logged as an exchange of Kind 'Write',
+	 * never cached, Ok for any 2xx.  The provider does not refresh anything afterwards: the change stream does.
+	 *
+	 * @param {string} pDomain
+	 * @param {string} pMethod - 'POST' | 'PUT' | 'DELETE' | 'GET'
+	 * @param {string} pPath - upstream path, '/1.0/<Entity>…'
+	 * @param {any} pBody - object or null
+	 * @param {{ GroupHash?: string|null, Trigger?: string }} pOptions
+	 * @param {(pError?: Error|null, pResponse?: Record<string, any>) => void} fCallback
+	 */
+	write(pDomain, pMethod, pPath, pBody, pOptions, fCallback)
+	{
+		let tmpOptions = Object.assign({}, pOptions || {}, { Kind: 'Write', NoCache: true });
+		return this.request(pDomain, pMethod, pPath, pBody, tmpOptions, fCallback);
+	}
+
+	/**
+	 * Open (or keep) the change stream of a domain for the current principal (§47.1).
+	 *
+	 * @param {string} pDomain
+	 * @return {Record<string, any>|null} the change state
+	 */
+	subscribeChanges(pDomain)
+	{
+		let tmpPrincipal = this.principalKey();
+		let tmpExisting = this._Streams[pDomain] || null;
+		if (tmpExisting && (tmpExisting.PrincipalKey === tmpPrincipal) && !tmpExisting.Closed)
+		{
+			// Open, connecting, waiting to reconnect, or stopped for this principal (401 / 429 / closed): keep it.
+			return this.changeState(pDomain);
+		}
+		if (tmpExisting)
+		{
+			this._closeStream(tmpExisting, 'Principal');
+		}
+		let tmpStream =
+			{
+				Domain: pDomain,
+				PrincipalKey: tmpPrincipal,
+				Closed: false,
+				Stopped: false,
+				Controller: null,
+				Source: null,
+				Timer: null,
+				Attempt: 0,
+				RetryMS: libFacetChanges.DEFAULT_RETRY_MS,
+				LastEventID: null,
+				ReadyCount: 0,
+				Generation: 0
+			};
+		this._Streams[pDomain] = tmpStream;
+		this.pict.AppData.Facet.Changes[pDomain] = { Status: 'Connecting', PrincipalKey: tmpPrincipal, LastSeq: null, LastEventAt: null, Events: 0, Reconnects: 0, Reason: null, Error: null, NodeEpoch: null, Transport: null };
+		this._openStream(tmpStream);
+		return this.changeState(pDomain);
+	}
+
+	/**
+	 * Close the change stream of one domain, or of every domain (a principal switch closes all; the next
+	 * subscribeChanges opens a stream for the new principal).
+	 *
+	 * @param {string} [pDomain]
+	 */
+	closeChanges(pDomain)
+	{
+		let tmpDomains = (typeof(pDomain) === 'string') ? [ pDomain ] : Object.keys(this._Streams);
+		tmpDomains.forEach(
+			(pName) =>
+			{
+				let tmpStream = this._Streams[pName];
+				if (tmpStream)
+				{
+					this._closeStream(tmpStream, 'Client');
+				}
+			});
+	}
+
+	/**
+	 * @param {Record<string, any>} pStream
+	 * @param {string} pReason
+	 */
+	_closeStream(pStream, pReason)
+	{
+		pStream.Closed = true;
+		pStream.Generation++;
+		if (pStream.Timer)
+		{
+			clearTimeout(pStream.Timer);
+			pStream.Timer = null;
+		}
+		if (pStream.Controller)
+		{
+			try
+			{
+				pStream.Controller.abort();
+			}
+			catch (pError)
+			{
+				// already settled
+			}
+			pStream.Controller = null;
+		}
+		if (pStream.Source)
+		{
+			try
+			{
+				pStream.Source.close();
+			}
+			catch (pError)
+			{
+				// already closed
+			}
+			pStream.Source = null;
+		}
+		if (this._Streams[pStream.Domain] === pStream)
+		{
+			delete this._Streams[pStream.Domain];
+		}
+		this._setStreamState(pStream, { Status: 'Closed', Reason: pReason });
+	}
+
+	/**
+	 * Update the domain's change state (when it still belongs to this stream) and tell the domain's groups.
+	 *
+	 * @param {Record<string, any>} pStream
+	 * @param {Record<string, any>} pPatch
+	 */
+	_setStreamState(pStream, pPatch)
+	{
+		let tmpState = this.pict.AppData.Facet.Changes[pStream.Domain];
+		if (!tmpState || (tmpState.PrincipalKey !== pStream.PrincipalKey))
+		{
+			return;
+		}
+		let tmpBefore = `${tmpState.Status}|${tmpState.Reconnects}`;
+		Object.assign(tmpState, pPatch || {});
+		if (`${tmpState.Status}|${tmpState.Reconnects}` === tmpBefore)
+		{
+			return;
+		}
+		let tmpGroups = this.pict.AppData.Facet.Groups;
+		Object.keys(tmpGroups).forEach(
+			(pGroupHash) =>
+			{
+				if (tmpGroups[pGroupHash].Domain === pStream.Domain)
+				{
+					this.notify(pGroupHash, 'Stream');
+				}
+			});
+		this._notifyLog();
+	}
+
+	/**
+	 * Which transport this host needs: EventSource cannot send request headers, so a host that authenticates
+	 * through headers (the demo's persona header) reads the stream with fetch().
+	 *
+	 * @return {string} 'EventSource' | 'Fetch' | 'None'
+	 */
+	_streamTransport()
+	{
+		let tmpWanted = this.options.ChangesTransport || 'Auto';
+		let tmpHasFetch = (typeof(fetch) === 'function') && (typeof(TextDecoder) === 'function');
+		let tmpHasEventSource = (typeof(EventSource) === 'function');
+		if (tmpWanted === 'EventSource')
+		{
+			return tmpHasEventSource ? 'EventSource' : 'None';
+		}
+		if (tmpWanted === 'Fetch')
+		{
+			return tmpHasFetch ? 'Fetch' : 'None';
+		}
+		let tmpHeaders = this._RequestHeaders() || {};
+		if (tmpHasEventSource && (Object.keys(tmpHeaders).length < 1))
+		{
+			return 'EventSource';
+		}
+		return tmpHasFetch ? 'Fetch' : 'None';
+	}
+
+	/**
+	 * @param {Record<string, any>} pStream
+	 */
+	_openStream(pStream)
+	{
+		if (pStream.Closed)
+		{
+			return;
+		}
+		pStream.Timer = null;
+		let tmpTransport = this._streamTransport();
+		this._setStreamState(pStream, { Status: 'Connecting', Transport: tmpTransport });
+		if (tmpTransport === 'None')
+		{
+			pStream.Stopped = true;
+			this._setStreamState(pStream, { Status: 'Closed', Reason: 'Unsupported' });
+			return;
+		}
+		let tmpURL = `${this._EndpointPrefix(pStream.Domain)}/1.0/Facet/Changes`;
+		let tmpGeneration = pStream.Generation;
+		if (tmpTransport === 'EventSource')
+		{
+			return this._openEventSource(pStream, tmpURL, tmpGeneration);
+		}
+		let tmpController = (typeof(AbortController) === 'function') ? new AbortController() : null;
+		pStream.Controller = tmpController;
+		let tmpHeaders = Object.assign({ 'Accept': 'text/event-stream' }, this._RequestHeaders() || {});
+		if (pStream.LastEventID)
+		{
+			tmpHeaders['Last-Event-ID'] = pStream.LastEventID;
+		}
+		let fCurrent = () => { return !pStream.Closed && (pStream.Generation === tmpGeneration); };
+		let tmpParser = libFacetChanges.createParser((pEvent) => { if (fCurrent()) { this._onStreamEvent(pStream, pEvent); } });
+		let tmpFetchOptions = { method: 'GET', headers: tmpHeaders, cache: 'no-store', credentials: 'same-origin' };
+		if (tmpController)
+		{
+			tmpFetchOptions.signal = tmpController.signal;
+		}
+		fetch(tmpURL, tmpFetchOptions)
+			.then(
+				(pResponse) =>
+				{
+					if (!fCurrent())
+					{
+						return null;
+					}
+					let tmpType = String(pResponse.headers.get('content-type') || '');
+					if ((pResponse.status !== 200) || !/text\/event-stream/i.test(tmpType) || !pResponse.body || (typeof(pResponse.body.getReader) !== 'function'))
+					{
+						return pResponse.text().then(
+							(pText) =>
+							{
+								let tmpError = null;
+								try
+								{
+									let tmpParsed = JSON.parse(pText);
+									tmpError = (tmpParsed && tmpParsed.Error && (typeof(tmpParsed.Error) === 'object')) ? tmpParsed.Error : null;
+								}
+								catch (pParseError)
+								{
+									tmpError = null;
+								}
+								if (fCurrent())
+								{
+									this._streamRefused(pStream, pResponse.status, tmpError || { Code: `DEMO_HTTP_${pResponse.status}`, Status: pResponse.status, Message: (pResponse.status === 200) ? 'The answer is not an event stream.' : (pResponse.statusText || `HTTP ${pResponse.status}`) });
+								}
+							});
+					}
+					this._setStreamState(pStream, { Status: 'Open', Error: null, Reason: null });
+					let tmpReader = pResponse.body.getReader();
+					let tmpDecoder = new TextDecoder('utf-8');
+					let fRead = () =>
+					{
+						return tmpReader.read().then(
+							(pChunk) =>
+							{
+								if (!fCurrent())
+								{
+									try
+									{
+										tmpReader.cancel();
+									}
+									catch (pError)
+									{
+										// already done
+									}
+									return null;
+								}
+								if (pChunk.done)
+								{
+									tmpParser.feed(tmpDecoder.decode());
+									tmpParser.flush();
+									return this._streamEnded(pStream, null);
+								}
+								tmpParser.feed(tmpDecoder.decode(pChunk.value, { stream: true }));
+								return fRead();
+							});
+					};
+					return fRead();
+				})
+			.catch(
+				(pError) =>
+				{
+					if (!fCurrent() || (pError && (pError.name === 'AbortError')))
+					{
+						return;
+					}
+					this._streamEnded(pStream, { Code: 'DEMO_NETWORK', Status: 0, Message: (pError && pError.message) ? pError.message : 'The change stream failed.' });
+				});
+	}
+
+	/**
+	 * The EventSource transport (a host whose session travels in cookies): the browser reconnects by itself.
+	 *
+	 * @param {Record<string, any>} pStream
+	 * @param {string} pURL
+	 * @param {number} pGeneration
+	 */
+	_openEventSource(pStream, pURL, pGeneration)
+	{
+		let tmpSource = null;
+		try
+		{
+			tmpSource = new EventSource(pURL, { withCredentials: true });
+		}
+		catch (pError)
+		{
+			pStream.Stopped = true;
+			this._setStreamState(pStream, { Status: 'Closed', Reason: 'Unsupported', Error: { Code: 'DEMO_NETWORK', Status: 0, Message: pError.message } });
+			return;
+		}
+		pStream.Source = tmpSource;
+		let fCurrent = () => { return !pStream.Closed && (pStream.Generation === pGeneration) && (pStream.Source === tmpSource); };
+		tmpSource.onopen = () =>
+		{
+			if (fCurrent())
+			{
+				this._setStreamState(pStream, { Status: 'Open', Error: null, Reason: null });
+			}
+		};
+		tmpSource.onerror = () =>
+		{
+			if (!fCurrent())
+			{
+				return;
+			}
+			if (tmpSource.readyState === 2)
+			{
+				// The browser gave up (a refusal or not an event stream): stop until the next principal change.
+				pStream.Stopped = true;
+				this._setStreamState(pStream, { Status: 'Closed', Reason: 'Refused' });
+				return;
+			}
+			let tmpState = this.changeState(pStream.Domain) || {};
+			this._setStreamState(pStream, { Status: 'Connecting', Reconnects: (tmpState.Reconnects || 0) + 1 });
+		};
+		libFacetChanges.EVENT_TYPES.forEach(
+			(pType) =>
+			{
+				tmpSource.addEventListener(pType,
+					(pMessage) =>
+					{
+						if (!fCurrent())
+						{
+							return;
+						}
+						let tmpData = null;
+						try
+						{
+							tmpData = JSON.parse(pMessage.data);
+						}
+						catch (pError)
+						{
+							tmpData = null;
+						}
+						this._onStreamEvent(pStream, { Event: pType, Data: tmpData, Raw: pMessage.data, ID: pMessage.lastEventId || null, Retry: null });
+					});
+			});
+	}
+
+	/**
+	 * The server refused the stream (a non-200 answer): 401 / 403 / 404 / 429 / … stop until the next principal
+	 * change; anything else (5xx, the proxy's 502) reconnects with backoff.
+	 *
+	 * @param {Record<string, any>} pStream
+	 * @param {number} pStatus
+	 * @param {Record<string, any>} pError
+	 */
+	_streamRefused(pStream, pStatus, pError)
+	{
+		pStream.Controller = null;
+		if (STREAM_STOP_STATUSES.indexOf(pStatus) >= 0)
+		{
+			pStream.Stopped = true;
+			let tmpReason = 'Refused';
+			if ((pStatus === 404) || (pStatus === 405) || (pStatus === 501))
+			{
+				tmpReason = 'Unavailable';
+			}
+			else if (pStatus === 429)
+			{
+				tmpReason = 'Limit';
+			}
+			else if (pStatus === 401)
+			{
+				tmpReason = 'Unauthenticated';
+			}
+			this._setStreamState(pStream, { Status: 'Closed', Reason: tmpReason, Error: pError });
+			return;
+		}
+		this._streamEnded(pStream, pError);
+	}
+
+	/**
+	 * The stream ended (the server closed it, or the network failed): reconnect after backoff unless it was
+	 * stopped ('closed' event, a refusal) or closed by the client.
+	 *
+	 * @param {Record<string, any>} pStream
+	 * @param {Record<string, any>|null} pError
+	 */
+	_streamEnded(pStream, pError)
+	{
+		pStream.Controller = null;
+		if (pStream.Closed || pStream.Stopped || pStream.Timer)
+		{
+			// Closed, stopped, or a reconnect is already scheduled (a 'closed' frame, then the end of the body).
+			return;
+		}
+		let tmpDelay = libFacetChanges.backoffMS(pStream.Attempt, pStream.RetryMS);
+		pStream.Attempt++;
+		let tmpState = this.changeState(pStream.Domain) || {};
+		this._setStreamState(pStream, { Status: 'Error', Error: pError || { Code: 'DEMO_STREAM_ENDED', Status: 0, Message: 'The change stream ended.' }, Reconnects: (tmpState.Reconnects || 0) + 1, Reason: `reconnecting in ${Math.round(tmpDelay / 100) / 10} s` });
+		pStream.Timer = setTimeout(() => { this._openStream(pStream); }, tmpDelay);
+	}
+
+	/**
+	 * Drop the current principal's lookup rows of an entity in a domain (a change event says they may be old).
+	 *
+	 * @param {string} pDomain
+	 * @param {string|null} pEntity - null: every entity of the domain
+	 */
+	_dropLookups(pDomain, pEntity)
+	{
+		let tmpPrefix = `${pDomain}|${this.principalKey() || ''}|${pEntity ? `${pEntity}|` : ''}`;
+		Object.keys(this._LookupCache).forEach(
+			(pKey) =>
+			{
+				if (pKey.indexOf(tmpPrefix) === 0)
+				{
+					delete this._LookupCache[pKey];
+				}
+			});
+	}
+
+	/**
+	 * One event of a domain's stream (§46.2, §47.2).
+	 *
+	 * @param {Record<string, any>} pStream
+	 * @param {{ Event: string, Data: any, Raw?: string, ID: string|null, Retry: number|null }} pEvent
+	 */
+	_onStreamEvent(pStream, pEvent)
+	{
+		if ((typeof(pEvent.Retry) === 'number') && (pEvent.Retry > 0))
+		{
+			pStream.RetryMS = pEvent.Retry;
+		}
+		if (pEvent.ID)
+		{
+			pStream.LastEventID = pEvent.ID;
+		}
+		let tmpData = (pEvent.Data && (typeof(pEvent.Data) === 'object')) ? pEvent.Data : {};
+		let tmpState = this.changeState(pStream.Domain) || {};
+		let tmpPatch = { LastEventAt: new Date().toISOString(), Events: (tmpState.Events || 0) + 1 };
+		let tmpSeq = libFacetChanges.parseSeq(tmpData.Seq) ? tmpData.Seq : null;
+		if (tmpSeq)
+		{
+			tmpPatch.LastSeq = libFacetChanges.laterSeq(tmpState.LastSeq || null, tmpSeq);
+		}
+		let tmpRefetched = [];
+		switch (pEvent.Event)
+		{
+			case 'ready':
+				pStream.ReadyCount++;
+				pStream.Attempt = 0;
+				tmpPatch.Status = 'Open';
+				tmpPatch.Error = null;
+				tmpPatch.Reason = null;
+				tmpPatch.NodeEpoch = tmpData.NodeEpoch || null;
+				if ((pStream.ReadyCount > 1) || (tmpData.Reset === true))
+				{
+					// Events are not replayed: anything may have changed while the stream was down.
+					this._dropLookups(pStream.Domain, null);
+					tmpRefetched = this.refetchDomain(pStream.Domain, tmpSeq, 'Live update: the change stream reconnected');
+				}
+				break;
+			case 'generation':
+				if (typeof(tmpData.Entity) === 'string')
+				{
+					this._dropLookups(pStream.Domain, tmpData.Entity);
+					let tmpTrigger = libFacetChanges.triggerText(tmpData.Entity, tmpSeq);
+					libFacetChanges.groupsToRefetch(this.pict.AppData.Facet.Groups, pStream.Domain, tmpData.Entity).forEach(
+						(pGroupHash) =>
+						{
+							if (this.refreshForChange(pGroupHash, tmpSeq, tmpTrigger))
+							{
+								tmpRefetched.push(pGroupHash);
+							}
+						});
+				}
+				break;
+			case 'model':
+				this._dropLookups(pStream.Domain, null);
+				delete this._DescribedFor[pStream.Domain];
+				tmpRefetched = this.refetchDomain(pStream.Domain, tmpSeq, 'Live update: the model changed');
+				break;
+			case 'closed':
+				// The server ends this stream right after the frame: 'Revalidate' (the periodic re-authentication:
+				// reconnect promptly, through the host's own authentication — a 401 then stops it) or 'Shutdown'
+				// (a restart or a deploy: reconnect with jittered backoff).  Never a reason to stop for good.
+				tmpPatch.Reason = `Server: ${tmpData.Reason || 'closed'}`;
+				if (tmpData.Reason === 'Revalidate')
+				{
+					pStream.Attempt = 0;
+				}
+				if (pStream.Source)
+				{
+					// EventSource reconnects by itself once the server ends the response.
+					break;
+				}
+				if (pStream.Controller)
+				{
+					try
+					{
+						pStream.Controller.abort();
+					}
+					catch (pError)
+					{
+						// already settled
+					}
+					pStream.Controller = null;
+				}
+				this._streamEnded(pStream, { Code: 'DEMO_STREAM_CLOSED', Status: 0, Message: `The server closed the change stream (${tmpData.Reason || 'closed'}).` });
+				break;
+			default:
+				break;
+		}
+		this._logChange(pStream, pEvent, tmpData, tmpRefetched);
+		this._setStreamState(pStream, tmpPatch);
+	}
+
+	/**
+	 * Log a stream event as an exchange of Kind 'Change' (the inspector lists it with the page's domains).
+	 *
+	 * @param {Record<string, any>} pStream
+	 * @param {Record<string, any>} pEvent
+	 * @param {Record<string, any>} pData
+	 * @param {Array<string>} pRefetched
+	 */
+	_logChange(pStream, pEvent, pData, pRefetched)
+	{
+		let tmpFacetState = this.pict.AppData.Facet;
+		tmpFacetState.LogSeq = (tmpFacetState.LogSeq || 0) + 1;
+		let tmpGroups = tmpFacetState.Groups;
+		let tmpMarked = Object.keys(tmpGroups).filter((pGroupHash) => { return (tmpGroups[pGroupHash].Domain === pStream.Domain) && !!tmpGroups[pGroupHash].ChangedSince && (pRefetched.indexOf(pGroupHash) < 0); });
+		tmpFacetState.Log.unshift(
+			{
+				ID: tmpFacetState.LogSeq,
+				At: new Date().toISOString(),
+				GroupHash: null,
+				Kind: 'Change',
+				Event: pEvent.Event,
+				Domain: pStream.Domain,
+				Method: 'SSE',
+				URL: `${this._EndpointPrefix(pStream.Domain)}/1.0/Facet/Changes`,
+				UpstreamPath: '/1.0/Facet/Changes',
+				RequestHeaders: {},
+				Body: null,
+				Pending: false,
+				Status: 200,
+				NotModified: false,
+				Superseded: false,
+				Aborted: false,
+				ElapsedMS: null,
+				ResponseHeaders: {},
+				Response: pEvent.Data,
+				Summary: { Event: pEvent.Event, Entity: pData.Entity || null, Generation: pData.Generation || null, Seq: pData.Seq || null, Reason: pData.Reason || null, Refetched: pRefetched.slice(), Marked: tmpMarked },
+				Error: null,
+				Trigger: null
+			});
+		while (tmpFacetState.Log.length > this.options.MaxLog)
+		{
+			tmpFacetState.Log.pop();
+		}
+		this._notifyLog();
+	}
+
+	/**
+	 * @param {string} pGroupHash
+	 */
+	_clearStaleTimer(pGroupHash)
+	{
+		if (this._StaleTimers[pGroupHash])
+		{
+			clearTimeout(this._StaleTimers[pGroupHash]);
+			delete this._StaleTimers[pGroupHash];
+		}
+	}
+
+	/**
+	 * A Stale answer (Bounded freshness: a cached answer older than the data, while the server refreshes it in the
+	 * background) is refetched once more after StaleRefetchMS, at most MaxStaleRefetches times in a row, so the page
+	 * converges without a change event.
+	 *
+	 * @param {Record<string, any>} pState
+	 */
+	_scheduleStaleRefetch(pState)
+	{
+		let tmpStale = !!pState.LastAnswer && (pState.LastAnswer.Stale === true);
+		if (!tmpStale)
+		{
+			pState.StaleRefetches = 0;
+			return;
+		}
+		let tmpDelay = this.options.StaleRefetchMS;
+		if (!(tmpDelay > 0) || ((pState.StaleRefetches || 0) >= this.options.MaxStaleRefetches))
+		{
+			return;
+		}
+		pState.StaleRefetches = (pState.StaleRefetches || 0) + 1;
+		let tmpGroupHash = pState.Hash;
+		let tmpPrincipal = pState.PrincipalKey;
+		this._clearStaleTimer(tmpGroupHash);
+		this._StaleTimers[tmpGroupHash] = setTimeout(
+			() =>
+			{
+				delete this._StaleTimers[tmpGroupHash];
+				let tmpCurrent = this.group(tmpGroupHash);
+				if (tmpCurrent && (tmpCurrent.PrincipalKey === this.principalKey()) && (tmpPrincipal === this.principalKey()) && (tmpCurrent.Status === 'Ready'))
+				{
+					this._PendingFreshness[tmpGroupHash] = Object.assign({}, this._PendingFreshness[tmpGroupHash] || {}, { Trigger: `Stale answer (${Math.round(pState.LastAnswer.LagMS || 0)} ms old): refetching` });
+					this.refresh(tmpGroupHash);
+				}
+			}, tmpDelay);
+	}
+
 	// ------------------------------------------------------------------ requests
 
 	/**
@@ -851,9 +1611,26 @@ class PictProviderFacet extends libPictProvider
 			}
 		}
 
+		// M4: the freshness of this POST: an SSE refetch (or a change that arrived while the group was not on screen)
+		// asks for MinSeq; a flush that supersedes such a flight keeps its MinSeq (the newer answer must be as fresh).
+		let tmpPending = this._PendingFreshness[pGroupHash] || null;
+		delete this._PendingFreshness[pGroupHash];
+		let tmpChanged = tmpState.ChangedSince || null;
+		tmpState.ChangedSince = null;
+		this._clearStaleTimer(pGroupHash);
+		let tmpMinSeq = libFacetChanges.laterSeq(tmpPending ? tmpPending.MinSeq : null, tmpChanged ? tmpChanged.Seq : null);
+		tmpMinSeq = libFacetChanges.laterSeq(tmpPrevious ? tmpPrevious.MinSeq : null, tmpMinSeq);
+		let tmpExact = !!((tmpPending && tmpPending.Exact) || (tmpChanged && tmpChanged.Exact) || (tmpPrevious && tmpPrevious.Exact));
+		let tmpTrigger = (tmpPending && tmpPending.Trigger) || (tmpChanged && tmpChanged.Trigger) || (tmpPrevious && tmpPrevious.Trigger) || null;
+		let tmpFreshness = null;
+		if (this.options.Freshness || tmpMinSeq || tmpExact)
+		{
+			tmpFreshness = libFacetSelection.freshnessBody(this.options.Freshness || { Mode: 'Exact' }, tmpMinSeq, tmpExact);
+		}
+
 		tmpState.Seq = (tmpState.Seq || 0) + 1;
 		let tmpPrincipal = this.principalKey();
-		let tmpBody = libFacetSelection.buildQueryBody(tmpState);
+		let tmpBody = libFacetSelection.buildQueryBody(tmpState, tmpFreshness ? { Freshness: tmpFreshness } : null);
 		Object.keys(tmpExtraSpecs).forEach(
 			(pKey) =>
 			{
@@ -868,7 +1645,7 @@ class PictProviderFacet extends libPictProvider
 				}
 			});
 		let tmpController = (typeof(AbortController) === 'function') ? new AbortController() : null;
-		let tmpFlight = { Seq: tmpState.Seq, Controller: tmpController, Callbacks: tmpCallbacks };
+		let tmpFlight = { Seq: tmpState.Seq, Controller: tmpController, Callbacks: tmpCallbacks, MinSeq: tmpMinSeq, Exact: tmpExact, Trigger: tmpTrigger };
 		this._InFlight[pGroupHash] = tmpFlight;
 		// A newer Query also outdates any records page or count request of this group.
 		this._RecordsSeq[pGroupHash] = (this._RecordsSeq[pGroupHash] || 0) + 1;
@@ -887,7 +1664,7 @@ class PictProviderFacet extends libPictProvider
 		this.notify(pGroupHash, 'Loading');
 
 		this.request(tmpState.Domain, 'POST', libFacetSelection.routePath(tmpState, libFacetSelection.KIND_QUERY), tmpBody,
-			{ GroupHash: pGroupHash, Kind: 'Query', Seq: tmpFlight.Seq, Signal: tmpController ? tmpController.signal : null, Principal: tmpPrincipal },
+			{ GroupHash: pGroupHash, Kind: 'Query', Seq: tmpFlight.Seq, Signal: tmpController ? tmpController.signal : null, Principal: tmpPrincipal, Trigger: tmpTrigger },
 			(pError, pResponse) =>
 			{
 				if (this._InFlight[pGroupHash] !== tmpFlight)
@@ -899,7 +1676,7 @@ class PictProviderFacet extends libPictProvider
 				delete this._InFlight[pGroupHash];
 				let tmpWaitingChecks = this._VerifyAfter[pGroupHash] || null;
 				delete this._VerifyAfter[pGroupHash];
-				this._applyQuery(tmpState, tmpBody, pResponse, tmpPrincipal, tmpFlight.Seq);
+				this._applyQuery(tmpState, tmpBody, pResponse, tmpPrincipal, tmpFlight.Seq, tmpTrigger);
 				if (tmpWaitingChecks && (tmpState.Status !== 'Ready'))
 				{
 					tmpState.CountCheck = null;
@@ -940,10 +1717,13 @@ class PictProviderFacet extends libPictProvider
 	 * @param {Record<string, any>} pResponse
 	 * @param {string|null} pPrincipal - the principal the request was sent as
 	 * @param {number} [pSeq] - the flight's Seq (becomes AnswerSeq: the identity of the answer on screen)
+	 * @param {string|null} [pTrigger] - why this POST went out when it was not a user gesture (M4: "Live update: …")
 	 */
-	_applyQuery(pState, pBody, pResponse, pPrincipal, pSeq)
+	_applyQuery(pState, pBody, pResponse, pPrincipal, pSeq, pTrigger)
 	{
 		let tmpResponse = pResponse || {};
+		let tmpHeaders = tmpResponse.Headers || {};
+		let tmpEnvelopeBody = (tmpResponse.Body && (typeof(tmpResponse.Body) === 'object') && !Array.isArray(tmpResponse.Body)) ? tmpResponse.Body : {};
 		pState.PendingPrincipalKey = null;
 		pState.PrincipalKey = pPrincipal;
 		pState.AnswerSeq = (typeof(pSeq) === 'number') ? pSeq : ((pState.AnswerSeq || 0) + 1);
@@ -956,14 +1736,27 @@ class PictProviderFacet extends libPictProvider
 				ElapsedMS: tmpResponse.ElapsedMS,
 				ETag: (tmpResponse.Headers && tmpResponse.Headers.ETag) ? tmpResponse.Headers.ETag : null,
 				ServerTiming: (tmpResponse.Headers && tmpResponse.Headers['Server-Timing']) ? tmpResponse.Headers['Server-Timing'] : null,
-				Posts: pState.PostsSinceChange || 1
+				Posts: pState.PostsSinceChange || 1,
+				// M4 (internal-contracts §44.7–§44.8): how the server answered, and why the client asked.
+				CacheStatus: tmpHeaders['X-Retold-Facet-Cache'] || null,
+				Seq: tmpHeaders['X-Retold-Facet-Seq'] || null,
+				Freshness: tmpHeaders['X-Retold-Facet-Freshness'] || null,
+				Cached: (tmpEnvelopeBody.Cached === true),
+				Stale: (tmpEnvelopeBody.Stale === true) && !(tmpResponse.NotModified === true),
+				LagMS: (typeof(tmpEnvelopeBody.LagMS) === 'number') ? tmpEnvelopeBody.LagMS : 0,
+				AsOf: tmpEnvelopeBody.AsOf || null,
+				Version: tmpEnvelopeBody.Version || null,
+				Trigger: pTrigger || null
 			};
 		if (tmpResponse.Ok && tmpResponse.Body && (typeof(tmpResponse.Body) === 'object'))
 		{
 			pState.Envelope = tmpResponse.Body;
 			pState.Status = 'Ready';
 			pState.Error = null;
+			// M4: the entities this answer depends on (a change event of one of them refetches the group).
+			pState.DependsOn = Array.isArray(tmpResponse.Body.DependsOn) ? tmpResponse.Body.DependsOn.slice() : null;
 			this._rememberLabels(pState, pPrincipal);
+			this._scheduleStaleRefetch(pState);
 			if (pBody.Records)
 			{
 				pState.RecordsPage =
@@ -1448,7 +2241,8 @@ class PictProviderFacet extends libPictProvider
 	 * @param {string} pMethod - 'GET' | 'POST'
 	 * @param {string} pPath - upstream path, '/1.0/Facet/…'
 	 * @param {any} pBody - object (POST) or null
-	 * @param {{ GroupHash?: string|null, Kind?: string, Seq?: number, Signal?: any, Principal?: string|null }} pOptions
+	 * @param {{ GroupHash?: string|null, Kind?: string, Seq?: number, Signal?: any, Principal?: string|null, NoCache?: boolean, Trigger?: string|null }} pOptions
+	 *        NoCache (writes): no If-None-Match, nothing stored or dropped, and any 2xx is Ok; Trigger is logged
 	 * @param {(pError?: Error|null, pResponse?: Record<string, any>) => void} fCallback
 	 */
 	request(pDomain, pMethod, pPath, pBody, pOptions, fCallback)
@@ -1466,8 +2260,9 @@ class PictProviderFacet extends libPictProvider
 			tmpHeaders['Content-Type'] = 'application/json';
 		}
 		Object.assign(tmpHeaders, this._RequestHeaders() || {});
-		let tmpCacheKey = libFacetSelection.requestKey(pDomain, tmpPrincipal, tmpMethod, pPath, tmpHasBody ? pBody : null);
-		let tmpCached = this._Cache.get(tmpCacheKey);
+		let tmpNoCache = (tmpOptions.NoCache === true);
+		let tmpCacheKey = tmpNoCache ? null : libFacetSelection.requestKey(pDomain, tmpPrincipal, tmpMethod, pPath, tmpHasBody ? pBody : null);
+		let tmpCached = tmpNoCache ? null : this._Cache.get(tmpCacheKey);
 		if (tmpCached && tmpCached.ETag)
 		{
 			tmpHeaders['If-None-Match'] = tmpCached.ETag;
@@ -1496,7 +2291,8 @@ class PictProviderFacet extends libPictProvider
 				ResponseHeaders: {},
 				Response: null,
 				Summary: null,
-				Error: null
+				Error: null,
+				Trigger: tmpOptions.Trigger || null
 			};
 		tmpFacetState.Log.unshift(tmpExchange);
 		while (tmpFacetState.Log.length > this.options.MaxLog)
@@ -1571,7 +2367,16 @@ class PictProviderFacet extends libPictProvider
 						}
 					}
 					let tmpAnswer = { Ok: false, Status: tmpStatus, Headers: tmpResponseHeaders, Body: tmpParsed, NotModified: false, ElapsedMS: tmpElapsed, Error: null };
-					if (tmpStatus === 304)
+					if (tmpNoCache)
+					{
+						// A write: any 2xx is the answer; nothing goes into (or comes out of) the Version cache.
+						tmpAnswer.Ok = (tmpStatus >= 200) && (tmpStatus < 300) && !tmpParseFailed;
+						if (!tmpAnswer.Ok)
+						{
+							tmpAnswer.Error = (tmpParsed && tmpParsed.Error && (typeof(tmpParsed.Error) === 'object')) ? tmpParsed.Error : { Code: tmpParseFailed ? 'DEMO_BAD_RESPONSE' : `DEMO_HTTP_${tmpStatus}`, Status: tmpStatus, Message: (tmpParsed && (typeof(tmpParsed.Error) === 'string')) ? tmpParsed.Error : (pResult.Response.statusText || `HTTP ${tmpStatus}`) };
+						}
+					}
+					else if (tmpStatus === 304)
 					{
 						tmpAnswer.NotModified = true;
 						if (tmpCached)
@@ -1682,6 +2487,11 @@ class PictProviderFacet extends libPictProvider
 		{
 			return { Records: pBody.length };
 		}
+		if (pKind === 'Write')
+		{
+			let tmpIDField = Object.keys(pBody).find((pKey) => { return /^ID[A-Z]/.test(pKey) && (typeof(pBody[pKey]) === 'number'); }) || null;
+			return { Written: true, IDField: tmpIDField, ID: tmpIDField ? pBody[tmpIDField] : null, Count: (typeof(pBody.Count) === 'number') ? pBody.Count : null };
+		}
 		if ((pKind === 'Count') || ((typeof(pBody.Count) === 'number') && !pBody.Facets))
 		{
 			return { Count: pBody.Count };
@@ -1740,6 +2550,12 @@ class PictProviderFacet extends libPictProvider
 				Engine: pBody.Engine || null,
 				Exact: pBody.Exact,
 				Version: pBody.Version || null,
+				// M4 (internal-contracts §44.7)
+				Cached: (typeof(pBody.Cached) === 'boolean') ? pBody.Cached : null,
+				Stale: (typeof(pBody.Stale) === 'boolean') ? pBody.Stale : null,
+				LagMS: (typeof(pBody.LagMS) === 'number') ? pBody.LagMS : null,
+				AsOf: pBody.AsOf || null,
+				DependsOn: Array.isArray(pBody.DependsOn) ? pBody.DependsOn.slice() : null,
 				ModelVersion: pBody.ModelVersion || null,
 				ServerElapsedMS: pBody.ElapsedMS,
 				Total: pBody.Total,

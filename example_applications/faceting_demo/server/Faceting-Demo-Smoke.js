@@ -21,6 +21,23 @@
  *       (In both + Stored only == A, In both + Configured only == B, nothing negative), histogram coverage ==
  *       the server's Selected flags (and partial edge buckets after an interval change), the readout's range
  *       text, the Query body always asking for page 1
+ *   12. (M4) the client's live-change contract without a server: the SSE parser (chunk splits, CR / LF / CRLF,
+ *       comments, retry, ids), refetch selection by DependsOn, Seqs, backoff, Freshness (never key material), the
+ *       write allowlist (matchWrite / checkBody), and the stream proxy against a stub upstream (streamed, persona
+ *       resolved, headers filtered, upstream aborted when the browser leaves, refusals relayed)
+ *   13. (M4) writes: off-allowlist 404s, 401 without a persona, 400 / 413 bodies, the domains' write guards (403
+ *       for another tenant's rows and foreign keys, a colleague's document, a project the persona is not a member of;
+ *       across tenants and owners, also straight at a domain server), nothing refused ever happened
+ *   14. (M4) every "Make a change" write as user42 through the proxy: the write's 2xx; a generation event on user42's
+ *       stream within 2 s and none on user81's; the dependent refetch with its pre-write ETag (200, the exact delta,
+ *       Miss, Exact by MinSeq, Seq and DependsOn); a repeat Hit; an unaffected group's 304 NotModified; user43's
+ *       shared E2 answer Stale right after a write, then fresh; undo restores every count.  The event / cache checks
+ *       need the M4 service (Describe.Changes.Stream); without it they are skipped (DEMO_REQUIRE_LIVE=1 fails
+ *       instead) and the writes, deltas and undo still run
+ *   15. (M4) the browser's provider (Pict-Provider-Facet) run in node against the demo: Freshness on every Query,
+ *       one stream per domain, a write refetches the dependent group by itself (If-None-Match + MinSeq, trigger
+ *       logged), a group off screen is marked and refetched when shown, a 401 stream stops, closeChanges; with the
+ *       cache, a Stale answer is followed up until fresh
  *   + the demo host's own errors (unknown domain / route, method, body size, Host header, dot segments)
  *   + a stopped domain answers 502 DEMO_UPSTREAM_UNAVAILABLE (last: it stops the Bookstore domain)
  *
@@ -42,6 +59,9 @@ const libLookup = require('../source/providers/Facet-Lookup.js');
 const libPages = require('../source/pages/FacetDemo-Pages.js');
 const libServer = require('./Faceting-Demo-Server.js');
 const libPersonas = require('./Faceting-Demo-Personas.js');
+const libChanges = require('../source/providers/Facet-Changes.js');
+const libWrites = require('./Faceting-Demo-Writes.js');
+const libFront = require('./Faceting-Demo-Front.js');
 
 const SMOKE_PORT = 19301;
 const EXAMPLE_ROOT = libPath.resolve(__dirname, '..');
@@ -228,7 +248,8 @@ const browserPath = (pState, pKind, pBegin, pCap) =>
  */
 const query = (pState, pPersona, pHeaders) =>
 {
-	return call('POST', browserPath(pState, libSelection.KIND_QUERY), libSelection.buildQueryBody(pState), { Persona: pPersona, Headers: pHeaders });
+	// Byte-for-byte the browser's body: the provider adds DEFAULT_FRESHNESS (Bounded, 5 s) to every Query (M4).
+	return call('POST', browserPath(pState, libSelection.KIND_QUERY), libSelection.buildQueryBody(pState, { Freshness: libSelection.DEFAULT_FRESHNESS }), { Persona: pPersona, Headers: pHeaders });
 };
 
 /**
@@ -879,6 +900,761 @@ const checkClientLogic = async () =>
 	}
 };
 
+// ------------------------------------------------------------------------------------------------ M4: live changes
+
+/**
+ * Wait until a condition holds (polled every 20 ms), at most pTimeoutMS.
+ *
+ * @param {() => boolean} fCondition
+ * @param {number} pTimeoutMS
+ * @return {Promise<boolean>}
+ */
+const waitFor = async (fCondition, pTimeoutMS) =>
+{
+	let tmpUntil = Date.now() + pTimeoutMS;
+	while (Date.now() < tmpUntil)
+	{
+		if (fCondition())
+		{
+			return true;
+		}
+		await new Promise((fResolve) => { setTimeout(fResolve, 20); });
+	}
+	return !!fCondition();
+};
+
+const sleep = (pMS) => { return new Promise((fResolve) => { setTimeout(fResolve, pMS); }); };
+
+/**
+ * Open a change stream the way the browser provider does (fetch + Facet-Changes.createParser), through a front
+ * server.  Returns at once; Events fill in as they arrive.
+ *
+ * @param {number} pPort - the front server's port
+ * @param {string} pDomain
+ * @param {string|null} pPersona
+ * @param {Record<string, string>} [pHeaders]
+ * @return {Record<string, any>} { Events, Status, Headers, Body, Ended, Error, close() }
+ */
+const openStream = (pPort, pDomain, pPersona, pHeaders) =>
+{
+	let tmpController = new AbortController();
+	let tmpStream = { Domain: pDomain, Persona: pPersona, Events: [], Status: null, Headers: {}, Body: null, Ended: false, Error: null, Chunks: 0 };
+	let tmpParser = libChanges.createParser((pEvent) => { pEvent.At = Date.now(); tmpStream.Events.push(pEvent); });
+	let tmpHeaders = Object.assign({ 'Accept': 'text/event-stream' }, pHeaders || {});
+	if (typeof(pPersona) === 'string')
+	{
+		tmpHeaders[libPersonas.HEADER] = pPersona;
+	}
+	tmpStream.close = () => { try { tmpController.abort(); } catch (pError) { /* settled */ } };
+	fetch(`http://127.0.0.1:${pPort}/api/${pDomain}${libFront.CHANGES_PATH}`, { headers: tmpHeaders, signal: tmpController.signal })
+		.then(
+			async (pResponse) =>
+			{
+				tmpStream.Status = pResponse.status;
+				pResponse.headers.forEach((pValue, pKey) => { tmpStream.Headers[pKey] = pValue; });
+				if (!/text\/event-stream/.test(pResponse.headers.get('content-type') || ''))
+				{
+					let tmpText = await pResponse.text();
+					try
+					{
+						tmpStream.Body = JSON.parse(tmpText);
+					}
+					catch (pError)
+					{
+						tmpStream.Body = tmpText;
+					}
+					tmpStream.Ended = true;
+					return;
+				}
+				let tmpReader = pResponse.body.getReader();
+				let tmpDecoder = new TextDecoder('utf-8');
+				for (;;)
+				{
+					let tmpChunk = await tmpReader.read();
+					if (tmpChunk.done)
+					{
+						tmpParser.feed(tmpDecoder.decode());
+						tmpParser.flush();
+						break;
+					}
+					tmpStream.Chunks++;
+					tmpParser.feed(tmpDecoder.decode(tmpChunk.value, { stream: true }));
+				}
+				tmpStream.Ended = true;
+			})
+		.catch(
+			(pError) =>
+			{
+				tmpStream.Ended = true;
+				if (!pError || (pError.name !== 'AbortError'))
+				{
+					tmpStream.Error = pError;
+				}
+			});
+	return tmpStream;
+};
+
+/**
+ * The generation events of a stream for an entity, after a mark (an index into Events).
+ */
+const generationsSince = (pStream, pMark, pEntity) =>
+{
+	return pStream.Events.slice(pMark || 0).filter((pEvent) => { return (pEvent.Event === 'generation') && pEvent.Data && (pEvent.Data.Entity === pEntity); });
+};
+
+/**
+ * A listen()ed throwaway http server on an ephemeral loopback port.
+ */
+const listenEphemeral = (pServer) =>
+{
+	return new Promise((fResolve, fReject) => { pServer.once('error', fReject); pServer.listen(0, '127.0.0.1', () => { fResolve(pServer.address().port); }); });
+};
+
+const closeServer = (pServer) =>
+{
+	return new Promise((fResolve) => { if (typeof(pServer.closeAllConnections) === 'function') { pServer.closeAllConnections(); } pServer.close(() => { fResolve(); }); setTimeout(fResolve, 2000).unref(); });
+};
+
+const checkChangesContract = async () =>
+{
+	section('12. live changes: the client contract, the write allowlist, the stream proxy (no M4 server needed)');
+	// -- the SSE parser
+	let tmpEvents = [];
+	let tmpParser = libChanges.createParser((pEvent) => { tmpEvents.push(pEvent); });
+	tmpParser.feed('﻿retry: 2500\n\nevent: ready\ndata: {"NodeEpoch":"e:0000abcd","Seq":"e:0000abcd:0","Reset":false}\n\n');
+	checkEqual('parser: a retry-only block is no event; ready carries Retry and its JSON', tmpEvents.map((pEvent) => { return [ pEvent.Event, pEvent.Data ? pEvent.Data.NodeEpoch : null, pEvent.Retry ]; }), [ [ 'ready', 'e:0000abcd', 2500 ] ]);
+	tmpParser.feed('id: e:0000abcd:5\r');
+	tmpParser.feed('\nevent: generation\r\ndata: {"Entity":"Project",');
+	tmpParser.feed('"Generation":"g:1","Seq":"e:0000abcd:5"}\r');
+	checkEqual('parser: a CR at the end of a chunk ends the line, the event waits for its blank line', tmpEvents.length, 1);
+	tmpParser.feed('\n\r\n: hb\n\nevent: model\rdata: {"ModelVersion":"m:1"}\r\r');
+	checkEqual('parser: CRLF / CR line ends, a comment between events', tmpEvents.slice(1).map((pEvent) => { return [ pEvent.Event, pEvent.Data ? (pEvent.Data.Entity || pEvent.Data.ModelVersion) : null, pEvent.ID ]; }), [ [ 'generation', 'Project', 'e:0000abcd:5' ], [ 'model', 'm:1', 'e:0000abcd:5' ] ]);
+	tmpParser.feed('data: line one\ndata: line two\n\ndata\n\n');
+	checkEqual('parser: multi-line data joins with LF (not JSON: Data null); a bare data field is an empty event', tmpEvents.slice(3).map((pEvent) => { return [ pEvent.Event, pEvent.Raw, pEvent.Data ]; }), [ [ 'message', 'line one\nline two', null ], [ 'message', '', null ] ]);
+	tmpParser.feed('event: closed\ndata: {"Reason":"Shutdown"}');
+	tmpParser.flush();
+	checkEqual('parser: an unterminated block is discarded at the end of the stream', tmpEvents.length, 5);
+	// -- refetch selection, Seqs, backoff, freshness
+	let tmpGroups =
+		{
+			A: { Domain: 'D', Entity: 'Project', Status: 'Ready', DependsOn: [ 'Client', 'Project' ] },
+			B: { Domain: 'D', Entity: 'Document', Status: 'Ready', DependsOn: [ 'Document' ] },
+			C: { Domain: 'E', Entity: 'Project', Status: 'Ready', DependsOn: [ 'Project' ] },
+			Y: { Domain: 'D', Entity: 'Project', Status: 'Idle' },
+			Z: { Domain: 'D', Entity: 'Project', Status: 'Ready', Envelope: {} }
+		};
+	checkEqual('groupsToRefetch: by DependsOn; a group without DependsOn (once it asked) for any change; one domain only', libChanges.groupsToRefetch(tmpGroups, 'D', 'Project'), [ 'A', 'Z' ]);
+	checkEqual('groupsToRefetch: a label target', libChanges.groupsToRefetch(tmpGroups, 'D', 'Client'), [ 'A', 'Z' ]);
+	checkEqual('groupsToRefetch: an entity nothing depends on', libChanges.groupsToRefetch(tmpGroups, 'D', 'Task'), [ 'Z' ]);
+	checkEqual('laterSeq: same epoch by counter, another epoch wins, malformed never wins', [ libChanges.laterSeq('e:0000abcd:9', 'e:0000abcd:10'), libChanges.laterSeq('e:0000abcd:10', 'e:0000abcd:9'), libChanges.laterSeq('e:0000abcd:10', 'e:11112222:1'), libChanges.laterSeq('e:0000abcd:3', 'nonsense'), libChanges.laterSeq(null, null) ], [ 'e:0000abcd:10', 'e:0000abcd:10', 'e:11112222:1', 'e:0000abcd:3', null ]);
+	checkEqual('triggerText / shortSeq', [ libChanges.triggerText('Project', 'e:4f0c2b9e:15'), libChanges.shortSeq('e:x') ], [ 'Live update: Project @ e:…:15', '' ]);
+	checkEqual('backoffMS: the server\'s retry doubled, capped at 30 s (the full delay)', [ libChanges.backoffMS(0, undefined, 1), libChanges.backoffMS(1, undefined, 1), libChanges.backoffMS(2, 1000, 1), libChanges.backoffMS(9, undefined, 1) ], [ 3000, 6000, 4000, 30000 ]);
+	checkEqual('backoffMS: jittered to between half and all of it (streams cut together never reconnect together)', [ libChanges.backoffMS(0, undefined, 0), libChanges.backoffMS(9, undefined, 0.5) ], [ 1500, 22500 ]);
+	check('backoffMS: a random jitter stays within [ ½, 1 ]', [ 0, 1, 2, 3, 4, 5, 6, 7 ].every(() => { let tmpDelay = libChanges.backoffMS(1); return (tmpDelay >= 3000) && (tmpDelay <= 6000); }));
+	let tmpState = groupState('Documents');
+	checkEqual('buildQueryBody: no Freshness unless asked; DEFAULT_FRESHNESS is Bounded 5 s', [ Object.prototype.hasOwnProperty.call(libSelection.buildQueryBody(tmpState), 'Freshness'), libSelection.buildQueryBody(tmpState, { Freshness: libSelection.DEFAULT_FRESHNESS }).Freshness ], [ false, { Mode: 'Bounded', MaxLagMS: 5000 } ]);
+	checkEqual('freshnessBody: MinSeq rides on the base mode; no Seq + exact -> Exact', [ libSelection.freshnessBody(libSelection.DEFAULT_FRESHNESS, 'e:0000abcd:7'), libSelection.freshnessBody(libSelection.DEFAULT_FRESHNESS, null, true) ], [ { Mode: 'Bounded', MaxLagMS: 5000, MinSeq: 'e:0000abcd:7' }, { Mode: 'Exact', MaxLagMS: 5000 } ]);
+	let tmpBody = libSelection.buildQueryBody(tmpState);
+	check('requestKey: Freshness is not key material (an SSE refetch revalidates the cached answer)', libSelection.requestKey('ProjectTrack', 'user42', 'POST', '/q', tmpBody) === libSelection.requestKey('ProjectTrack', 'user42', 'POST', '/q', Object.assign({}, tmpBody, { Freshness: { Mode: 'Exact', MinSeq: 'e:0000abcd:1' } })));
+	// -- the write allowlist (pure)
+	let fMatch = (pDomain, pMethod, pPath) => { let tmpRoute = libWrites.matchWrite(pDomain, pMethod, pPath); return tmpRoute ? tmpRoute.Action : null; };
+	checkEqual('matchWrite: exactly the §47.4 rows', [ fMatch('ProjectTrack', 'PUT', '/1.0/Project'), fMatch('ProjectTrack', 'POST', '/1.0/Document'), fMatch('ProjectTrack', 'DELETE', '/1.0/Document/12'), fMatch('ProjectTrack', 'GET', '/1.0/Document/Undelete/12'), fMatch('LabTrack', 'PUT', '/1.0/LabForm'), fMatch('Bookstore', 'POST', '/1.0/Review'), fMatch('Bookstore', 'DELETE', '/1.0/Review/3') ], [ 'ProjectStatus', 'DocumentAdd', 'DocumentDelete', 'DocumentUndelete', 'LabFormStatus', 'ReviewAdd', 'ReviewDelete' ]);
+	checkEqual('matchWrite: anything else is not a write', [ fMatch('ProjectTrack', 'GET', '/1.0/Project'), fMatch('ProjectTrack', 'PUT', '/1.0/Project/5'), fMatch('ProjectTrack', 'DELETE', '/1.0/Project/5'), fMatch('ProjectTrack', 'PUT', '/1.0/Document'), fMatch('ProjectTrack', 'DELETE', '/1.0/Document/0'), fMatch('ProjectTrack', 'DELETE', '/1.0/Document/1/2'), fMatch('ProjectTrack', 'DELETE', '/1.0/Document/%31'), fMatch('Bookstore', 'PUT', '/1.0/Project'), fMatch('LabTrack', 'POST', '/1.0/LabForm'), fMatch('ProjectTrack', 'POST', '/1.0/Documents') ], [ null, null, null, null, null, null, null, null, null, null ]);
+	let fCheck = (pAction, pBody) => { let tmpError = libWrites.checkBody(libWrites.WRITE_ROUTES.find((pRoute) => { return pRoute.Action === pAction; }), pBody); return tmpError ? `${tmpError.Code}${(tmpError.Detail && tmpError.Detail.Field) ? `:${tmpError.Detail.Field}` : ''}` : null; };
+	checkEqual('checkBody: permitted keys, required keys, value shapes', [ fCheck('ProjectStatus', { IDProject: 3, Status: 'OnHold' }), fCheck('ProjectStatus', { IDProject: 3, Status: 'OnHold', Name: 'x' }), fCheck('ProjectStatus', { IDProject: 3, Status: 'Cancelled' }), fCheck('ProjectStatus', { IDProject: '3', Status: 'Done' }), fCheck('ProjectStatus', { IDProject: 3 }), fCheck('ProjectStatus', [ 1 ]), fCheck('DocumentAdd', { Title: 'T', Status: 'Draft', DocumentDate: '2026-03-15 00:00:00', IDFormType: 4, IDProject: 2 }), fCheck('DocumentAdd', { Title: 'T', Status: 'Draft', DocumentDate: '2026-13-45', IDFormType: 4, IDProject: 2 }), fCheck('DocumentAdd', { Title: 'T', Status: 'Draft', DocumentDate: '2026-03-15', IDFormType: 4, IDProject: 2, IDCustomer: 8 }), fCheck('LabFormStatus', { IDLabForm: 9, Status: 'Pending', CompletedDate: null }), fCheck('LabFormStatus', { IDLabForm: 9, Status: 'Complete', CompletedDate: '2026-10-09 12:00:00' }), fCheck('LabFormStatus', { IDLabForm: 9, Status: 'Pending', OwnerIDUser: 43 }), fCheck('ReviewAdd', { IDBook: 1, Rating: 5, Text: 'ok' }), fCheck('ReviewAdd', { IDBook: 1, Rating: 6 }), fCheck('DocumentDelete', undefined), fCheck('DocumentDelete', {}), fCheck('DocumentDelete', { IDDocument: 4 }) ], [ null, 'DEMO_WRITE_INVALID:Name', 'DEMO_WRITE_INVALID:Status', 'DEMO_WRITE_INVALID:IDProject', 'DEMO_WRITE_INVALID:Status', 'DEMO_WRITE_INVALID', null, 'DEMO_WRITE_INVALID:DocumentDate', 'DEMO_WRITE_INVALID:IDCustomer', null, null, 'DEMO_WRITE_INVALID:OwnerIDUser', null, 'DEMO_WRITE_INVALID:Rating', null, null, 'DEMO_WRITE_INVALID' ]);
+
+	// -- the stream proxy against a stub upstream: streamed (not buffered), persona resolved, headers filtered,
+	//    the upstream aborted when the browser goes away, refusals relayed whole
+	let tmpSeen = [];
+	let tmpOpen = [];
+	let tmpStub = libHttp.createServer(
+		(pRequest, pResponse) =>
+		{
+			let tmpRecord = { URL: pRequest.url, Method: pRequest.method, Headers: Object.assign({}, pRequest.headers), Closed: false };
+			tmpSeen.push(tmpRecord);
+			pRequest.on('close', () => { tmpRecord.Closed = true; });
+			if (pRequest.url !== libFront.CHANGES_PATH)
+			{
+				pResponse.writeHead(404, { 'Content-Type': 'application/json' });
+				return pResponse.end('{"Error":{"Code":"STUB_NOT_FOUND","Status":404,"Message":"no"}}');
+			}
+			if (!pRequest.headers['x-facet-test-tenant'])
+			{
+				pResponse.writeHead(401, { 'Content-Type': 'application/json' });
+				return pResponse.end(JSON.stringify({ Error: { Code: 'FACET_UNAUTHENTICATED', Status: 401, Message: 'Authentication required.' } }));
+			}
+			pResponse.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Retold-Facet-Contract': '1', 'Vary': 'Cookie, Authorization', 'Set-Cookie': 'leak=1' });
+			pResponse.write('retry: 2500\n\nevent: ready\ndata: {"NodeEpoch":"e:0000abcd","Seq":"e:0000abcd:0","CoalesceMS":250,"HeartbeatMS":15000,"Reset":false}\n\n');
+			tmpOpen.push(pResponse);
+		});
+	let tmpStubPort = await listenEphemeral(tmpStub);
+	let tmpFront = libFront.create({ DistRoot: _Demo.Options.DistRoot, Domains: { ProjectTrack: { baseURL: `http://127.0.0.1:${tmpStubPort}` } }, Status: () => { return {}; }, LoopbackOnly: true });
+	let tmpFrontPort = await listenEphemeral(tmpFront);
+	try
+	{
+		let tmpStream = openStream(tmpFrontPort, 'ProjectTrack', 'user42', { 'x-facet-test-tenant': '8', 'x-facet-test-user': '81', 'Last-Event-ID': 'e:0000abcd:3', 'If-None-Match': 'W/"x"', 'Cookie': 'a=b' });
+		let tmpReady = await waitFor(() => { return tmpStream.Events.length > 0; }, 2000);
+		check('stream proxy: the ready event arrives while the upstream stream is still open (streamed, not buffered)', tmpReady && (tmpOpen.length === 1) && !tmpStream.Ended, { Events: tmpStream.Events.length, Open: tmpOpen.length });
+		let tmpHeaders = tmpStream.Headers;
+		checkEqual('stream proxy: 200 text/event-stream, no-cache no-transform, no proxy buffering', [ tmpStream.Status, /text\/event-stream/.test(tmpHeaders['content-type'] || ''), tmpHeaders['cache-control'], tmpHeaders['x-accel-buffering'] ], [ 200, true, 'no-cache, no-transform', 'no' ]);
+		check('stream proxy: provenance headers, Vary on the DEMO header, x-retold-facet-* kept, nothing else (no Set-Cookie)', (tmpHeaders['x-retold-facet-demo-upstream'] === 'GET /1.0/Facet/Changes') && (tmpHeaders['x-retold-facet-demo-session'] === 'tenant=7; user=42') && /X-Retold-Facet-Demo-Principal/i.test(tmpHeaders['vary'] || '') && (tmpHeaders['x-retold-facet-contract'] === '1') && !tmpHeaders['set-cookie'], tmpHeaders);
+		let tmpUp = tmpSeen.find((pRecord) => { return pRecord.URL === libFront.CHANGES_PATH; }) || { Headers: {} };
+		checkEqual('stream proxy: upstream sees the persona\'s session (never the forged one), Accept and Last-Event-ID, and nothing else of the browser\'s', [ tmpUp.Headers['x-facet-test-tenant'], tmpUp.Headers['x-facet-test-user'], tmpUp.Headers['accept'], tmpUp.Headers['last-event-id'], tmpUp.Headers['if-none-match'] || null, tmpUp.Headers['cookie'] || null, tmpUp.Headers['x-retold-facet-demo-principal'] || null ], [ '7', '42', 'text/event-stream', 'e:0000abcd:3', null, null, null ]);
+		tmpOpen[0].write('id: e:0000abcd:4\nevent: generation\ndata: {"Entity":"Project","Generation":"g:aa","Seq":"e:0000abcd:4"}\n\n');
+		let tmpGot = await waitFor(() => { return tmpStream.Events.some((pEvent) => { return pEvent.Event === 'generation'; }); }, 1000);
+		check('stream proxy: a later event arrives on the open stream', tmpGot);
+		tmpStream.close();
+		let tmpAborted = await waitFor(() => { return tmpUp.Closed === true; }, 1500);
+		check('stream proxy: the browser going away aborts the upstream request', tmpAborted);
+		// The upstream ends the stream: the browser's response ends too.
+		let tmpSecond = openStream(tmpFrontPort, 'ProjectTrack', 'user43');
+		await waitFor(() => { return tmpOpen.length === 2; }, 2000);
+		tmpOpen[1].end();
+		check('stream proxy: the upstream ending ends the browser\'s stream', await waitFor(() => { return tmpSecond.Ended; }, 1500));
+		let tmpAnonymous = openStream(tmpFrontPort, 'ProjectTrack', 'anonymous');
+		await waitFor(() => { return tmpAnonymous.Ended; }, 2000);
+		checkEqual('stream proxy: an anonymous stream gets the service\'s 401 relayed whole', [ tmpAnonymous.Status, (tmpAnonymous.Body && tmpAnonymous.Body.Error) ? tmpAnonymous.Body.Error.Code : null, tmpAnonymous.Headers['x-retold-facet-demo-session'] ], [ 401, 'FACET_UNAUTHENTICATED', 'anonymous' ]);
+		let tmpPost = await fetch(`http://127.0.0.1:${tmpFrontPort}/api/ProjectTrack${libFront.CHANGES_PATH}`, { method: 'POST', headers: { [libPersonas.HEADER]: 'user42' } });
+		checkEqual('stream proxy: POST /1.0/Facet/Changes is 405', tmpPost.status, 405);
+		await tmpPost.text();
+	}
+	finally
+	{
+		tmpOpen.forEach((pResponse) => { try { pResponse.end(); } catch (pError) { /* gone */ } });
+		await closeServer(tmpFront);
+		await closeServer(tmpStub);
+	}
+	console.log('    parser, refetch selection, Seqs, freshness, write allowlist and the stream proxy (stub upstream) checked');
+};
+
+/**
+ * Bucket counts of a facet as { '<key>': count } (count > 0 only).
+ */
+const countsOf = (pEnvelope, pFacetKey) =>
+{
+	let tmpMap = {};
+	let tmpFacet = (pEnvelope && pEnvelope.Facets) ? pEnvelope.Facets[pFacetKey] : null;
+	((tmpFacet && Array.isArray(tmpFacet.Buckets)) ? tmpFacet.Buckets : []).forEach((pBucket) => { if (pBucket.Count > 0) { tmpMap[String(pBucket.Key)] = pBucket.Count; } });
+	return tmpMap;
+};
+
+/**
+ * A copy of a counts map with deltas applied (zero entries dropped).
+ */
+const withDeltas = (pCounts, pDeltas) =>
+{
+	let tmpMap = Object.assign({}, pCounts);
+	Object.keys(pDeltas).forEach((pKey) => { tmpMap[pKey] = (tmpMap[pKey] || 0) + pDeltas[pKey]; if (tmpMap[pKey] === 0) { delete tmpMap[pKey]; } });
+	return tmpMap;
+};
+
+/**
+ * Sorted entries of a counts map (for an order-free comparison).
+ */
+const entriesOf = (pCounts) =>
+{
+	return Object.keys(pCounts).sort().map((pKey) => { return [ pKey, pCounts[pKey] ]; });
+};
+
+const checkWriteGuards = async (pUser42) =>
+{
+	section('13. writes: the allowlist and the write guards (through the proxy, and straight at a domain server)');
+	let fCode = (pResponse) => { return (pResponse.Body && pResponse.Body.Error && (typeof(pResponse.Body.Error) === 'object')) ? pResponse.Body.Error.Code : null; };
+	let tmpProject = (pUser42.Projects.Body.Records || [])[0];
+	let tmpDocument = (pUser42.Documents.Body.Records || [])[0];
+	let tmpForms = await call('POST', '/api/LabTrack/1.0/Facet/LabForm/Records/0/1', { Clauses: [] }, { Persona: 'user42' });
+	let tmpForm = Array.isArray(tmpForms.Body) ? tmpForms.Body[0] : null;
+	check('fixtures for the guard checks: a tenant-7 project, document and one of user42\'s lab forms', !!tmpProject && !!tmpDocument && !!tmpForm);
+	let tmpNotListed = await call('PUT', '/api/ProjectTrack/1.0/Document', { IDDocument: tmpDocument.IDDocument, Title: 'x' }, { Persona: 'user42' });
+	checkEqual('a write that is not on the allowlist: 404 DEMO_NOT_FOUND', [ tmpNotListed.Status, fCode(tmpNotListed) ], [ 404, 'DEMO_NOT_FOUND' ]);
+	let tmpByID = await call('PUT', `/api/ProjectTrack/1.0/Project/${tmpProject.IDProject}`, { Status: 'Done' }, { Persona: 'user42' });
+	checkEqual('PUT /1.0/Project/<ID> (another route form): 404 DEMO_NOT_FOUND', [ tmpByID.Status, fCode(tmpByID) ], [ 404, 'DEMO_NOT_FOUND' ]);
+	let tmpQueryString = await call('PUT', '/api/ProjectTrack/1.0/Project?x=1', { IDProject: tmpProject.IDProject, Status: 'Done' }, { Persona: 'user42' });
+	checkEqual('an allowlisted write with a query string: 404 DEMO_NOT_FOUND', tmpQueryString.Status, 404);
+	let tmpAnonymous = await call('PUT', '/api/ProjectTrack/1.0/Project', { IDProject: tmpProject.IDProject, Status: 'Done' }, { Persona: 'anonymous' });
+	checkEqual('a write without a persona: 401 DEMO_UNAUTHENTICATED (never forwarded)', [ tmpAnonymous.Status, fCode(tmpAnonymous) ], [ 401, 'DEMO_UNAUTHENTICATED' ]);
+	let tmpExtra = await call('PUT', '/api/ProjectTrack/1.0/Project', { IDProject: tmpProject.IDProject, Status: 'Done', IDCustomer: 8 }, { Persona: 'user42' });
+	checkEqual('a body with another key: 400 DEMO_WRITE_INVALID naming it', [ tmpExtra.Status, fCode(tmpExtra), (tmpExtra.Body && tmpExtra.Body.Error && tmpExtra.Body.Error.Detail) ? tmpExtra.Body.Error.Detail.Field : null ], [ 400, 'DEMO_WRITE_INVALID', 'IDCustomer' ]);
+	let tmpText = await call('PUT', '/api/ProjectTrack/1.0/Project', 'IDProject=1', { Persona: 'user42', Headers: { 'Content-Type': 'text/plain' } });
+	checkEqual('a write body that is not JSON: 400 DEMO_WRITE_INVALID', [ tmpText.Status, fCode(tmpText) ], [ 400, 'DEMO_WRITE_INVALID' ]);
+	let tmpBig = await call('POST', '/api/Bookstore/1.0/Review', { IDBook: 1, Rating: 5, Text: 'x'.repeat(20 * 1024) }, { Persona: 'user42' });
+	checkEqual('a write body over 16 KiB: 413 DEMO_BODY_TOO_LARGE', [ tmpBig.Status, fCode(tmpBig) ], [ 413, 'DEMO_BODY_TOO_LARGE' ]);
+	let tmpOther = await call('PUT', '/api/ProjectTrack/1.0/Project', { IDProject: tmpProject.IDProject, Status: 'Done' }, { Persona: 'user81' });
+	checkEqual('user81 (tenant 8) changing a tenant-7 project: 403 DEMO_WRITE_REFUSED (the domain\'s write guard)', [ tmpOther.Status, fCode(tmpOther) ], [ 403, 'DEMO_WRITE_REFUSED' ]);
+	check('a refused write leaks neither the record nor the query', tmpOther.Text.indexOf('"Record"') < 0 && tmpOther.Text.indexOf('"Query"') < 0 && tmpOther.Text.indexOf(String(tmpProject.Name)) < 0, tmpOther.Text.slice(0, 200));
+	let tmpColleague = await call('PUT', '/api/LabTrack/1.0/LabForm', { IDLabForm: tmpForm ? tmpForm.IDLabForm : 1, Status: 'Complete', CompletedDate: '2026-10-09 12:00:00' }, { Persona: 'user43' });
+	checkEqual('user43 completing user42\'s lab form: 403 (owner-scoped)', [ tmpColleague.Status, fCode(tmpColleague) ], [ 403, 'DEMO_WRITE_REFUSED' ]);
+	let tmpDelete = await call('DELETE', `/api/ProjectTrack/1.0/Document/${tmpDocument.IDDocument}`, null, { Persona: 'user81' });
+	checkEqual('user81 deleting a tenant-7 document: 403', [ tmpDelete.Status, fCode(tmpDelete) ], [ 403, 'DEMO_WRITE_REFUSED' ]);
+	// Rows inside the persona's tenant but outside what it may touch (the UI's "my" scope), and foreign keys into
+	// another tenant's data: the guards read them (internal-contracts §47.5).
+	let tmpProjectDB = _Demo.Domains.ProjectTrack.db;
+	let tmpBookDB = _Demo.Domains.Bookstore.db;
+	let tmpForeignProject = tmpProjectDB.prepare('SELECT IDProject FROM Project WHERE IDCustomer <> 7 AND Deleted = 0 ORDER BY IDProject LIMIT 1').get();
+	let tmpForeignBook = tmpBookDB.prepare('SELECT IDBook FROM Book WHERE IDTenant <> 7 AND Deleted = 0 ORDER BY IDBook LIMIT 1').get();
+	let tmpNotMine = tmpProjectDB.prepare('SELECT d.IDDocument AS IDDocument FROM Document d WHERE d.IDCustomer = 7 AND d.Deleted = 0 AND (d.CreatingIDUser IS NULL OR d.CreatingIDUser <> 42) AND NOT EXISTS (SELECT 1 FROM ProjectMembership m WHERE m.IDProject = d.IDProject AND m.IDUser = 42 AND m.Active = 1 AND m.Deleted = 0) ORDER BY d.IDDocument LIMIT 1').get();
+	let tmpNotMyProject = tmpProjectDB.prepare('SELECT p.IDProject AS IDProject FROM Project p WHERE p.IDCustomer = 7 AND p.Deleted = 0 AND NOT EXISTS (SELECT 1 FROM ProjectMembership m WHERE m.IDProject = p.IDProject AND m.IDUser = 42 AND m.Active = 1 AND m.Deleted = 0) ORDER BY p.IDProject LIMIT 1').get();
+	check('fixtures for the ownership checks: another tenant\'s project and book, a tenant-7 document and project that are not user42\'s', !!tmpForeignProject && !!tmpForeignBook && !!tmpNotMine && !!tmpNotMyProject);
+	let tmpCrossProject = await call('POST', '/api/ProjectTrack/1.0/Document', { Title: 'Into another tenant', Status: 'Draft', DocumentDate: '2026-03-15', IDFormType: 4, IDProject: tmpForeignProject ? tmpForeignProject.IDProject : 1 }, { Persona: 'user42' });
+	checkEqual('user42 adding a document to another tenant\'s project: 403 (the guard reads the referenced row)', [ tmpCrossProject.Status, fCode(tmpCrossProject) ], [ 403, 'DEMO_WRITE_REFUSED' ]);
+	let tmpCrossBook = await call('POST', '/api/Bookstore/1.0/Review', { IDBook: tmpForeignBook ? tmpForeignBook.IDBook : 1, Rating: 5, Text: 'Into another tenant' }, { Persona: 'user42' });
+	checkEqual('user42 reviewing another tenant\'s book: 403', [ tmpCrossBook.Status, fCode(tmpCrossBook) ], [ 403, 'DEMO_WRITE_REFUSED' ]);
+	let tmpUnknownForm = await call('POST', '/api/ProjectTrack/1.0/Document', { Title: 'Unknown form', Status: 'Draft', DocumentDate: '2026-03-15', IDFormType: 999999, IDProject: tmpDocument.IDProject }, { Persona: 'user42' });
+	checkEqual('user42 naming a form type that does not exist (a shared lookup): 403', [ tmpUnknownForm.Status, fCode(tmpUnknownForm) ], [ 403, 'DEMO_WRITE_REFUSED' ]);
+	let tmpColleagueDocument = await call('DELETE', `/api/ProjectTrack/1.0/Document/${tmpNotMine ? tmpNotMine.IDDocument : 1}`, null, { Persona: 'user42' });
+	checkEqual('user42 deleting a colleague\'s document (not its writer, not a member of its project): 403', [ tmpColleagueDocument.Status, fCode(tmpColleagueDocument) ], [ 403, 'DEMO_WRITE_REFUSED' ]);
+	let tmpNotMemberProject = await call('PUT', '/api/ProjectTrack/1.0/Project', { IDProject: tmpNotMyProject ? tmpNotMyProject.IDProject : 1, Status: 'Done' }, { Persona: 'user42' });
+	checkEqual('user42 changing a tenant-7 project it is not a member of: 403', [ tmpNotMemberProject.Status, fCode(tmpNotMemberProject) ], [ 403, 'DEMO_WRITE_REFUSED' ]);
+	// Straight at the domain server (the proxy bypassed, as a loopback client could): the guard still refuses a body
+	// naming another tenant, and stamps the session's tenant otherwise.
+	let tmpHarness = _Demo.Domains.ProjectTrack;
+	let tmpDirect = await fetch(`${tmpHarness.baseURL}/1.0/Document`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-facet-test-tenant': '7', 'x-facet-test-user': '42' }, body: JSON.stringify({ Title: 'Cross-tenant', Status: 'Draft', DocumentDate: '2026-03-15 00:00:00', IDFormType: 4, IDProject: tmpDocument.IDProject, IDCustomer: 8 }) });
+	checkEqual('straight at the domain server: a Create naming another tenant is refused (403)', tmpDirect.status, 403);
+	await tmpDirect.text();
+	let tmpStatus = await call('GET', '/api/Demo/Status');
+	let tmpGuards = Object.keys(tmpStatus.Body.Domains || {}).map((pDomain) => { let tmpGuard = tmpStatus.Body.Domains[pDomain].WriteGuard; return [ pDomain, !!tmpGuard && tmpGuard.Installed && (tmpGuard.Entities > 0) ]; });
+	checkEqual('/api/Demo/Status: every domain has its write guards', tmpGuards, [ [ 'ProjectTrack', true ], [ 'LabTrack', true ], [ 'Bookstore', true ] ]);
+	check('/api/Demo/Status: the guards counted the refusals', (tmpStatus.Body.Domains.ProjectTrack.WriteGuard.Refused >= 3) && (tmpStatus.Body.Domains.LabTrack.WriteGuard.Refused >= 1), tmpStatus.Body.Domains.ProjectTrack.WriteGuard);
+	checkEqual('/api/Demo/Status: the write allowlist per domain', tmpStatus.Body.Domains.ProjectTrack.Writes, [ 'PUT /1.0/Project', 'POST /1.0/Document', 'DELETE /1.0/Document/<ID>', 'GET /1.0/Document/Undelete/<ID>' ]);
+	let tmpAfter = await query(groupState('Projects'), 'user42');
+	checkEqual('nothing the refused writes asked for happened (Projects still 6)', tmpAfter.Body ? tmpAfter.Body.Total : null, 6);
+};
+
+/**
+ * The live part of one "Make a change" action (§47.6): the write, the event on user42's stream and none on
+ * user81's, the dependent refetch (pre-write ETag, MinSeq) with its delta and a Miss, a repeat Hit, an unaffected
+ * group's 304 NotModified.  Returns { Event, Refetch } for the caller's own checks.
+ */
+const liveStep = async (pLive, pName, pDomain, pEntity, fWrite, pDependent, pUnaffected) =>
+{
+	let tmpMark42 = pLive.Stream ? pLive.User42[pDomain].Events.length : 0;
+	let tmpMark81 = pLive.Stream ? pLive.User81[pDomain].Events.length : 0;
+	let tmpWrite = await fWrite();
+	check(`${pName}: the write answers 2xx through the proxy`, (tmpWrite.Status >= 200) && (tmpWrite.Status < 300), [ tmpWrite.Status, tmpWrite.Body ]);
+	check(`${pName}: the write answer names the allowlisted action`, !!tmpWrite.Headers['x-retold-facet-demo-write'], tmpWrite.Headers);
+	let tmpEvent = null;
+	if (pLive.Stream)
+	{
+		let tmpStarted = Date.now();
+		let tmpArrived = await waitFor(() => { return generationsSince(pLive.User42[pDomain], tmpMark42, pEntity).length > 0; }, 2000);
+		let tmpEvents = generationsSince(pLive.User42[pDomain], tmpMark42, pEntity);
+		tmpEvent = tmpEvents.length ? tmpEvents[tmpEvents.length - 1] : null;
+		check(`${pName}: user42's stream gets a generation event for ${pEntity} within 2 s`, tmpArrived, { Events: pLive.User42[pDomain].Events.slice(tmpMark42).map((pEvent) => { return pEvent.Raw; }) });
+		if (tmpEvent)
+		{
+			checkEqual(`${pName}: the event carries only Entity, Generation and Seq`, Object.keys(tmpEvent.Data || {}).sort(), [ 'Entity', 'Generation', 'Seq' ]);
+			check(`${pName}: the event's Seq is well-formed, and no id line (events are never replayed)`, libChanges.SEQ_PATTERN.test(tmpEvent.Data.Seq) && !tmpEvent.ID && /^g:[0-9a-f]{12}$/.test(tmpEvent.Data.Generation), tmpEvent);
+			console.log(`    ${pName}: ${pEntity} event after ${tmpEvent.At - tmpStarted} ms (${tmpEvent.Data.Seq})`);
+		}
+		await sleep(350);
+		checkEqual(`${pName}: user81's stream (tenant 8) gets nothing for ${pEntity}`, generationsSince(pLive.User81[pDomain], tmpMark81, pEntity).length, 0);
+	}
+	let tmpSeq = (tmpEvent && tmpEvent.Data) ? tmpEvent.Data.Seq : null;
+	let tmpFreshness = libSelection.freshnessBody(libSelection.DEFAULT_FRESHNESS, tmpSeq);
+	let tmpRefetch = await call('POST', browserPath(pDependent.State, libSelection.KIND_QUERY), libSelection.buildQueryBody(pDependent.State, { Freshness: tmpFreshness }), { Persona: 'user42', Headers: { 'If-None-Match': pDependent.ETag } });
+	checkEqual(`${pName}: the dependent ${pDependent.State.Hash} refetch (pre-write ETag) answers 200`, tmpRefetch.Status, 200);
+	if (pLive.Wired)
+	{
+		check(`${pName}: the answer says it depends on ${pEntity}`, !!tmpRefetch.Body && Array.isArray(tmpRefetch.Body.DependsOn) && (tmpRefetch.Body.DependsOn.indexOf(pEntity) >= 0), tmpRefetch.Body ? tmpRefetch.Body.DependsOn : null);
+		if (tmpSeq)
+		{
+			check(`${pName}: Exact because of MinSeq (X-Retold-Facet-Freshness)`, /^Exact/.test(tmpRefetch.Headers['x-retold-facet-freshness'] || '') && /MinSeq/.test(tmpRefetch.Headers['x-retold-facet-freshness'] || ''), tmpRefetch.Headers['x-retold-facet-freshness']);
+			check(`${pName}: X-Retold-Facet-Seq covers the write`, !!libChanges.parseSeq(tmpRefetch.Headers['x-retold-facet-seq']) && (libChanges.laterSeq(tmpRefetch.Headers['x-retold-facet-seq'], tmpSeq) === tmpRefetch.Headers['x-retold-facet-seq']), [ tmpRefetch.Headers['x-retold-facet-seq'], tmpSeq ]);
+		}
+	}
+	if (pLive.Cache)
+	{
+		checkEqual(`${pName}: the refetch is computed (Miss)`, [ tmpRefetch.Headers['x-retold-facet-cache'], tmpRefetch.Body ? tmpRefetch.Body.Cached : null ], [ 'Miss', false ]);
+		let tmpRepeat = await query(pDependent.State, 'user42');
+		checkEqual(`${pName}: a repeat request answers Hit (Cached: true)`, [ tmpRepeat.Status, tmpRepeat.Headers['x-retold-facet-cache'], tmpRepeat.Body ? tmpRepeat.Body.Cached : null, tmpRepeat.Body ? tmpRepeat.Body.Total : null ], [ 200, 'Hit', true, tmpRefetch.Body ? tmpRefetch.Body.Total : null ]);
+		check(`${pName}: the ETag changed with the write and is stable on the repeat`, (tmpRefetch.Headers.etag !== pDependent.ETag) && (tmpRepeat.Headers.etag === tmpRefetch.Headers.etag), [ pDependent.ETag, tmpRefetch.Headers.etag, tmpRepeat.Headers.etag ]);
+	}
+	if (pUnaffected)
+	{
+		let tmpUnaffected = await call('POST', browserPath(pUnaffected.State, libSelection.KIND_QUERY), libSelection.buildQueryBody(pUnaffected.State, { Freshness: libSelection.DEFAULT_FRESHNESS }), { Persona: 'user42', Headers: { 'If-None-Match': pUnaffected.ETag } });
+		checkEqual(`${pName}: the unaffected ${pUnaffected.State.Hash} with its old ETag answers 304${pLive.Cache ? ' NotModified' : ''}`, [ tmpUnaffected.Status, pLive.Cache ? tmpUnaffected.Headers['x-retold-facet-cache'] : 'NotModified' ], [ 304, 'NotModified' ]);
+	}
+	return { Write: tmpWrite, Event: tmpEvent, Refetch: tmpRefetch };
+};
+
+/**
+ * One group's current answer as user42 (state, envelope, ETag).
+ */
+const snapshot = async (pGroup, pPersona) =>
+{
+	let tmpState = groupState(pGroup);
+	let tmpResponse = await query(tmpState, pPersona || 'user42');
+	return { State: tmpState, Response: tmpResponse, Envelope: tmpResponse.Body, ETag: tmpResponse.Headers.etag };
+};
+
+const checkLiveChanges = async () =>
+{
+	section('14. live changes (M4): every "Make a change" write as user42, its event, the refetch, the cache, undo');
+	// What this service offers, probed separately: the change stream, the result cache (X-Retold-Facet-Cache), and the
+	// wired pipeline (Describe's Changes block, DependsOn).  Each missing part skips its own checks with a note
+	// (DEMO_REQUIRE_LIVE=1: fails them instead); the writes, deltas and undo always run.
+	let tmpDescribe = await call('GET', '/api/ProjectTrack/1.0/Facet/Describe', null, { Persona: 'user42' });
+	let tmpChanges = (tmpDescribe.Body && tmpDescribe.Body.Changes) ? tmpDescribe.Body.Changes : null;
+	let tmpProbe = openStream(SMOKE_PORT, 'ProjectTrack', 'user42');
+	await waitFor(() => { return tmpProbe.Ended || tmpProbe.Events.some((pEvent) => { return pEvent.Event === 'ready'; }); }, 2000);
+	let tmpStreamUp = (tmpProbe.Status === 200) && tmpProbe.Events.some((pEvent) => { return pEvent.Event === 'ready'; });
+	tmpProbe.close();
+	let tmpProbeQuery = await query(groupState('Projects'), 'user42');
+	let tmpCacheHeader = tmpProbeQuery.Headers['x-retold-facet-cache'] || null;
+	let tmpLive = { Stream: tmpStreamUp, Cache: !!tmpCacheHeader && (tmpCacheHeader !== 'Off'), Wired: !!(tmpChanges && tmpChanges.Stream), User42: {}, User81: {} };
+	let fMissing = (pWhat, pDetail) =>
+	{
+		if (process.env.DEMO_REQUIRE_LIVE === '1')
+		{
+			check(`DEMO_REQUIRE_LIVE=1: ${pWhat}`, false, pDetail);
+			return;
+		}
+		let tmpMessage = `M4 ${pWhat} is not available yet (${pDetail}): its checks are skipped; the writes, deltas and undo still run`;
+		_Skipped.push(tmpMessage);
+		console.log(`    skipped: ${tmpMessage}`);
+	};
+	if (!tmpLive.Wired)
+	{
+		fMissing('Describe.Changes / DependsOn (the wired pipeline)', 'Describe has no Changes block');
+	}
+	else
+	{
+		check('Describe names the change stream and the intake', /\/Changes$/.test(tmpChanges.Stream) && (typeof(tmpChanges.Intake) === 'string') && (tmpChanges.Intake !== 'None'), tmpChanges);
+		check('Describe says the cache is on (the demo opts in)', !!tmpDescribe.Body.Cache && (tmpDescribe.Body.Cache.Enabled === true), tmpDescribe.Body.Cache);
+	}
+	if (!tmpLive.Cache)
+	{
+		fMissing('the result cache', `X-Retold-Facet-Cache: ${tmpCacheHeader || 'absent'}`);
+	}
+	if (!tmpLive.Stream)
+	{
+		fMissing('the change stream', `GET /1.0/Facet/Changes answered ${tmpProbe.Status}`);
+	}
+	else
+	{
+		// Let the server drop the probe (MaxPerPrincipal), then one stream per (persona, domain).
+		await sleep(150);
+		libServer.Domains.DOMAINS.forEach(
+			(pDomain) =>
+			{
+				tmpLive.User42[pDomain.Domain] = openStream(SMOKE_PORT, pDomain.Domain, 'user42');
+				tmpLive.User81[pDomain.Domain] = openStream(SMOKE_PORT, pDomain.Domain, 'user81');
+			});
+		let tmpReady = await waitFor(() => { return [ tmpLive.User42, tmpLive.User81 ].every((pSet) => { return Object.keys(pSet).every((pDomain) => { return pSet[pDomain].Events.some((pEvent) => { return pEvent.Event === 'ready'; }); }); }); }, 3000);
+		check('six streams (user42 and user81 x three domains) are open with a ready event', tmpReady, Object.keys(tmpLive.User42).map((pDomain) => { return [ pDomain, tmpLive.User42[pDomain].Status, tmpLive.User81[pDomain].Status, tmpLive.User42[pDomain].Body ]; }));
+		let tmpFirstReady = tmpLive.User42.ProjectTrack.Events.find((pEvent) => { return pEvent.Event === 'ready'; });
+		check('ready: { NodeEpoch, Seq, CoalesceMS, HeartbeatMS, Reset: false } and a retry', !!tmpFirstReady && /^e:[0-9a-f]{8}$/.test(tmpFirstReady.Data.NodeEpoch) && libChanges.SEQ_PATTERN.test(tmpFirstReady.Data.Seq) && (tmpFirstReady.Data.Reset === false) && (typeof(tmpFirstReady.Retry) === 'number'), tmpFirstReady);
+		checkEqual('stream headers through the proxy', [ tmpLive.User42.LabTrack.Status, /text\/event-stream/.test(tmpLive.User42.LabTrack.Headers['content-type'] || ''), tmpLive.User42.LabTrack.Headers['x-retold-facet-demo-session'] ], [ 200, true, 'tenant=7; user=42' ]);
+		let tmpAnonymous = openStream(SMOKE_PORT, 'Bookstore', 'anonymous');
+		await waitFor(() => { return tmpAnonymous.Ended; }, 2000);
+		checkEqual('an anonymous stream: 401 FACET_UNAUTHENTICATED', [ tmpAnonymous.Status, (tmpAnonymous.Body && tmpAnonymous.Body.Error) ? tmpAnonymous.Body.Error.Code : null ], [ 401, 'FACET_UNAUTHENTICATED' ]);
+	}
+	try
+	{
+		// ---- Projects for me: Active / At risk -> On hold, then Undo
+		let tmpProjects = await snapshot('Projects');
+		let tmpDocuments = await snapshot('Documents');
+		let tmpTarget = (tmpProjects.Envelope.Records || []).find((pRecord) => { return (pRecord.Status === 'Active') || (pRecord.Status === 'AtRisk'); });
+		check('Projects: a listed Active / At risk project to change', !!tmpTarget);
+		let tmpStatusBefore = countsOf(tmpProjects.Envelope, 'Status');
+		let tmpStep = await liveStep(tmpLive, 'Projects status -> OnHold', 'ProjectTrack', 'Project',
+			() => { return call('PUT', '/api/ProjectTrack/1.0/Project', { IDProject: tmpTarget.IDProject, Status: 'OnHold' }, { Persona: 'user42' }); },
+			tmpProjects, tmpDocuments);
+		checkEqual('Projects status -> OnHold: the write returns the updated row', tmpStep.Write.Body ? [ tmpStep.Write.Body.IDProject, tmpStep.Write.Body.Status ] : null, [ tmpTarget.IDProject, 'OnHold' ]);
+		let tmpDelta = {};
+		tmpDelta[tmpTarget.Status] = -1;
+		tmpDelta.OnHold = 1;
+		checkEqual('Projects status -> OnHold: Total 6 -> 5 (OnHold is not selected)', tmpStep.Refetch.Body ? tmpStep.Refetch.Body.Total : null, tmpProjects.Envelope.Total - 1);
+		checkEqual(`Projects status -> OnHold: Status counts ${tmpTarget.Status} -1, OnHold +1 (the Status card ignores its own selection)`, entriesOf(countsOf(tmpStep.Refetch.Body, 'Status')), entriesOf(withDeltas(tmpStatusBefore, tmpDelta)));
+		let tmpUndoProjects = await snapshot('Projects');
+		let tmpUndo = await liveStep(tmpLive, 'Projects undo', 'ProjectTrack', 'Project',
+			() => { return call('PUT', '/api/ProjectTrack/1.0/Project', { IDProject: tmpTarget.IDProject, Status: tmpTarget.Status }, { Persona: 'user42' }); },
+			tmpUndoProjects, null);
+		checkEqual('Projects undo: the totals are back (6, same Status counts)', [ tmpUndo.Refetch.Body ? tmpUndo.Refetch.Body.Total : null, entriesOf(countsOf(tmpUndo.Refetch.Body, 'Status')) ], [ tmpProjects.Envelope.Total, entriesOf(tmpStatusBefore) ]);
+		console.log(`    Projects: "${tmpTarget.Name}" ${tmpTarget.Status} -> OnHold: Total ${tmpProjects.Envelope.Total} -> ${tmpStep.Refetch.Body.Total}; undo -> ${tmpUndo.Refetch.Body.Total}`);
+
+		// ---- Documents by form type: add a Draft Form D document dated 2026-03-15; delete; undelete; delete
+		tmpDocuments = await snapshot('Documents');
+		tmpProjects = await snapshot('Projects');
+		let tmpProjectID = ((tmpDocuments.Envelope.Records || [])[0] || {}).IDProject;
+		let tmpMonthBefore = countsOf(tmpDocuments.Envelope, 'ByMonth');
+		let tmpDocStatusBefore = countsOf(tmpDocuments.Envelope, 'Status');
+		let tmpMarch = Object.keys(tmpMonthBefore).find((pKey) => { return /^2026-03-01/.test(pKey); }) || '2026-03-01 00:00:00';
+		let tmpAdd = await liveStep(tmpLive, 'Documents add', 'ProjectTrack', 'Document',
+			() => { return call('POST', '/api/ProjectTrack/1.0/Document', { Title: 'Smoke document', Status: 'Draft', DocumentDate: '2026-03-15 00:00:00', IDFormType: 4, IDProject: tmpProjectID }, { Persona: 'user42' }); },
+			tmpDocuments, tmpProjects);
+		let tmpDocumentID = tmpAdd.Write.Body ? tmpAdd.Write.Body.IDDocument : null;
+		check('Documents add: the new row is in tenant 7 (stamped by the guard), Draft, Form D', !!tmpAdd.Write.Body && (tmpAdd.Write.Body.IDCustomer === 7) && (tmpAdd.Write.Body.Status === 'Draft') && (tmpAdd.Write.Body.IDFormType === 4), tmpAdd.Write.Body);
+		let tmpMonthDelta = {};
+		tmpMonthDelta[tmpMarch] = 1;
+		checkEqual('Documents add: Total 41 -> 42, March +1, Draft +1', [ tmpAdd.Refetch.Body ? tmpAdd.Refetch.Body.Total : null, entriesOf(countsOf(tmpAdd.Refetch.Body, 'ByMonth')), entriesOf(countsOf(tmpAdd.Refetch.Body, 'Status')) ], [ tmpDocuments.Envelope.Total + 1, entriesOf(withDeltas(tmpMonthBefore, tmpMonthDelta)), entriesOf(withDeltas(tmpDocStatusBefore, { Draft: 1 })) ]);
+		// Delete it; user43 asks right away (Bounded, nothing of its own written): the E2 key is shared, so the answer
+		// computed for user42 a moment ago comes back Stale, then fresh once the background refresh stored it.
+		let tmpAfterAdd = await snapshot('Documents');
+		let tmpDelete = await call('DELETE', `/api/ProjectTrack/1.0/Document/${tmpDocumentID}`, null, { Persona: 'user42' });
+		checkEqual('Documents delete: 200 { Count: 1 }', [ tmpDelete.Status, tmpDelete.Body ? tmpDelete.Body.Count : null ], [ 200, 1 ]);
+		let tmpUser43 = await query(groupState('Documents'), 'user43');
+		if (tmpLive.Cache)
+		{
+			checkEqual('user43 right after user42\'s delete (Bounded): the shared E2 answer comes back Stale', [ tmpUser43.Status, tmpUser43.Headers['x-retold-facet-cache'], tmpUser43.Body ? tmpUser43.Body.Stale : null, tmpUser43.Body ? tmpUser43.Body.Exact : null, tmpUser43.Body ? tmpUser43.Body.Total : null ], [ 200, 'Stale', true, false, tmpAfterAdd.Envelope.Total ]);
+			check('user43 Stale: LagMS is the answer\'s age, within MaxLagMS', !!tmpUser43.Body && (tmpUser43.Body.LagMS > 0) && (tmpUser43.Body.LagMS <= 5000), tmpUser43.Body ? tmpUser43.Body.LagMS : null);
+			let tmpFresh = null;
+			await waitFor(() => { return false; }, 0);
+			for (let i = 0; i < 40; i++)
+			{
+				await sleep(75);
+				tmpFresh = await query(groupState('Documents'), 'user43');
+				if (tmpFresh.Body && (tmpFresh.Body.Stale === false))
+				{
+					break;
+				}
+			}
+			checkEqual('user43 a moment later: fresh (the background refresh ran), Total 41', [ tmpFresh.Body ? tmpFresh.Body.Stale : null, tmpFresh.Body ? tmpFresh.Body.Total : null, tmpFresh.Headers['x-retold-facet-cache'] ], [ false, tmpDocuments.Envelope.Total, 'Hit' ]);
+		}
+		else
+		{
+			checkEqual('user43 after user42\'s delete: Total 41', tmpUser43.Body ? tmpUser43.Body.Total : null, tmpDocuments.Envelope.Total);
+		}
+		let tmpUndeleteFrom = await snapshot('Documents');
+		checkEqual('Documents delete: user42 (read-your-writes) sees 41', tmpUndeleteFrom.Envelope.Total, tmpDocuments.Envelope.Total);
+		let tmpUndelete = await liveStep(tmpLive, 'Documents undelete', 'ProjectTrack', 'Document',
+			() => { return call('GET', `/api/ProjectTrack/1.0/Document/Undelete/${tmpDocumentID}`, null, { Persona: 'user42' }); },
+			tmpUndeleteFrom, null);
+		checkEqual('Documents undelete: 42 again', tmpUndelete.Refetch.Body ? tmpUndelete.Refetch.Body.Total : null, tmpDocuments.Envelope.Total + 1);
+		let tmpCleanup = await call('DELETE', `/api/ProjectTrack/1.0/Document/${tmpDocumentID}`, null, { Persona: 'user42' });
+		checkEqual('Documents: deleted again (the smoke leaves the counts as it found them)', tmpCleanup.Status, 200);
+		let tmpDocumentsAfter = await snapshot('Documents');
+		checkEqual('Documents: back to 41 with the same March and Status counts', [ tmpDocumentsAfter.Envelope.Total, entriesOf(countsOf(tmpDocumentsAfter.Envelope, 'ByMonth')), entriesOf(countsOf(tmpDocumentsAfter.Envelope, 'Status')) ], [ tmpDocuments.Envelope.Total, entriesOf(tmpMonthBefore), entriesOf(tmpDocStatusBefore) ]);
+		console.log(`    Documents: add #${tmpDocumentID} 41 -> ${tmpAdd.Refetch.Body.Total}; delete -> user43 ${tmpLive.Cache ? 'Stale then fresh' : tmpUser43.Body.Total}; undelete -> ${tmpUndelete.Refetch.Body.Total}; delete -> ${tmpDocumentsAfter.Envelope.Total}`);
+
+		// ---- Lab forms (A): complete one of my started forms; re-open it
+		let tmpLabA = await snapshot('LabFormsA');
+		let tmpRows = await allRows(groupState('LabFormsA'), 'user42');
+		let tmpFormsByIntake = await lookup('LabTrack', 'LabForm', 'IDMaterialIntake', libLookup.keysOf(tmpRows, 'IDMaterialIntake'), 'user42');
+		let tmpStartedRow = tmpRows.find((pRow) => { return (tmpFormsByIntake[String(pRow.IDMaterialIntake)] || []).some((pForm) => { return libSelection.sameKey(pForm.IDLabFormType, pRow.IDLabFormType) && (pForm.Status === 'Pending'); }); });
+		check('Lab forms: a Started work-list row with a Pending form of mine', !!tmpStartedRow);
+		let tmpFound = await call('POST', '/api/LabTrack/1.0/Facet/LabForm/Records/0/1', { Clauses: [ libSelection.lookupClause('IDMaterialIntake', [ tmpStartedRow.IDMaterialIntake ]), libSelection.lookupClause('IDLabFormType', [ tmpStartedRow.IDLabFormType ]), libSelection.lookupClause('Status', [ 'Pending' ]) ] }, { Persona: 'user42' });
+		let tmpForm = Array.isArray(tmpFound.Body) ? tmpFound.Body[0] : null;
+		check('Lab forms: POST …/1.0/Facet/LabForm/Records/0/1 finds it (mine: owner-scoped)', !!tmpForm && (tmpForm.OwnerIDUser === 42) && (tmpForm.Status === 'Pending'), tmpForm);
+		let tmpStartedBefore = countsOf(tmpLabA.Envelope, 'Started');
+		let tmpUnaffectedLab = await snapshot('Books');
+		let tmpComplete = await liveStep(tmpLive, 'Lab forms complete', 'LabTrack', 'LabForm',
+			() => { return call('PUT', '/api/LabTrack/1.0/LabForm', { IDLabForm: tmpForm.IDLabForm, Status: 'Complete', CompletedDate: '2026-10-09 12:00:00' }, { Persona: 'user42' }); },
+			tmpLabA, tmpUnaffectedLab);
+		checkEqual('Lab forms complete: the row leaves the work list (237 -> 236), Started -1', [ tmpComplete.Refetch.Body ? tmpComplete.Refetch.Body.Total : null, entriesOf(countsOf(tmpComplete.Refetch.Body, 'Started')) ], [ tmpLabA.Envelope.Total - 1, entriesOf(withDeltas(tmpStartedBefore, { 1: -1 })) ]);
+		let tmpReopenFrom = await snapshot('LabFormsA');
+		let tmpReopen = await liveStep(tmpLive, 'Lab forms re-open', 'LabTrack', 'LabForm',
+			() => { return call('PUT', '/api/LabTrack/1.0/LabForm', { IDLabForm: tmpForm.IDLabForm, Status: 'Pending', CompletedDate: null }, { Persona: 'user42' }); },
+			tmpReopenFrom, null);
+		checkEqual('Lab forms re-open: back to 237 with the same Started counts', [ tmpReopen.Refetch.Body ? tmpReopen.Refetch.Body.Total : null, entriesOf(countsOf(tmpReopen.Refetch.Body, 'Started')) ], [ tmpLabA.Envelope.Total, entriesOf(tmpStartedBefore) ]);
+		console.log(`    Lab forms: complete form #${tmpForm.IDLabForm} (intake #${tmpForm.IDMaterialIntake}) ${tmpLabA.Envelope.Total} -> ${tmpComplete.Refetch.Body.Total}; re-open -> ${tmpReopen.Refetch.Body.Total}`);
+
+		// ---- Bookstore explorer: a 5-star review on the first listed book; remove it
+		let tmpBooks = await snapshot('Books');
+		// The panel's rule: the first listed book that has no 5-star review yet (so the 5-star count moves).
+		let tmpListed = (tmpBooks.Envelope.Records || []);
+		let tmpReviews = await lookup('Bookstore', 'Review', 'IDBook', libLookup.keysOf(tmpListed, 'IDBook'), 'user42');
+		let tmpBook = tmpListed.find((pRow) => { return !(tmpReviews[String(pRow.IDBook)] || []).some((pReview) => { return Number(pReview.Rating) === 5; }); }) || tmpListed[0];
+		let tmpHadFive = (tmpReviews[String(tmpBook.IDBook)] || []).some((pReview) => { return Number(pReview.Rating) === 5; });
+		check('Bookstore: a listed book without a 5-star review', !tmpHadFive);
+		let tmpRatingBefore = countsOf(tmpBooks.Envelope, 'ReviewRating');
+		let tmpFiveStarBefore = countsOf(tmpBooks.Envelope, 'HasFiveStar');
+		let tmpUnaffectedBooks = await snapshot('Documents');
+		let tmpReview = await liveStep(tmpLive, 'Bookstore add review', 'Bookstore', 'Review',
+			() => { return call('POST', '/api/Bookstore/1.0/Review', { IDBook: tmpBook.IDBook, Rating: 5, Text: 'Five stars, from the smoke test.' }, { Persona: 'user42' }); },
+			tmpBooks, tmpUnaffectedBooks);
+		let tmpReviewID = tmpReview.Write.Body ? tmpReview.Write.Body.IDReview : null;
+		check('Bookstore add review: the new review is in tenant 7 (stamped by the guard)', !!tmpReview.Write.Body && (tmpReview.Write.Body.IDTenant === 7) && (tmpReview.Write.Body.Rating === 5), tmpReview.Write.Body);
+		let tmpFiveKeys = Object.keys(countsOf(tmpReview.Refetch.Body, 'HasFiveStar'));
+		checkEqual('Bookstore add review: Total unchanged, books with a 5-star rating +1', [ tmpReview.Refetch.Body ? tmpReview.Refetch.Body.Total : null, entriesOf(countsOf(tmpReview.Refetch.Body, 'ReviewRating')) ], [ tmpBooks.Envelope.Total, entriesOf(withDeltas(tmpRatingBefore, { 5: 1 })) ]);
+		check('Bookstore add review: the five-star split moved one book across', (Object.keys(tmpFiveStarBefore).length === 2) && (tmpFiveKeys.length === 2) && (JSON.stringify(entriesOf(countsOf(tmpReview.Refetch.Body, 'HasFiveStar'))) !== JSON.stringify(entriesOf(tmpFiveStarBefore))), [ tmpFiveStarBefore, countsOf(tmpReview.Refetch.Body, 'HasFiveStar') ]);
+		let tmpRemoveFrom = await snapshot('Books');
+		let tmpRemove = await liveStep(tmpLive, 'Bookstore remove review', 'Bookstore', 'Review',
+			() => { return call('DELETE', `/api/Bookstore/1.0/Review/${tmpReviewID}`, null, { Persona: 'user42' }); },
+			tmpRemoveFrom, null);
+		checkEqual('Bookstore remove review: the rating and five-star counts are back', [ entriesOf(countsOf(tmpRemove.Refetch.Body, 'ReviewRating')), entriesOf(countsOf(tmpRemove.Refetch.Body, 'HasFiveStar')) ], [ entriesOf(tmpRatingBefore), entriesOf(tmpFiveStarBefore) ]);
+		console.log(`    Bookstore: review #${tmpReviewID} on "${tmpBook.Title}" (had a 5-star: ${tmpHadFive}); removed`);
+
+		if (tmpLive.Stream)
+		{
+			let tmpAll = [];
+			[ tmpLive.User42, tmpLive.User81 ].forEach((pSet) => { Object.keys(pSet).forEach((pDomain) => { tmpAll = tmpAll.concat(pSet[pDomain].Events); }); });
+			check('every stream event is ready / generation / model / closed', tmpAll.every((pEvent) => { return libChanges.EVENT_TYPES.indexOf(pEvent.Event) >= 0; }), tmpAll.map((pEvent) => { return pEvent.Event; }));
+			checkEqual('user81 saw no generation of tenant 7\'s writes at all', [ 'ProjectTrack', 'LabTrack', 'Bookstore' ].map((pDomain) => { return tmpLive.User81[pDomain].Events.filter((pEvent) => { return pEvent.Event === 'generation'; }).length; }), [ 0, 0, 0 ]);
+		}
+		if (tmpLive.Wired)
+		{
+			let tmpStatus = await call('GET', '/api/Demo/Status');
+			let tmpLiveStats = tmpStatus.Body.Domains.ProjectTrack.Live || {};
+			check('/api/Demo/Status: each domain reports its Cache / Changes / SSE statistics', !!tmpLiveStats.Cache && (typeof(tmpLiveStats.Cache.Hits) === 'number') && (!tmpLive.Cache || (tmpLiveStats.Cache.Hits > 0)) && !!tmpLiveStats.Changes && !!tmpLiveStats.SSE, tmpLiveStats);
+			console.log(`    ProjectTrack cache: ${tmpLiveStats.Cache.Hits} hits, ${tmpLiveStats.Cache.Misses} misses, ${tmpLiveStats.Cache.StaleHits} stale; ${tmpLiveStats.SSE ? tmpLiveStats.SSE.Connections : '?'} SSE connection(s)`);
+		}
+	}
+	finally
+	{
+		if (tmpLive.Stream)
+		{
+			[ tmpLive.User42, tmpLive.User81 ].forEach((pSet) => { Object.keys(pSet).forEach((pDomain) => { pSet[pDomain].close(); }); });
+			await sleep(100);
+		}
+	}
+};
+
+/**
+ * The browser's provider (Pict-Provider-Facet), run in node against the demo: the same transport code, stream reader,
+ * coalescing and Version cache as the page.
+ *
+ * @param {string} pPersona
+ * @param {Record<string, any>} [pOptions] - provider options over the default configuration
+ * @return {Record<string, any>} the provider
+ */
+const nodeProvider = (pPersona, pOptions) =>
+{
+	let libPict = require('pict');
+	let libProviderFacet = require('../source/providers/Pict-Provider-Facet.js');
+	let tmpPict = new libPict({ Product: `FacetingDemoSmoke-${pPersona}`, LogStreams: [ { streamtype: 'console', level: 'fatal' } ] });
+	let tmpProvider = tmpPict.addProvider('Facet', Object.assign({}, libProviderFacet.default_configuration, { ChangesTransport: 'Fetch' }, pOptions || {}), libProviderFacet);
+	tmpProvider.setEndpointPrefix((pDomain) => { return `http://127.0.0.1:${SMOKE_PORT}/api/${pDomain}`; });
+	let tmpHeaders = {};
+	if (pPersona !== 'anonymous')
+	{
+		tmpHeaders[libPersonas.HEADER] = pPersona;
+	}
+	tmpProvider.setRequestHeaders(() => { return tmpHeaders; });
+	tmpProvider.setPrincipalKey(pPersona);
+	Object.keys(libPages.Groups).forEach((pGroupHash) => { tmpProvider.defineGroup(libPages.Groups[pGroupHash]); });
+	if (_BooksDescribed)
+	{
+		tmpProvider.applyDescribedFacets('Books', _BooksDescribed.Facets, _BooksDescribed.Panels, _BooksDescribed.Skipped);
+	}
+	return tmpProvider;
+};
+
+/**
+ * provider.refresh as a promise (resolves with the group state).
+ */
+const providerRefresh = (pProvider, pGroupHash) =>
+{
+	return new Promise((fResolve) => { pProvider.refresh(pGroupHash, () => { fResolve(pProvider.group(pGroupHash)); }); });
+};
+
+const providerWrite = (pProvider, pDomain, pMethod, pPath, pBody, pGroupHash) =>
+{
+	return new Promise((fResolve) => { pProvider.write(pDomain, pMethod, pPath, pBody, { GroupHash: pGroupHash }, (pError, pResponse) => { fResolve(pResponse); }); });
+};
+
+const checkProviderLive = async () =>
+{
+	section('15. the browser provider in node (M4): Freshness, the change stream, coalesced refetch, writes, stale follow-up');
+	let tmpProvider = nodeProvider('user42');
+	let tmpVisible = [ 'Documents', 'Projects' ];
+	tmpProvider.setGroupVisibility((pGroupHash) => { return tmpVisible.indexOf(pGroupHash) >= 0; });
+	await providerRefresh(tmpProvider, 'Documents');
+	await providerRefresh(tmpProvider, 'Projects');
+	await providerRefresh(tmpProvider, 'LabFormsA');
+	let tmpFirst = tmpProvider.exchanges().find((pExchange) => { return (pExchange.Kind === 'Query') && (pExchange.GroupHash === 'Documents'); });
+	checkEqual('every Query asks for Freshness Bounded 5 s (the browser\'s body)', tmpFirst ? tmpFirst.Body.Freshness : null, { Mode: 'Bounded', MaxLagMS: 5000 });
+	checkEqual('the provider answers as the page does (Documents 41, Projects 6, LabFormsA 237)', [ tmpProvider.group('Documents').Envelope.Total, tmpProvider.group('Projects').Envelope.Total, tmpProvider.group('LabFormsA').Envelope.Total ], [ 41, 6, 237 ]);
+	let tmpStream = tmpProvider.subscribeChanges('ProjectTrack');
+	await waitFor(() => { return [ 'Open', 'Closed' ].indexOf(tmpProvider.changeState('ProjectTrack').Status) >= 0 && ((tmpProvider.changeState('ProjectTrack').Status === 'Closed') || (tmpProvider.changeState('ProjectTrack').Events > 0)); }, 3000);
+	let tmpLive = (tmpProvider.changeState('ProjectTrack').Status === 'Open');
+	check('subscribeChanges keeps one stream per domain (a second call reuses it)', tmpProvider.subscribeChanges('ProjectTrack') === tmpProvider.changeState('ProjectTrack') && (tmpStream === tmpProvider.changeState('ProjectTrack')));
+	if (!tmpLive)
+	{
+		let tmpState = tmpProvider.changeState('ProjectTrack');
+		check('without a change stream the provider stops (Closed: Unavailable) instead of retrying', (tmpState.Status === 'Closed') && (tmpState.Reason === 'Unavailable'), tmpState);
+	}
+	else
+	{
+		check('the stream is Open after its ready event (fetch transport)', (tmpProvider.changeState('ProjectTrack').Transport === 'Fetch') && !!tmpProvider.changeState('ProjectTrack').NodeEpoch, tmpProvider.changeState('ProjectTrack'));
+	}
+	let tmpSeqBefore = tmpProvider.group('Documents').AnswerSeq;
+	let tmpProjectsBefore = tmpProvider.group('Projects').AnswerSeq;
+	let tmpLabBefore = tmpProvider.group('LabFormsA').AnswerSeq;
+	let tmpWrite = await providerWrite(tmpProvider, 'ProjectTrack', 'POST', '/1.0/Document', { Title: 'Provider document', Status: 'Draft', DocumentDate: '2026-03-15 00:00:00', IDFormType: 4, IDProject: tmpProvider.group('Documents').Envelope.Records[0].IDProject }, 'Documents');
+	check('provider.write: Ok, logged as a Write exchange, nothing cached', !!tmpWrite && tmpWrite.Ok && (tmpProvider.exchanges()[0].Kind === 'Write') && !tmpProvider.exchanges()[0].RequestHeaders['If-None-Match'], tmpWrite ? [ tmpWrite.Status, tmpWrite.Error ] : null);
+	let tmpDocumentID = (tmpWrite && tmpWrite.Body) ? tmpWrite.Body.IDDocument : null;
+	if (!tmpLive)
+	{
+		tmpProvider.refetchDomain('ProjectTrack', null, 'Refreshed after my write (no change stream)');
+	}
+	let tmpUpdated = await waitFor(() => { let tmpState = tmpProvider.group('Documents'); return (tmpState.AnswerSeq !== tmpSeqBefore) && (tmpState.Status === 'Ready'); }, 3000);
+	let tmpDocuments = tmpProvider.group('Documents');
+	check('the Documents group got a new answer with no request from the caller', tmpUpdated && (tmpDocuments.Envelope.Total === 42), [ tmpDocuments.AnswerSeq, tmpDocuments.Envelope ? tmpDocuments.Envelope.Total : null ]);
+	let tmpRefetch = tmpProvider.exchanges().find((pExchange) => { return (pExchange.Kind === 'Query') && (pExchange.GroupHash === 'Documents') && !pExchange.Pending; });
+	check('the refetch revalidated the cached answer (If-None-Match)', !!tmpRefetch && /^W\/"fv1:/.test(tmpRefetch.RequestHeaders['If-None-Match'] || ''), tmpRefetch ? tmpRefetch.RequestHeaders : null);
+	if (tmpLive)
+	{
+		let tmpEvent = tmpProvider.exchanges().find((pExchange) => { return (pExchange.Kind === 'Change') && (pExchange.Event === 'generation') && pExchange.Summary && (pExchange.Summary.Entity === 'Document'); });
+		check('the generation event is logged (Kind Change) with what it refetched', !!tmpEvent && (tmpEvent.Summary.Refetched.indexOf('Documents') >= 0), tmpEvent ? tmpEvent.Summary : null);
+		checkEqual('the refetch carried MinSeq = the event\'s Seq and its trigger', [ tmpRefetch.Body.Freshness.MinSeq, tmpRefetch.Trigger ], [ tmpEvent ? tmpEvent.Summary.Seq : null, libChanges.triggerText('Document', tmpEvent ? tmpEvent.Summary.Seq : null) ]);
+		checkEqual('the answer remembers the trigger and the server\'s Seq', [ tmpDocuments.LastAnswer.Trigger, !!libChanges.parseSeq(tmpDocuments.LastAnswer.Seq) || (tmpDocuments.LastAnswer.Seq === null) ], [ tmpRefetch.Trigger, true ]);
+		let tmpProjects = tmpProvider.group('Projects');
+		if (Array.isArray(tmpProjects.DependsOn))
+		{
+			check('Projects (DependsOn without Document) was not refetched', (tmpProjects.AnswerSeq === tmpProjectsBefore) && !tmpProjects.ChangedSince, [ tmpProjects.DependsOn, tmpProjects.AnswerSeq, tmpProjectsBefore ]);
+		}
+		else
+		{
+			check('Projects (no DependsOn from this server: any change may matter) was refetched', tmpProjects.AnswerSeq !== tmpProjectsBefore, [ tmpProjects.AnswerSeq, tmpProjectsBefore ]);
+		}
+		checkEqual('a group of another domain is untouched', tmpProvider.group('LabFormsA').AnswerSeq, tmpLabBefore);
+		// A group of this domain that is not on screen is marked, then refetched when it is shown (isStale).
+		tmpVisible = [ 'Projects' ];
+		let tmpDocumentsSeq = tmpProvider.group('Documents').AnswerSeq;
+		await providerWrite(tmpProvider, 'ProjectTrack', 'DELETE', `/1.0/Document/${tmpDocumentID}`, null, 'Documents');
+		let tmpMarked = await waitFor(() => { return !!tmpProvider.group('Documents').ChangedSince; }, 2000);
+		check('a change for a group that is not on screen marks it (ChangedSince) instead of refetching', tmpMarked && (tmpProvider.group('Documents').AnswerSeq === tmpDocumentsSeq) && tmpProvider.isStale('Documents'), tmpProvider.group('Documents').ChangedSince);
+		tmpVisible = [ 'Documents', 'Projects' ];
+		let tmpShown = await providerRefresh(tmpProvider, 'Documents');
+		let tmpShownExchange = tmpProvider.exchanges().find((pExchange) => { return (pExchange.Kind === 'Query') && (pExchange.GroupHash === 'Documents'); });
+		checkEqual('shown again: one refetch with the marked MinSeq, Total 41', [ tmpShown.Envelope.Total, !!libChanges.parseSeq(tmpShownExchange.Body.Freshness.MinSeq), tmpShown.ChangedSince ], [ 41, true, null ]);
+	}
+	else
+	{
+		await providerWrite(tmpProvider, 'ProjectTrack', 'DELETE', `/1.0/Document/${tmpDocumentID}`, null, 'Documents');
+		let tmpBack = await providerRefresh(tmpProvider, 'Documents');
+		checkEqual('Documents back to 41', tmpBack.Envelope.Total, 41);
+	}
+	tmpProvider.closeChanges();
+	checkEqual('closeChanges: the stream is Closed by the client and forgotten', [ tmpProvider.changeState('ProjectTrack').Status, tmpProvider.changeState('ProjectTrack').Reason, Object.keys(tmpProvider._Streams).length ], [ 'Closed', tmpLive ? 'Client' : 'Client', 0 ]);
+
+	if (tmpLive)
+	{
+		let tmpAnonymous = nodeProvider('anonymous');
+		tmpAnonymous.subscribeChanges('Bookstore');
+		await waitFor(() => { return tmpAnonymous.changeState('Bookstore').Status === 'Closed'; }, 2000);
+		checkEqual('an anonymous stream stops (no reconnect) on the 401', [ tmpAnonymous.changeState('Bookstore').Status, tmpAnonymous.changeState('Bookstore').Reason, tmpAnonymous.changeState('Bookstore').Reconnects ], [ 'Closed', 'Unauthenticated', 0 ]);
+		tmpAnonymous.closeChanges();
+	}
+
+	// Stale follow-up (needs the result cache): user43 reads E2 right after user42's write -> Stale, and the provider
+	// asks again on its own until the answer is fresh.
+	let tmpProbe = await query(groupState('Documents'), 'user42');
+	if (tmpProbe.Headers['x-retold-facet-cache'] && (tmpProbe.Headers['x-retold-facet-cache'] !== 'Off'))
+	{
+		let tmpColleague = nodeProvider('user43', { StaleRefetchMS: 200 });
+		let tmpAdded = await call('POST', '/api/ProjectTrack/1.0/Document', { Title: 'Stale probe', Status: 'Draft', DocumentDate: '2026-03-15 00:00:00', IDFormType: 4, IDProject: tmpDocuments.Envelope.Records[0].IDProject }, { Persona: 'user42' });
+		let tmpRefreshed = await query(groupState('Documents'), 'user42');
+		await call('DELETE', `/api/ProjectTrack/1.0/Document/${tmpAdded.Body.IDDocument}`, null, { Persona: 'user42' });
+		let tmpStale = await providerRefresh(tmpColleague, 'Documents');
+		checkEqual('user43\'s provider gets the Stale answer (and shows it as such)', [ tmpStale.LastAnswer.Stale, tmpStale.LastAnswer.CacheStatus, tmpStale.Envelope.Total ], [ true, 'Stale', tmpRefreshed.Body.Total ]);
+		let tmpFresh = await waitFor(() => { let tmpState = tmpColleague.group('Documents'); return (tmpState.Status === 'Ready') && tmpState.LastAnswer && (tmpState.LastAnswer.Stale === false); }, 3000);
+		let tmpFollow = tmpColleague.exchanges().find((pExchange) => { return (pExchange.Kind === 'Query') && (pExchange.GroupHash === 'Documents'); });
+		check('…and asks again by itself until it is fresh (41)', tmpFresh && (tmpColleague.group('Documents').Envelope.Total === 41) && /^Stale answer/.test(tmpFollow.Trigger || ''), [ tmpColleague.group('Documents').LastAnswer, tmpFollow.Trigger ]);
+	}
+	else if (process.env.DEMO_REQUIRE_LIVE === '1')
+	{
+		check('DEMO_REQUIRE_LIVE=1: the result cache (stale follow-up)', false);
+	}
+	else
+	{
+		_Skipped.push('the provider\'s stale follow-up: the result cache is not on yet');
+		console.log('    skipped: the stale follow-up (no result cache yet)');
+	}
+	console.log(`    provider in node: ${tmpLive ? 'stream Open, the Document write refetched Documents by itself' : 'no stream: refreshed directly'}; closed cleanly`);
+};
+
 const checkHostErrors = async () =>
 {
 	section('+ demo host errors');
@@ -969,6 +1745,10 @@ const run = () =>
 				await checkIntervalError();
 				await checkLoopbackGuard();
 				await checkClientLogic();
+				await checkChangesContract();
+				await checkWriteGuards(tmpUser42);
+				await checkLiveChanges();
+				await checkProviderLive();
 				await checkHostErrors();
 				await checkUpstreamDown();
 			})().then(

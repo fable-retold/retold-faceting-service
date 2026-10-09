@@ -697,6 +697,13 @@ class RetoldFacetingScopeCapture extends libFableServiceProviderBase
 	_finishCapture(pContext, pEntity, pQuery, pScopeMode, pBehavior, pBehaviorRan, pBefore, pMemoKey, pScopeGuard, pPostOperation, pState, fCallback)
 	{
 		let tmpAnalysis = this.analyze(pBefore, pQuery);
+		if (Array.isArray(pContext.ScopeLog))
+		{
+			// M4 (internal-contracts §42.8): what this execution's behavior appended, before any
+			// TenantOnly relaxation, for CacheKey.scopeDrift (a cacheable request arms the log after its
+			// probes; probes run with ScopeLog null).
+			pContext.ScopeLog.push({ Entity: pEntity, ScopeMode: pScopeMode, Appended: tmpAnalysis.Appended.slice() });
+		}
 		if (pPostOperation && pPostOperation.Opaque)
 		{
 			// A row filter / redaction in a read-side behavior is invisible here (06 §3.5): Opaque, and

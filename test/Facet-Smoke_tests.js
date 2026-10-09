@@ -49,7 +49,14 @@ const SERVICE_CLASSES = (
 		[ 'plan/Retold-Faceting-Binder.js', 'RetoldFacetingBinder' ],
 		[ 'engine/live/Retold-Faceting-PredicateCompiler.js', 'RetoldFacetingPredicateCompiler' ],
 		[ 'engine/live/Retold-Faceting-StagedKeys.js', 'RetoldFacetingStagedKeys' ],
-		[ 'engine/live/Retold-Faceting-CubeExecutor.js', 'RetoldFacetingCubeExecutor' ]
+		[ 'engine/live/Retold-Faceting-CubeExecutor.js', 'RetoldFacetingCubeExecutor' ],
+		// Milestone 4 (internal-contracts §38.3)
+		[ 'security/Retold-Faceting-CacheKey.js', 'RetoldFacetingCacheKey' ],
+		[ 'cache/Retold-Faceting-Generations.js', 'RetoldFacetingGenerations' ],
+		[ 'cache/Retold-Faceting-ResultCache.js', 'RetoldFacetingResultCache' ],
+		[ 'change/Retold-Faceting-ChangeIntake.js', 'RetoldFacetingChangeIntake' ],
+		[ 'change/Retold-Faceting-ReadYourWrites.js', 'RetoldFacetingReadYourWrites' ],
+		[ 'routes/Retold-Faceting-SSE.js', 'RetoldFacetingSSE' ]
 	]);
 
 // [ relative path, required export names ] for every pure / function module
@@ -67,7 +74,9 @@ const PURE_MODULES = (
 			'pathSignatureOf', 'pathStepsOf', 'SELECTION_ONLY_FOLDS' ] ],
 		[ 'contract/Facet-Contract-Errors.js', [ 'CODES', 'create', 'isFacetError', 'fromBehaviorError', 'toResponse', 'toEntry' ] ],
 		[ 'contract/Facet-Contract-Util.js', [ 'RESERVED_KEY_NAMES', 'isPlainObject', 'hasOwn', 'isPresent', 'toFiniteNumber', 'toCount', 'keyProblem', 'logSafe' ] ],
-		[ 'Retold-Faceting-Util.js', [ 'stripColumn', 'columnQualifier', 'normalizeScopeValue', 'isUnsetScopeValue', 'hasOwn' ] ],
+		[ 'Retold-Faceting-Util.js', [ 'stripColumn', 'columnQualifier', 'normalizeScopeValue', 'isUnsetScopeValue', 'hasOwn',
+			// M4 (internal-contracts §38.5)
+			'SEQ_PATTERN', 'NODE_EPOCH_PATTERN', 'parseSeq', 'formatSeq', 'principalKey' ] ],
 		[ 'engine/live/Shell-Templates-SQLite.js', [ 'Dialect', 'Templates', 'Expressions' ] ],
 		[ 'engine/live/Shell-Templates-PostgreSQL.js', [ 'Dialect', 'Templates', 'Expressions' ] ],
 		[ 'engine/live/Shell-Templates-MySQL.js', [ 'Dialect', 'Templates', 'Expressions' ] ],
@@ -333,6 +342,92 @@ suite
 						Expect(libReference.FOLD_KINDS).to.include.members([ 'ChildRollup', 'ExistsSplit' ]);
 						Expect(libReference.CROSS_ENTITY_DIMENSIONS).to.deep.equal([ 'Multi', 'ChildAgg', 'ExistsFlag' ]);
 						[ 'countBase', 'recordKeys', 'keys', 'listRows', 'evalPred' ].forEach((pName) => { Expect(libReference.prototype[pName], pName).to.be.a('function'); });
+					});
+
+				test('contracts (M4): the intake adapters, the Seq grammar, principalKey and Host.entityScopeColumns (internal-contracts §38.3, §38.5, §39.1, §41.2)',
+					() =>
+					{
+						let libUtil = require(SOURCE + 'Retold-Faceting-Util.js');
+						Expect(libUtil.parseSeq('e:4f0c2b9e:88121')).to.deep.equal({ Epoch: 'e:4f0c2b9e', N: 88121 });
+						Expect(libUtil.parseSeq('e:4f0c2b9e:0')).to.deep.equal({ Epoch: 'e:4f0c2b9e', N: 0 });
+						[ 'e:4f0c2b9e:01', 'e:4F0C2B9E:1', 'e:4f0c2b9:1', '4f0c2b9e:1', 'e:4f0c2b9e:-1', 'e:4f0c2b9e:1.5', 42, null ].forEach(
+							(pBad) =>
+							{
+								Expect(libUtil.parseSeq(pBad), String(pBad)).to.equal(null);
+							});
+						Expect(libUtil.formatSeq('e:4f0c2b9e', 7)).to.equal('e:4f0c2b9e:7');
+						// principalKey: stable across ResolvedAt / Source and value spellings, sensitive to identity.
+						let tmpKey = libUtil.principalKey({ Kind: 'User', IDUser: 42, IDCustomer: 7, ScopeValues: { IDCustomer: 7, OwnerIDUser: 42 }, RoleSetHash: '', ResolvedAt: 1, Source: 'InProcess' });
+						Expect(tmpKey).to.match(/^pk:[0-9a-f]{16}$/);
+						Expect(libUtil.principalKey({ Kind: 'User', IDUser: '42', IDCustomer: ' 7', ScopeValues: { OwnerIDUser: '42', IDCustomer: 7 }, RoleSetHash: '', ResolvedAt: 2, Source: 'Other' })).to.equal(tmpKey);
+						Expect(libUtil.principalKey({ Kind: 'User', IDUser: 43, IDCustomer: 7, ScopeValues: { IDCustomer: 7, OwnerIDUser: 43 }, RoleSetHash: '' })).to.not.equal(tmpKey);
+						Expect(libUtil.principalKey(null)).to.equal(null);
+
+						let libInterim = require(SOURCE + 'change/Change-Intake-Interim.js');
+						let libBus = require(SOURCE + 'change/Change-Intake-Bus.js');
+						Expect(libInterim).to.be.a('function');
+						Expect(libInterim.INTAKE_MARKER).to.equal(Symbol.for('RetoldFaceting.Intake'));
+						Expect(libBus).to.be.a('function');
+						let libIntake = require(SOURCE + 'change/Retold-Faceting-ChangeIntake.js');
+						let tmpIntake = new libIntake(newFable());
+						Expect(tmpIntake.NodeEpoch).to.match(libUtil.NODE_EPOCH_PATTERN);
+						Expect(tmpIntake.currentSeq()).to.equal(`${tmpIntake.NodeEpoch}:0`);
+						Expect(tmpIntake.Interim).to.be.an.instanceof(libInterim);
+						Expect(tmpIntake.Bus).to.be.an.instanceof(libBus);
+						Expect(tmpIntake.Bus.available()).to.equal(false);
+						Expect(Object.keys(libIntake.INTERIM_SLOTS)).to.deep.equal([ 'Create-PostOperation', 'Update-PostOperation', 'Delete-PostOperation', 'Undelete-PostOperation' ]);
+
+						let libGenerations = require(SOURCE + 'cache/Retold-Faceting-Generations.js');
+						Expect(libGenerations.tenantKey(7)).to.equal('7');
+						Expect(libGenerations.tenantKey('7', 42)).to.equal('7/42');
+						Expect(libGenerations.tenantKey(7, 0)).to.equal('7/*');
+						Expect(libGenerations.tenantKey(0)).to.equal('*');
+						Expect(libGenerations.tenantKey('*', 42)).to.equal('*');
+						Expect(libGenerations.tenantKey('#none', 42)).to.equal('#none/42');
+						Expect(libGenerations.tenantKey('a/b*|c')).to.equal('a%2Fb%2A%7Cc');
+						Expect(libGenerations.genKey('Project', '7', '#row')).to.equal('Project|7|#row');
+						Expect(new libGenerations(newFable()).BootEpoch).to.match(/^g:[0-9a-f]{8}$/);
+						let libCacheKey = require(SOURCE + 'security/Retold-Faceting-CacheKey.js');
+						Expect(new libCacheKey(newFable()).version('ck:x', 'g:y')).to.match(/^fv1:[0-9a-f]{16}$/);
+
+						// Host.entityScopeColumns (§41.2) over a tiny model.
+						let libHostBase = require(SOURCE + 'host/Retold-Faceting-Host-Base.js');
+						let fColumns = (pNames) => { return pNames.map((pName) => { return { Column: pName }; }); };
+						let tmpModel = { Tables:
+							{
+								Project: { Columns: fColumns([ 'IDProject', 'IDCustomer', 'Status', 'Deleted' ]) },
+								LabForm: { Columns: fColumns([ 'IDLabForm', 'IDCustomer', 'OwnerIDUser', 'Status', 'Deleted' ]) },
+								FormType: { Columns: fColumns([ 'IDFormType', 'Name' ]) }
+							} };
+						class TinyHost extends libHostBase
+						{
+							getModelSync()
+							{
+								return tmpModel;
+							}
+
+							getScopePolicy()
+							{
+								return this.buildScopePolicy(this.options.Scope, (pEntity, pColumn) => { return this.entityHasColumn(pEntity, pColumn); });
+							}
+
+							getDeleteColumn(pEntity)
+							{
+								return this.entityHasColumn(pEntity, 'Deleted') ? 'Deleted' : null;
+							}
+
+							getPrimaryKey(pEntity)
+							{
+								return `ID${pEntity}`;
+							}
+						}
+						let tmpHost = new TinyHost(newFable(), { Scope: { Policy: { Column: 'IDCustomer', SessionField: 'CustomerID', Exclude: [ 'FormType' ], PersonalScopes: { LabForm: { Column: 'OwnerIDUser', SessionField: 'UserID' } } } } });
+						Expect(tmpHost.entityScopeColumns('Project')).to.deep.include({ Kind: 'Tenant', TenantColumn: 'IDCustomer', OwnerColumn: null, DeleteColumn: 'Deleted', PrimaryKey: 'IDProject' });
+						Expect(tmpHost.entityScopeColumns('Project').RowColumns).to.deep.equal([ 'Deleted', 'IDCustomer', 'IDProject' ]);
+						Expect(tmpHost.entityScopeColumns('LabForm')).to.deep.include({ Kind: 'Personal', TenantColumn: 'IDCustomer', OwnerColumn: 'OwnerIDUser' });
+						Expect(tmpHost.entityScopeColumns('LabForm').RowColumns).to.deep.equal([ 'Deleted', 'IDCustomer', 'OwnerIDUser', 'IDLabForm' ]);
+						Expect(tmpHost.entityScopeColumns('FormType')).to.deep.include({ Kind: 'Global', TenantColumn: null, OwnerColumn: null, DeleteColumn: null });
+						Expect(new TinyHost(newFable(), {}).entityScopeColumns('Project').Kind).to.equal('Unscoped');
 					});
 
 				test('wiring (M2): the Records / Count / Keys pipeline, the Bind stage, the route handlers and the request modes (internal-contracts §22.6, §28)',

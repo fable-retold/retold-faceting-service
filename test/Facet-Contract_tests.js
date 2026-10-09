@@ -346,7 +346,8 @@ suite
 								Records: null,
 								Cap: null,
 								TimeoutMS: 10000,
-								Freshness: { Mode: 'Exact' },
+								// M4 (internal-contracts §44.2): the normalized Freshness.
+								Freshness: { Mode: 'Exact', MaxLagMS: 5000, MinSeq: null },
 								Warnings: []
 							});
 					});
@@ -375,7 +376,8 @@ suite
 						Expect(tmpRequest.FilterString).to.equal('FBV~PaymentMethod~EQ~Credit%20Card');
 						Expect(tmpRequest.Total).to.equal(false);
 						Expect(tmpRequest.TimeoutMS).to.equal(2500);
-						Expect(tmpRequest.Freshness).to.deep.equal({ Mode: 'Exact' });
+						// M4 (internal-contracts §44.2): Freshness is normalized and carried, no longer ignored.
+						Expect(tmpRequest.Freshness).to.deep.equal({ Mode: 'Fast', MaxLagMS: 50, MinSeq: null });
 						let tmpFacets = tmpRequest.Facets;
 						Expect(tmpFacets[0]).to.include({ Key: 'ByMonth', Fold: 'DateHistogram', Interval: 'week', TimeZone: 'UTC', EmptyBuckets: false, Chart: true });
 						Expect(tmpFacets[1]).to.include({ Buckets: 12, Mode: 'Nice', Missing: false, Exclude: 'None' });
@@ -628,6 +630,18 @@ suite
 						expectFacetError(() => { normalize(base({ TimeoutMS: '100' })); }, 'FACET_REQUEST_INVALID', { Field: 'TimeoutMS' });
 						Expect(normalize(base({ TimeoutMS: 999999 })).TimeoutMS).to.equal(10000);
 						expectFacetError(() => { normalize(base({ Freshness: 'Fast' })); }, 'FACET_REQUEST_INVALID', { Field: 'Freshness' });
+						// M4 (internal-contracts §44.2): Mode, MaxLagMS (0 … MaxAgeMS), MinSeq (SEQ_PATTERN).
+						expectFacetError(() => { normalize(base({ Freshness: { Mode: 'Eventually' } })); }, 'FACET_REQUEST_INVALID', { Field: 'Freshness.Mode' });
+						expectFacetError(() => { normalize(base({ Freshness: { MaxLagMS: -1 } })); }, 'FACET_REQUEST_INVALID', { Field: 'Freshness.MaxLagMS', Max: 600000 });
+						expectFacetError(() => { normalize(base({ Freshness: { MaxLagMS: 1.5 } })); }, 'FACET_REQUEST_INVALID', { Field: 'Freshness.MaxLagMS' });
+						expectFacetError(() => { normalize(base({ Freshness: { MaxLagMS: 600001 } })); }, 'FACET_REQUEST_INVALID', { Field: 'Freshness.MaxLagMS', Max: 600000 });
+						expectFacetError(() => { normalize(base({ Freshness: { MinSeq: 'e:nothex:12' } })); }, 'FACET_REQUEST_INVALID', { Field: 'Freshness.MinSeq' });
+						expectFacetError(() => { normalize(base({ Freshness: { MinSeq: 12 } })); }, 'FACET_REQUEST_INVALID', { Field: 'Freshness.MinSeq' });
+						Expect(normalize(base({ Freshness: { Mode: 'Bounded', MaxLagMS: 0, MinSeq: 'e:4f0c2b9e:12', Other: true } })).Freshness).to.deep.equal({ Mode: 'Bounded', MaxLagMS: 0, MinSeq: 'e:4f0c2b9e:12' });
+						Expect(normalize(base({ Freshness: {} })).Freshness).to.deep.equal({ Mode: 'Exact', MaxLagMS: 5000, MinSeq: null });
+						Expect(libFacetRequest.normalizeRequest('BookStoreSale', base({}), { Freshness: { DefaultMode: 'Fast', MaxLagMS: 250, MaxAgeMS: 1000 } }).Freshness).to.deep.equal({ Mode: 'Fast', MaxLagMS: 250, MinSeq: null });
+						expectFacetError(() => { libFacetRequest.normalizeRequest('BookStoreSale', base({ Freshness: { MaxLagMS: 1001 } }), { Freshness: { MaxAgeMS: 1000 } }); }, 'FACET_REQUEST_INVALID', { Field: 'Freshness.MaxLagMS', Max: 1000 });
+						Expect(libFacetRequest.FRESHNESS_MODES).to.deep.equal([ 'Exact', 'Bounded', 'Fast' ]);
 					});
 
 				test('L1 limits: depth, string bytes, array length, clause count, body size',

@@ -1,6 +1,6 @@
-# retold-faceting-service — Internal Contracts (Milestones 1 and 2)
+# retold-faceting-service — Internal Contracts (Milestones 1, 2 and 4)
 
-> **Part II (§19–§37) is the Milestone 2 contract and wins over Part I wherever they conflict** (§19.2 lists every Part I rule it changes). Part I (§0–§18) below is the Milestone 1 contract as built.
+> **Part III (§38–§52) is the Milestone 4 contract (change capture, generations, result cache, freshness, SSE) and wins over Parts I and II wherever they conflict** (§38.2 lists every earlier rule it changes). **Part II (§19–§37) is the Milestone 2 contract and wins over Part I wherever they conflict** (§19.2 lists every Part I rule it changes). Part I (§0–§18) below is the Milestone 1 contract as built. (Milestone 3 was the `example_applications/faceting_demo` app; its spec is that folder's `DEMO-SPEC.md`.)
 
 > **Binding.** This file is the interface spec Milestone 1 is coded against. Every shape, method name, field name and error code here is a contract between modules. If you need to change a contract, change it here first; never silently diverge. Where this file and the design set (`/Users/steven/Documents/retold-faceting-service-design/design/`) disagree, **this file wins for M1** and §16 lists every deliberate deviation.
 
@@ -988,7 +988,8 @@ See §9.3. The harness's `reference()` and the HTTP `facetQuery()` must produce 
 | 19190 | `debug/m1-smoke.js` (manual smoke run, not part of `npm test`) |
 | 19120–19129 | M2 test files (§32.4) |
 | 19196–19198 | `example_applications/faceting_demo` (registry tags of the ProjectTrack, LabTrack and Bookstore domains; binds ephemeral; the demo's own ports are 19300–19310: 19300 `npm start`, 19301 its `npm test`, 19302 its `npm run check:browser`) |
-| 19130–19189, 19192–19195, 19199 | free; claim one by adding a row here |
+| 19130–19137, 19192 | M4 test files and `debug/m4-smoke.js` (§49.2) |
+| 19138–19189, 19193–19195, 19199 | free; claim one by adding a row here |
 
 ---
 
@@ -2417,3 +2418,930 @@ M2 review (`.build-notes/m2-report.md` lists every finding):
 | `/Scope/:Scope/Keys` | use `/Keys` with `Scopes` |
 | `COLLATE "C"` on PostgreSQL string keys (Terms tie order on non-C databases) | the test databases are C-collated |
 | CostModel, row prechecks (`LIMITS_NOT_ENFORCED`) | not enforced |
+
+
+---
+
+# Part III — Milestone 4: change capture, generations, result cache, freshness, SSE
+
+> **Binding for M4.** Part III wins over Parts I and II wherever they conflict; §38.2 lists every earlier rule it changes. Where Part III and the design set disagree, Part III wins for M4 and §51 lists each deliberate deviation. The M4 builders are **A** (generations, cache key, result cache), **B** (change intake, `notify` / `notifyByFilter`, the Seq clock), **C** (SSE, read-your-writes), **D** (the demo client and demo host) and the **wiring** agent (service pipeline, routes, envelope, Version, end-to-end O7 tests); §50 is the ownership table. Design references: `05` (core), `04 §8.2–§8.3`, `02 §3.3 / §4.2 / §8 / §10 / §13`, `06 §7 / §11`, `09 §3.1 / §4.7 / §4.8 / §4.10 / §4.20 / §4.29`.
+
+---
+
+## 38. Overview, precedence, services, options, context
+
+### 38.1 What M4 adds
+
+| Area | Addition | Owner |
+|---|---|---|
+| Change intake | `RetoldFacetingChangeIntake`: one normalization + Seq + synchronous delivery point (`ingest`) for every change source; the **interim** source wraps each facetable entity's route-bound controller's behavior **dispatcher** (`BehaviorInjection.runBehavior`) and its DAL write methods (§40, as revised by the review §51.46); a **Bus** adapter seam for the upstream `MeadowChangeBus` (no-op until it exists); `notify` / `notifyByFilter` for raw writers; `covers` / `uncovered` (is every write of an entity seen?) | B |
+| Seq clock | `NodeEpoch` `'e:' + 8 hex` per process, `Seq = '<NodeEpoch>:<n>'` assigned in `ingest` (§39.1) | B |
+| Generations | `RetoldFacetingGenerations`: tick-stamped counters per `(Entity, TenantKey, Column \| '#row' \| '#all' \| '#cols')`, owner-qualified tenant keys, `'*'`, `'#any'`, eviction floors, GenVector (§41) | A |
+| Cache key | `RetoldFacetingCacheKey`: the cache DepSet (pivot, hops, label targets), per-entity scope probes, cacheability, key material, dependencies → GenVector, Version (§42) | A |
+| Result cache | `RetoldFacetingResultCache`: own LRU bounded by entries and bytes, Freshness `Exact` / `Bounded` / `Fast`, single-flight background refresh, metrics (§43) | A |
+| Pipeline | Freshness stage, Cache stage (304 without executing, hit, stale-while-revalidate), Store; generation Version / ETag; envelope `Cached` / `Stale` / `LagMS` / `AsOf` / `DependsOn`; `X-Retold-Facet-Seq` / `-Cache` / `-Freshness` headers (§44) | wiring |
+| Read-your-writes | `RetoldFacetingReadYourWrites`: last write Seq per principal; `Bounded` / `Fast` upgraded to `Exact` for `ReadYourWritesMS` after the principal's own write, and whenever `MinSeq` is sent (§45) | C |
+| SSE | `RetoldFacetingSSE`: `GET /1.0/Facet/Changes`, authenticated principals only, events `{ Entity, Generation, Seq }` for tenants / owners the principal can see, coalesced per entity, heartbeat, connection limits, clean shutdown (§46) | C |
+| Demo | provider subscribe + coalesced refetch, inspector Cached / Stale / Version, a "Make a change" panel per page writing through the stock CRUD routes as the demo principal (§47) | D |
+
+### 38.2 Earlier rules changed by Part III
+
+| Earlier | Rule there | M4 rule |
+|---|---|---|
+| §2.1 / §19.2 pipeline | Principal → Shape → Gate → Bind → Filter → Plan → Execute → Records → Post | Principal → Shape → **Freshness** → Gate → Bind → Filter → Plan → **Cache** → Execute → Records → Post → **Store** (§44.1). Records / Count / Keys are unchanged (never cached) |
+| §2.2 / §19.5 context | | + `Freshness`, `Cache`, `IfNoneMatch`, `CacheRefresh` (§38.6) |
+| §3 `Freshness` | accepted and ignored (`{ Mode: 'Exact' }`) | normalized: `{ Mode, MaxLagMS, MinSeq }` (§44.2) |
+| §10.1 / §10.2 | `Cached: false, Stale: false, LagMS: 0` always | set by the cache paths, envelope and every FacetResult (§44.4); the envelope gains `DependsOn` (§44.7) |
+| §10.5 / §18.5 / §30.2 Version | digest of the computed representation (gap G3) | the **generation Version** `hash(Key, GenVector)` for answers that are cacheable end to end while `Cache.Enabled`; the digest form otherwise (§44.5) |
+| §18.1 / §28.5 `pMeta` | | + `Cache`, `Seq`, `Freshness`, `ProbeRuns`, `NotModified` (§44.9) |
+| §17 / §37 seams | ResultCache / Generations / ChangeIntake / SSE stubbed | implemented (Interim + notify; Bus is a seam) |
+| §0 conventions | services, pure modules | + **intake adapters** (`change/Change-Intake-*.js`): plain classes owned and constructed by the ChangeIntake service, never registered on fable (§38.3) |
+| §12.1 `Host.installChangeIntake` | no-op seam | still a no-op: the ChangeIntake service installs itself through `Host.getRouteBoundController` (§40.1); `Host.entityScopeColumns` is new (§38.5) |
+| §14.4 / §32.4 ports | | + §49.2 |
+
+Everything earlier that is not listed here still holds. In particular: a `Records` / `Count` / `Keys` request is always Live and executes (D-38), and the Reference engine (`ForceEngine`) never reads or writes the cache.
+
+### 38.3 New files and services
+
+| File | Export | Owner |
+|---|---|---|
+| `source/cache/Retold-Faceting-Generations.js` | service `RetoldFacetingGenerations` (+ statics `tenantKey`, `genKey`, `encodePart`, `ROW`, `ALL`, `COLS`, `ANY`, `GLOBAL`, `NO_TENANT`; `tenantKey` / `genKey` / `encodePart` are implemented in the skeleton and pinned by the smoke test) | A |
+| `source/cache/Retold-Faceting-ResultCache.js` | service `RetoldFacetingResultCache` | A |
+| `source/security/Retold-Faceting-CacheKey.js` | service `RetoldFacetingCacheKey` (+ statics `KEY_VERSION`, `UNCACHEABLE_REASONS`) | A |
+| `source/change/Retold-Faceting-ChangeIntake.js` | service `RetoldFacetingChangeIntake` (+ statics `OPERATIONS`, `SOURCES`, `INTERIM_SLOTS`) | B |
+| `source/change/Change-Intake-Interim.js` | class `ChangeIntakeInterim` (adapter; `new (pIntake)`) | B |
+| `source/change/Change-Intake-Bus.js` | class `ChangeIntakeBus` (adapter; `new (pIntake)`) | B |
+| `source/change/Retold-Faceting-ReadYourWrites.js` | service `RetoldFacetingReadYourWrites` | C |
+| `source/routes/Retold-Faceting-SSE.js` | service `RetoldFacetingSSE` (+ statics `EVENT_TYPES`) | C |
+
+Every service is registered in `SUB_SERVICES` (skeletons exist and construct; the contracts pass registered them after `RetoldFacetingLabelResolver`, in this order: CacheKey, Generations, ResultCache, ChangeIntake, ReadYourWrites, then Router, Routes, then SSE). A builder may add a further service only by adding it to `SUB_SERVICES` and to `test/Facet-Smoke_tests.js` in the same change.
+
+Services that need the host read it as `this.fable.RetoldFacetingService.Host` (null before `attach`: then every entity is `Unscoped` and nothing is installed). Services never `require` a sibling service; the adapters receive their owning ChangeIntake and reach everything through `pIntake.fable`.
+
+### 38.4 Options (M4)
+
+```javascript
+Cache:
+{
+	Enabled: false,                  // M4: opt-in (§51.1). true = result cache + generation Version + 304 without executing;
+	                                 // correct only while every writer runs in THIS process (§51.50)
+	ExposeStatus: false,             // review: X-Retold-Facet-Cache / -Freshness headers + a truthful Cached on another principal's hit (§51.57)
+	MaxConcurrentRefreshes: 4,       // review: background refreshes in flight at once (§51.56)
+	MaxBytes: 67108864, MaxEntries: 5000, MaxEntryBytes: 4194304, MaxAgeMS: 600000,
+	GenerationGranularity: 'Column' | 'Entity',
+	MaxGenerationKeys: 'Auto',       // 'Auto' → clamp(MaxBytes / 320, 4096, 200000) (review §51.53)
+	MaxGenerationFloors: 50000,
+	OpaqueTTLMS: 0,                  // ignored in M4: Opaque answers are never cached (§42.3)
+	NowBucketMS, AsOfBucketMS, AgentlessTTLMS   // unchanged / unused in M4
+},
+Freshness: { DefaultMode: 'Exact', MaxLagMS: 5000, ReadYourWritesMS: 10000, ReadYourWritesMaxPrincipals: 10000,
+             SeqHeader: 'Auto' /* true | false | 'Auto' = only without a scope policy (§51.58) */, … },
+ChangeCapture: { Intake: 'Auto' | 'Interim' | 'Bus' | 'None', NotifySettleMS: 1000,
+                 NotifyManaged: [] | true,      // review: entities whose every write the host notify()s (§51.48)
+                 RequireNotifyTenants: false,   // review: refuse a notify of a tenant-scoped entity naming no tenant (§51.64)
+                 MaxEventIDs: 10000, MaxEventOwners: 1000 },   // review: beyond them ids / owners become "unknown" (§51.65)
+SSE: { Enabled: 'Auto' /* true | false | 'Auto' = only with a scope policy (§51.59) */, AllowedOrigins: [],
+       CoalesceMS: 250, HeartbeatMS: 15000, GlobalTickMS: 60000, MaxPerPrincipal: 2, MaxPerTenant: 200,
+       MaxConnections: 1000, RevalidateMS: 300000, RetryMS: 3000, IncludeSeq: 'Auto' /* as SeqHeader */ }
+```
+
+`Scope.DependsOn` stays reserved (accepted, ignored in M4, §52). Every key above exists in `DEFAULTS` (added by the contracts pass); its owner enforces it.
+
+### 38.5 Shared helpers (implemented by the contracts pass; builders use, never fork)
+
+| Helper | Where | Rule |
+|---|---|---|
+| `SEQ_PATTERN`, `NODE_EPOCH_PATTERN`, `parseSeq(pSeq)` → `{ Epoch, N }` \| null, `formatSeq(pEpoch, pN)` | `source/Retold-Faceting-Util.js` | the Seq grammar of §39.1 |
+| `principalKey(pPrincipal)` → `'pk:' + 16 hex` | `source/Retold-Faceting-Util.js` | sha256 over `[ Kind, IDUser, IDCustomer, ScopeValues (sorted, normalized), RoleSetHash ]`; never SessionID / ResolvedAt / Source. The principal of a write (`Host.buildPrincipal(pRequestState.SessionData, pRequest)`) and of a read of the same session get the same key |
+| `Host.entityScopeColumns(pEntity)` | `source/host/Retold-Faceting-Host-Base.js` | §41.2 (Kind, TenantColumn, OwnerColumn, RequiredColumns, DeleteColumn, PrimaryKey, RowColumns) |
+| `normalizeScopeValue`, `isUnsetScopeValue` | `Retold-Faceting-Util.js` (M1) | every tenant / owner value is normalized with them before it becomes a key |
+
+### 38.6 Request context additions (`newContext`)
+
+```javascript
+{
+	…M2 fields,
+	Freshness: { Mode: 'Exact', MaxLagMS: 5000, MinSeq: null, Requested: 'Bounded', Upgrade: 'ReadYourWrites' | 'MinSeq' | null },   // §45 (set by the Freshness stage)
+	IfNoneMatch: 'W/"fv1:…"' | null,    // pRequest.headers['if-none-match'] (the Cache stage compares it, §44.5)
+	CacheRefresh: false,               // true only for the background refresh (pInternalOptions.CacheRefresh; never from a client)
+	Cache:                             // set by the Cache stage (§44.3); { Status: 'Off' } when Cache.Enabled is false
+	{
+		Status: 'Off' | 'Bypass' | 'Miss' | 'Hit' | 'Stale' | 'NotModified' | 'Refresh',
+		Reason: null | '<§42.3 reason>',
+		Cacheable: false,
+		Key: 'ck:…', Short: 'ck:…12', Version: 'fv1:…',
+		Deps: <§42.1 result>, Probe: <§42.2 result>, Dependencies: [ … ], GenVector: { Hash, Entries, MaxTick },
+		SeqAtCompute: 'e:…:n', Entry: <§43.1 entry> | null, LagMS: 0,
+		ProbeRuns: 0, VectorAt: <Date.now() when the GenVector was read>, Coalesced: false   // as built (wiring)
+	},
+	// As built (wiring):
+	CacheDeps: <§42.1 result>,          // computed for EVERY Query (cache on or off): the envelope's DependsOn
+	SeqAtCompute: 'e:…:n',             // read in newContext (Records / Count / Keys) and again at the Cache stage (Query)
+	PinnedNow: '2026-10-08T12:00:00.000Z' | null,   // the in-process Now when pinned (key material, §42.4)
+	InternalOptions: { Now?, PlanForm? },           // what a background refresh repeats (never ForceEngine)
+	RequestBody: <the Query body>        // kept only for the background refresh of a Stale serve; never key material
+}
+```
+
+---
+
+## 39. ChangeEvent and the Seq clock (B)
+
+### 39.1 NodeEpoch and Seq
+
+- `NodeEpoch` = `'e:' + 8 lowercase hex`, minted once when the ChangeIntake service is constructed (first 8 hex of sha256 of `fable.getUUID()` and the start time), exposed as `RetoldFacetingChangeIntake.NodeEpoch`. A restart is a new epoch.
+- `Seq` = `'<NodeEpoch>:<n>'`, `n` a per-process counter, `0` before the first change; `ingest` assigns `++n` **synchronously**, once per delivered event (a bulk write of 10 rows takes 10 seqs). Grammar: `Util.SEQ_PATTERN` (`/^e:[0-9a-f]{8}:(0|[1-9][0-9]{0,14})$/`). `currentSeq()` is the last assigned Seq (`'<epoch>:0'` before any).
+- Seqs compare only within one epoch (`parseSeq(a).N` vs `parseSeq(b).N`); a Seq of another epoch is "foreign" (§45).
+- Generations keep their own `BootEpoch` (`'g:' + 8 hex`, §41.5); the two are independent process-lifetime identifiers.
+
+### 39.2 ChangeEvent (aligned with 05 §3.3 so the upstream bus can replace the interim intake)
+
+```javascript
+{
+	ChangeID: 'ch:000017',                  // per-process counter (logs, tests)
+	Source: 'Interim' | 'Notify' | 'Bus',
+	Entity: 'LabForm',
+	Operation: 'Create' | 'Update' | 'Delete' | 'Undelete' | 'Touch' | 'EntityDirty',
+	IDs: [ 1201 ],                          // [] when unknown (EntityDirty, a notify without ids)
+	Tenants: [ 7 ],                         // normalized tenant values of Before ∪ After; '*' = unknown, unset (Scope.UnsetValues), or the entity has no tenant column
+	Owners: [ { Tenant: 7, Owner: 42 } ] | null,   // Kind 'Personal' only (§41.2): one pair per distinct (tenant, owner) of Before ∪ After; Owner '*' = unknown; Tenant '#none' when the entity has no tenant column, '*' when unknown
+	ChangedColumns: [ 'Status', 'UpdateDate', 'UpdatingIDUser' ] | null,   // Update / Touch: §40.3; null = unknown (→ '#all'); null on every other Operation
+	KeyImages: { '1201': { B: { IDCustomer: 7, OwnerIDUser: 42 }, A: { IDCustomer: 7, OwnerIDUser: 42 } } },   // the policy columns only (TenantColumn, OwnerColumn); B absent on Create, A absent on Delete / Undelete; {} when no images
+	Filter: null | 'FBV~IDSource~EQ~12' | [ <FoxHound filter entries> ],   // EntityDirty (notifyByFilter) only: the PRE-write predicate, carried, never executed in M4
+	Actor: { PrincipalKey: 'pk:…' | null, UserID: 42 | 0, Verb: 'Update' | 'UpdateBulk' | 'Upsert' | 'Notify' | … },
+	Timestamp: 1791472445120,
+	Epoch: 'e:4f0c2b9e',
+	Seq: 'e:4f0c2b9e:88121'
+}
+```
+
+- Full row images (`Images` in 05) are **never** put on the event (nothing in M4 needs them; nothing may hold rows).
+- The event is frozen (the object and its arrays / nested objects) before delivery; subscribers never mutate it.
+- `Tenants` never comes from the writer's session (05 §3.3): only from row images, or from a `notify` caller's explicit `Tenants`. A write whose tenant column is submitted but whose old row is unknown adds `'*'` (the old tenant is unknown).
+- Vocabulary: `Create` / `Delete` / `Undelete` change row membership; `Update` / `Touch` change columns; `EntityDirty` = "anything in this entity may have changed" (notifyByFilter, overflow). `DeleteByFilter` (05) is folded into `EntityDirty` in M4.
+
+### 39.3 Delivery
+
+`ingest(pRaw)` is the one entry point every source uses (Interim, `notify`, `notifyByFilter`, Bus): it validates and normalizes the raw change (§40.3 / §40.5 shapes), assigns `ChangeID` and `Seq`, freezes the event, then calls every subscriber **synchronously, in subscription order**, each in its own `try/catch` (an exception is logged at warn with the subscriber name and counted in `stats().SubscriberErrors`; the remaining subscribers still run). `ingest` never throws and returns the event, or `null` for an invalid raw change (logged at warn, counted). Subscribers must be O(1)-ish and must not do I/O (they bump counters and arm timers).
+
+```javascript
+RetoldFacetingChangeIntake.subscribe(pName, fListener)   // fListener(pChangeEvent); a second subscribe with the same name replaces the first
+RetoldFacetingChangeIntake.unsubscribe(pName)
+```
+
+The wiring subscribes, in this order (§44.10): `'Generations'` → `Generations.applyChange(e)`; `'ReadYourWrites'` → `ReadYourWrites.onChange(e)`. SSE listens to Generations bumps (§41.7), not to the intake.
+
+### 39.4 Alignment with the upstream bus
+
+The shape above is 05 §3.3 minus `Images`, plus `Owners` (pre-derived from `KeyImages` so consumers need not know the policy) and `Actor.PrincipalKey`. When `MeadowChangeBus` (M-1) and `ChangeContext` (ME-3) land, the Bus adapter maps a bus event onto this shape (`Source: 'Bus'`; the bus `Seq` is kept when it matches `SEQ_PATTERN`, else a local Seq is assigned) and the interim wrappers are not installed (§40.1).
+
+---
+
+## 40. Intake (B)
+
+### 40.1 Install and source selection
+
+`RetoldFacetingChangeIntake.install()` → `{ Source: 'Interim' | 'Bus' | 'None', Entities: [ … ] }` — idempotent; the wiring calls it after every `rebuildCatalog` (attach and each model reload).
+
+| `ChangeCapture.Intake` | Behavior |
+|---|---|
+| `'Auto'` (default) | `'Bus'` when `ChangeIntakeBus.available()` (fable has a `MeadowChangeBus` with `subscribe`), else `'Interim'` |
+| `'Interim'` | the interim wrappers only |
+| `'Bus'` | the bus only; no bus → `'None'` with a warn log |
+| `'None'` | nothing installed; generations never move (only `notify` bumps them) |
+
+Interim entities: every name in `Catalog.entities()` that has a route-bound controller (`Host.getRouteBoundController(E)`). A dispatcher / DAL method that already carries **this intake's** wrapper (marker `Symbol.for('RetoldFaceting.Intake')` on the wrapper function: `{ Intake, Entity, Original }`) is skipped, so a reload wraps only new controllers and nothing is ever wrapped twice; one that was **replaced** since is wrapped again (review §51.48). Coverage is read from the actual functions, never from a remembered set: `Interim.isCovered(controller)`, `ChangeIntake.covers(E)` / `uncovered(Es)` (§40.8). Catalog entities with no route-bound controller that are not `ChangeCapture.NotifyManaged` are logged at install (their answers are never cached, `'NoChangeSource'`).
+
+### 40.2 Wrapping rules (meadow-endpoints 4.0.21 installed; identical slots in the 4.1.x repo)
+
+> **Revised by the review (§51.46–§51.49).** The interim intake no longer puts wrappers into the slots below (a host's ordinary single-slot `setBehavior` silently replaced them). It wraps, once per route-bound controller, the behavior **dispatcher** `BehaviorInjection.runBehavior` (an own, non-enumerable property shadowing the prototype method; the original runs with the injection as `this`) and, once per DAL object, `doCreate` / `doUpdate` / `doDelete` / `doUndelete`. The dispatcher wrapper looks only at the slot name:
+>
+> | Slot | Before the slot's behavior | After it called back without an error |
+> |---|---|---|
+> | `Update-` / `Delete-` / `Undelete-PreOperation` | snapshot a shallow copy of `OriginalRecord` (else `Record`) on the request state — before any host behavior can mutate the shared row object | (Delete / Undelete) arm the write query |
+> | `Create-` / `Update-QueryConfiguration` | — | arm the write query (the last slot before the DAL call) |
+> | `Create-` / `Update-` / `Delete-` / `Undelete-PostOperation` | capture the change and **ingest it at entry** (the row is committed), then dispatch to the host's behavior; its callback passes through unchanged | — |
+>
+> Arming puts `{ Entity, Operation, State, Request }` on the query object (`Symbol.for('RetoldFaceting.IntakePending')`, non-enumerable). The DAL wrapper observes only an armed query (a DAL-direct write passes straight through); when the DAL calls back with an error, or Create / Update **without a record** — a committed UPDATE whose re-read failed (meadow's own delete tracking after `PUT { Deleted: 1 }`; an `Update-QueryConfiguration` filter the moved row no longer satisfies) or an INSERT whose re-read failed — no PostOperation will run, so it ingests a **conservative** event: the snapshot pre-image and the record actually submitted to the provider (`query.query.records[0]`; an Update's after-image = pre-image overlaid with it), `ChangedColumns: null` (`'#all'`). A per-request-state marker (`Symbol.for('RetoldFaceting.IntakeState')`) makes the precise PostOperation path and the conservative DAL path ingest **at most once** per record. A capture that cannot be derived (or that `ingest` refuses) **fails closed**: an `EntityDirty` of `Tenants: ['*']`. Every wrapper only acts while the intake's source is `'Interim'`; nothing ever throws into or delays a write. With ME-1 (`addBehavior`, no `runBehavior`) the capture and the snapshots register at the lowest order (`{ Name: 'Faceting', Order: -1000 }`) and the arms at the highest (`{ Name: 'FacetingArm', Order: 1000 }`). The text below is the M4 build's slot inventory; its "Wrapper" steps are superseded by this note.
+
+The four per-record slots below are reached by **every** write path of both versions: single Create (`POST /1.0/E`), bulk Create (`POST /1.0/Es`, one `doCreate` per record), Update (`PUT /1.0/E`, `PUT|PATCH /1.0/E/:IDRecord`), bulk Update (`PUT /1.0/Es`, one `doUpdate` per record), Upsert / Upserts / Upserts/Detailed (`Meadow-Operation-Upsert` → `doCreate` or `doUpdate` per record), Delete (`DELETE /1.0/E[/:IDRecord]`), Undelete (`GET /1.0/E/Undelete/:IDRecord`). The endpoint-level slots (`CreateBulk-`, `UpdateBulk-`, `UpsertBulk-PostOperation`) are **not** wrapped (they would double-count). The 4.1.x `POST /1.0/Es/Query` is a read.
+
+| Slot | Runs after | Request state available |
+|---|---|---|
+| `Create-PostOperation` | `DAL.doCreate` succeeded with a record | `Record` (re-read row), `RecordToCreate` (submitted), `SessionData`, `Verb` |
+| `Update-PostOperation` | `DAL.doUpdate` succeeded with a record | `OriginalRecord` (pre-image: read by Update; the cached row on the Upsert path), `Record` (post-image), `RecordToModify` (submitted) |
+| `Delete-PostOperation` | `DAL.doDelete` without error | `OriginalRecord` / `Record` (pre-image), `IDRecord`, `RecordCount` |
+| `Undelete-PostOperation` | `DAL.doUndelete` without error | `OriginalRecord` / `Record` (the deleted row), `RecordCount` |
+
+Wrapper (per controller, per slot), normative:
+
+1. With ME-1 (`BehaviorInjection.addBehavior` is a function): `addBehavior(Slot, fCapture, { Name: 'Faceting', Order: 1000 })` and stop.
+2. Otherwise read the existing function **before** wrapping (`_BehaviorFunctions[Slot]`, may be absent) and `setBehavior(Slot, fWrapper)` where `fWrapper` is a `function` (never an arrow: it keeps the controller as `this`) that:
+   1. computes the raw change **synchronously at entry** from the request state (§40.3) inside `try/catch` (a failure is logged at warn, counted in `stats().WrapperErrors`, and the write proceeds with no event) — at entry, so a previous behavior that decorates or mutates `Record` cannot change what is captured;
+   2. calls the previous function **first**, as `fPrevious.call(this, pRequest, pRequestState, fWrapped)` (no previous function → `fWrapped()` directly);
+   3. `fWrapped(pError)` ingests the computed change exactly once (inside `try/catch`, errors logged and swallowed) and then calls the original `fCallback(pError)` with the previous behavior's error **unchanged** — the row committed whatever the previous behavior said, so the event is ingested even when it errors;
+   4. if `fPrevious` throws synchronously before calling back, the wrapper ingests the change and calls `fCallback(pThrown)` (what `runBehavior` would have done); if it throws after calling back, the exception is rethrown (it belongs to the continuation).
+3. Ingest is synchronous and does no I/O, so the write's response is never delayed by more than the subscribers' O(1) work, and by the time the client receives its 2xx the generations are already bumped (read-your-writes inside the process).
+
+Writes that fail before the DAL call (validation, a 404 pre-read, a refusing PreOperation) produce no event: nothing was submitted. A DAL write that fails (or whose re-read fails) produces the conservative event of the note above, whether or not the provider committed (an extra invalidation is harmless).
+
+### 40.3 Deriving the change from the request state
+
+Let `S = Host.entityScopeColumns(E)` (§41.2), `PK = S.PrimaryKey`, and compare only **model columns** of `E` (`Host.entityHasColumn`; decorations are ignored).
+
+| Slot | Operation | Before | After | IDs | ChangedColumns |
+|---|---|---|---|---|---|
+| Create | `Create` | — | `Record` (else `RecordToCreate`) | `[ After[PK] ]` | `null` |
+| Update | `Update` | `OriginalRecord` | `Record` | `[ After[PK] ?? Before[PK] ?? RecordToModify[PK] ]` | Before and After: the model columns whose values differ (compared as `canonicalJSON` of the value, a `Date` as its ISO string) ∪ `UpdateDate`, `UpdatingIDUser`; no Before: the submitted model columns of `RecordToModify` ∪ the two audit columns, and when `S.TenantColumn` (or `S.OwnerColumn`) is among them `Tenants` gains `'*'` (resp. `Owners` gains an unknown-owner pair) |
+| Delete | `Delete` | `OriginalRecord ?? Record` | — | `[ Before[PK] ?? IDRecord ]` | `null` |
+| Undelete | `Undelete` | `OriginalRecord ?? Record` | — | `[ Before[PK] ]` | `null` |
+
+- `Tenants` / `Owners` / `KeyImages` from `Before` and `After` per §39.2 (values normalized with `normalizeScopeValue`; `isUnsetScopeValue(v, Scope.UnsetValues)` → unknown).
+- No update is suppressed as a no-op (meadow stamps `UpdateDate` on every update, which an `UpdateDate` facet reads).
+- `Actor`: `Host.buildPrincipal(pRequestState.SessionData, pRequest)` → `Util.principalKey`; `UserID` = that principal's `IDUser`; `Verb` = `pRequestState.Verb` (or its `ParentRequestState.Verb`). A failure to build the principal leaves `PrincipalKey: null` (no read-your-writes for that write), never fails the capture.
+- `RetoldFacetingChangeIntake.changeFromRows(pEntity, pOperation, pBefore, pAfter, pExtra)` → raw change is the one implementation, shared with `notify({ Records, Before })`.
+
+### 40.4 What the interim intake cannot see (documented, tested as "not seen")
+
+DAL-direct writes (`fable.DAL.E.doUpdate` from app code, importers — an unarmed query), raw SQL, `provider.*` calls, writes on controllers that are not route-bound, and **writes made by another process** (generations live in one process, §51.50). These must call `notify` / `notifyByFilter` until M-1 lands (§51.1); an entity whose writes no source sees is never cached unless `ChangeCapture.NotifyManaged` names it (§40.8). Sweep / Bisect / Scrub are later milestones.
+
+### 40.5 `notify` and `notifyByFilter` (raw writers; call only after COMMIT)
+
+```javascript
+RetoldFacetingService.notify(pEntity, pChange)                    // → Seq | null   (delegates to ChangeIntake.notify)
+RetoldFacetingService.notifyChanged(pEntity, pChange)             // alias (05 §5)
+RetoldFacetingService.notifyByFilter(pEntity, pFilter, pOptions)  // → Seq | null   (delegates to ChangeIntake.notifyByFilter)
+
+pChange =
+{
+	Operation: 'Update',            // Create | Update | Delete | Undelete | Touch | EntityDirty (default Update)
+	IDs: [ 1, 2 ],                  // optional
+	Records: [ <row after> … ],     // optional: IDs, tenants, owners and KeyImages are read from them (changeFromRows)
+	Before: [ <row before> … ],     // optional: the pre-images (moves)
+	Tenants: [ 7 ],                 // optional: explicit tenant values; absent with no rows → [ '*' ] (every tenant)
+	Owners: [ { Tenant: 7, Owner: 42 } ],   // optional (Personal entities)
+	ChangedColumns: [ 'Value' ] | null,     // Update / Touch; absent or null → unknown ('#all')
+	Principal: <Principal> | PrincipalKey: 'pk:…'   // optional: read-your-writes for the writer (§45)
+}
+pFilter = 'FBV~IDSource~EQ~12' | [ <FoxHound filter entries> ]   // the PRE-write predicate (05 §5)
+pOptions = { Tenants, Owners, Principal | PrincipalKey }
+```
+
+- Validation: `pEntity` must have a DAL (`Host.getDAL(E)`); `Operation` must be one of `OPERATIONS`; arrays must be arrays; a `pFilter` must be a non-empty string or an array. A failure logs a warn (entity name and reason only, `logSafe`) and returns `null` — **never throws** (the caller's commit already happened).
+- `notifyByFilter` emits `Operation: 'EntityDirty'`, `IDs: []`, `Filter` carried (never executed or parsed in M4), `Tenants` from `pOptions.Tenants` else `[ '*' ]`.
+- **Settle (05 §5):** every `Source: 'Notify'` event is re-ingested once more after `ChangeCapture.NotifySettleMS` (a new Seq, `ChangeID` + `'~settle'`), so a notify sent just before its commit became visible cannot leave a cache entry computed on the old row valid. `0` disables. Settles are **coalesced per (Entity, Operation)** within one window (review §51.65): the first notify arms one timer, later ones merge their IDs, Tenants, Owners and ChangedColumns (an unknown list wins); a merged settle carries `KeyImages: {}` and no Filter. The timer is `unref()`'d and cleared by `shutdown()`.
+- **Unknown tenants (review §51.64):** a notify of a Tenant / Personal entity whose event falls back to `'*'` is counted (`stats().UnknownTenant`) and warned about at most once a minute per entity; `ChangeCapture.RequireNotifyTenants: true` refuses (null + warn) a notify that names no tenant (no `Tenants`, no row carrying the tenant column).
+- **Size caps (review §51.65):** an event with more than `MaxEventIDs` ids carries `IDs: []` and `KeyImages: {}`; more than `MaxEventOwners` owner pairs, `Owners: null` (Part/* per tenant). Derivation is linear (Set-based dedupe): 50 000 ids in well under 100 ms.
+
+### 40.6 Bus adapter seam (`Change-Intake-Bus.js`)
+
+`new ChangeIntakeBus(pIntake)`: `available()` → `!!(fable.MeadowChangeBus && typeof fable.MeadowChangeBus.subscribe === 'function')`; `install()` → subscribes `{ onChangeSync: (e) => pIntake.ingestBusEvent(e), onBatch: (b, f) => f() }` under `'RetoldFaceting'` and returns true, else false; `uninstall()`. `ChangeIntake.ingestBusEvent(pBusEvent)` maps 05 §3.3 onto §39.2 (`Owners` derived from `KeyImages` + `Host.entityScopeColumns`, `Images` dropped). M4 ships no bus; B tests the adapter against a fake bus object.
+
+### 40.7 ChangeIntake API (B)
+
+```javascript
+NodeEpoch                                           // 'e:' + 8 hex
+install() → { Source, Entities }                    // §40.1
+subscribe(pName, fListener) / unsubscribe(pName)    // §39.3
+ingest(pRaw) → ChangeEvent | null                   // §39.3
+changeFromRows(pEntity, pOperation, pBefore, pAfter, pExtra) → raw change   // §40.3
+notify(pEntity, pChange) → Seq | null               // §40.5
+notifyByFilter(pEntity, pFilter, pOptions) → Seq | null
+ingestBusEvent(pBusEvent) → ChangeEvent | null      // §40.6
+nextSeq() → Seq                                     // implemented in the skeleton; only ingest calls it
+currentSeq() → Seq                                  // implemented in the skeleton
+shutdown()                                          // clears settle timers; uninstalls nothing (wrappers stay harmless)
+stats() → { Source, Entities, Events, BySource: {}, ByOperation: {}, SubscriberErrors, WrapperErrors, Invalid,
+             UnconfirmedWrites, FailClosed, Rewraps, UnknownTenant, Capped, LastSeq }
+notifyManaged(pEntity) → boolean, covers(pEntity) → boolean, uncovered(pEntities) → [ … ]   // §40.8
+```
+
+### 40.8 Coverage (review §51.48)
+
+`covers(E)`: `'Bus'` and `'None'` cover every entity (the operator chose them); `ChangeCapture.NotifyManaged` (true, or a list naming E) covers E; under `'Interim'`, E is covered iff its route-bound controller's dispatcher (ME-1: its registered slots) carries this intake's wrapper — a dispatcher or DAL method replaced since the install is wrapped again, warned about, and an `EntityDirty` (`Tenants: ['*']`, `Actor.Verb: 'Rewrap'`) is ingested **before** `covers` returns, so no answer computed during the gap survives the lookup that follows. `CacheKey.precheck` asks `uncovered(DepSet entities)` for every cacheable request (`'NoChangeSource'`).
+
+---
+
+## 41. Generations (A)
+
+### 41.1 Key grammar
+
+```
+GenKey    = Entity '|' TenantKey '|' Column
+TenantKey = '*'                       a change that may affect every tenant (unknown tenant; every write of a Global / Unscoped entity)
+          | '#any'                    bumped by every write of the entity; read only by folds with no captured tenant
+          | Part                      one tenant
+          | Part '/' Owner            one owner of a Personal entity in one tenant
+          | Part '/*'                 a write in that tenant whose owner is unknown (read by every owner-qualified fold of the tenant)
+Part      = enc(tenant) | '#none'     ('#none': a Personal entity without a tenant column)
+Owner     = enc(owner)
+Column    = <model column name> | '#row' | '#all' | '#cols'
+enc(v)    = encodeURIComponent(String(normalizeScopeValue(v))).replace(/\*/g, '%2A')
+```
+
+`'#…'` keys never collide with an encoded value (`'#'` encodes as `%23`), nor does `'*'` (encoded `%2A`). `Generations.tenantKey(pTenant, pOwner)` (static and instance) is the one implementation: `pTenant` unknown (`'*'`, null, unset) → `'*'`; `pOwner` `undefined` → the tenant key; `pOwner` unknown → `Part + '/*'`. `Generations.genKey(pEntity, pTenantKey, pColumn)`.
+
+### 41.2 Entity scope kinds (`Host.entityScopeColumns(E)`, §38.5)
+
+| Kind | When | Writes bump tenant keys | A fold reads tenant keys |
+|---|---|---|---|
+| `Unscoped` | no policy (`Kind: 'None'`) | `'*'` | `'*'` |
+| `Global` | policy, but `E` has no (non-excluded) tenant column and no personal column — global lookups, `Exclude`d entities, entities scoped only by `Required` columns | `'*'` | `'*'` |
+| `Tenant` | `E` has the policy `Column` and is not excluded | each `enc(t)` of `Tenants` (`'*'` for unknown) | `enc(t)` (the principal's `ScopeValues[TenantColumn]`), `'*'` — or `'#any'`, `'*'` when that value is unset |
+| `Personal` | `E` has its `PersonalScopes` column | the tenant keys as `Tenant` (`Part` = `'#none'` without a tenant column) **plus** `Part/Owner` for each pair of `Owners` (`Part/*` for an unknown owner; when `Owners` is null, `Part/*` for each known tenant) | owner-qualified `Part/o`, `Part/*`, `'*'` (`o` = `ScopeValues[OwnerColumn]`) — or tenant-wide `Part`, `'*'` when the plan reads `E` through a `TenantOnly` Rel anywhere (§42.1) or `o` is unset |
+
+Every write also bumps `'#any'`. `RowColumns` (delete, tenant, owner, identity, `Required`) are the columns whose change moves a row in or out of a scope or fold.
+
+### 41.3 Bumping a ChangeEvent — `applyChange(pEvent)`
+
+Columns (granularity `'Column'`):
+
+| Operation | Column keys bumped |
+|---|---|
+| `Create`, `Delete`, `Undelete` | `'#row'` |
+| `Update`, `Touch` with `ChangedColumns: null` | `'#all'` |
+| `Update`, `Touch` with a list | each column: `'#row'` when it is in `RowColumns`, else the column itself; plus `'#cols'` ("some column changed") |
+| `EntityDirty`, anything else | `'#all'` |
+
+Granularity `'Entity'`: every bump that is not `'#row'` becomes `'#all'`.
+
+One bump = `Tick = ++GlobalTick`, `At = Date.now()`, stamped on **every** `genKey(E, T, C)` for `T` in the event's tenant keys (§41.2, plus `'#any'`) and `C` in its columns: `table.set(GenKey, { Tick, At })` (LRU-refreshed). Returns the bump record (also passed to bump listeners, §41.7):
+
+```javascript
+{ Entity, Tick, At, Seq, Source, Operation, TenantKeys: [ … ], Columns: [ … ], Keys: [ 'E|T|C', … ] }
+```
+
+An invalid event (no Entity) returns `null` and bumps nothing; `applyChange` never throws. `bumpEntity(pEntity, pReason)` bumps `(E, '*', '#all')` and `(E, '#any', '#all')` (model reloads and tests).
+
+### 41.4 Reading — what a fold depends on
+
+`CacheKey.dependencies` (§42.5) produces, per DepSet entity `E`, `{ Entity, TenantKeys, Columns }`:
+
+- `TenantKeys` = `Generations.foldTenantKeys(pPrincipal, E, pTenantOnly)` (the right-hand column of §41.2);
+- `Columns` = (`DepSet[E]` ∪ the probe capture's `Appended` columns (stripped)) − `RowColumns` ∪ `'#row'`, `'#all'` (∪ `'#cols'` when `DepSet[E]` holds `'#cols'`, §42.1). Granularity `'Entity'`: `'#row'`, `'#all'`.
+
+### 41.5 GenVector — `vector(pDependencies)`
+
+`Entries` = every `[ genKey(E, T, C), read(…).Tick ]` for each dependency, `T` in its `TenantKeys`, `C` in its `Columns`, deduplicated, sorted by key; `MaxTick` = the largest tick; `Hash` = `'g:' + sha256(BootEpoch + '|' + JSON.stringify(<the sorted keys>) + '|' + MaxTick).slice(0, 16)` where `BootEpoch` = `'g:' + 8 hex` minted at construction (a restart changes every hash, 05 §6.3). Ticks only grow, so any bump of a dependency after the read raises `MaxTick`; an eviction can change the hash only by raising `MaxTick` (the evicted group's own last bump newer than every dependency), i.e. only ever invalidates more (review §51.53). `read(pGenKey)` → `{ Tick, At }`: the table value (LRU-refreshed), else `{ Tick: floor(E, T), At: null }` without inserting anything.
+
+The vector is read **before** execution (§44.3) and stored with the entry: a write that commits during execution leaves the stored vector older than the current one, so the entry is stale from birth (never served as Exact).
+
+### 41.6 Eviction floors (no ABA, 05 §6.2) — revised by the review (§51.53)
+
+- Keys live in **groups**, one per `E|T` (the floor key), each holding at most the entity's columns. The `'*'` and `'#any'` groups of every entity are **pinned**: created on first bump or read (starting at the floor their keys read so far), never evicted (≤ 2 × entities groups), so the keys every fold reads never fall back to a floor.
+- Other groups are bounded by `Cache.MaxGenerationKeys` (`'Auto'` → `clamp(MaxBytes / 320, 4096, 200000)`): while the evictable keys exceed it, the least recently used of the 16 oldest-inserted groups is evicted **whole** (recency is a use stamp on bump and read — never a Map re-insertion on the hot path). Evicting a group with largest tick `x` sets `Floor[E|T] = max(Floor[E|T], x)` (`FloorRaises`); a group recreated later starts at that floor (its `Base`).
+- Floors are bounded by `Cache.MaxGenerationFloors`; the oldest floor `f` of `E|T` folds into `EntityFloor[E] = max(EntityFloor[E], f)` — **never a global floor**: churn on one entity can never move another entity's keys. (`GlobalFloor` is raised only by `clear()`.)
+- A key whose group is missing reads `max(Floor[E|T] ?? 0, EntityFloor[E] ?? 0, GlobalFloor)`; a present group's column it never saw reads the group's `Base`. Reads are monotone, so an entry that saw the evicted group's last bump stays valid and one that predates it is invalid.
+- `stats()` adds `Groups`, `PinnedKeys`, `EntityFloors`, `GroupEvictions`, `EntityFloorRaises`, `ApplyErrors`, `MaxKeys`, `ApproxBytes`. `applyChange` fails closed: an event that breaks after its Entity was read bumps `bumpEntity(E, 'ApplyError')`; `scopeColumns` falls back to an Unscoped descriptor (bumps `'*'`) when the host throws.
+
+### 41.7 API (A)
+
+```javascript
+BootEpoch, GlobalTick (getter)
+applyChange(pEvent) → Bump | null               // §41.3; then calls every bump listener (sync, try/catch each)
+bumpEntity(pEntity, pReason) → Bump
+subscribe(pName, fListener) / unsubscribe(pName)   // bump listeners: fListener(pBump); SSE subscribes 'SSE'
+read(pGenKey) → { Tick, At }
+vector(pDependencies) → { Hash, Entries, MaxTick }
+scopeColumns(pEntity) → Host.entityScopeColumns(pEntity), or an Unscoped descriptor without a host
+tenantKeysForChange(pEvent) → [ … ]             // §41.2 middle column + '#any'
+columnsForChange(pEvent) → [ … ]                // §41.3
+foldTenantKeys(pPrincipal, pEntity, pTenantOnly) → [ … ]   // §41.2 right column
+principalTenantKeys(pPrincipal, pEntity) → [ … ]           // SSE visibility (§46.4): Tenant → [ enc(t) ]; Personal → [ Part/o, Part/* ]; Global / Unscoped → [ '*' ]; [] when unset
+static tenantKey(pTenant, pOwner), static genKey(pEntity, pTenantKey, pColumn)
+stats() → { Keys, Floors, GlobalFloor, GlobalTick, Bumps, Evictions, FloorRaises }
+clear()                                          // tests
+```
+
+---
+
+## 42. DepSet, scope probes and the cache key (A)
+
+### 42.1 The cache DepSet — `CacheKey.depSet(pContext, pPlan)`
+
+```javascript
+{
+	DepSet: { Project: [ 'IDProject', 'Status', … ], Client: [ 'IDClient', 'Name' ], … },   // sorted columns
+	Entities: [ 'Client', 'Project', … ],      // sorted; the envelope's DependsOn (§44.7)
+	TenantOnly: [ 'LabForm' ],                 // entities some Rel reads with Scope 'TenantOnly'
+	LabelTargets: [ 'Client' ],
+	Records: true | false
+}
+```
+
+- `Plan.DepSet` (every Agg's DepSet over its Rels and its Variant's PathPred, §24.10);
+- ∪ each `Agg.LabelLookup` target `{ Entity: [ KeyColumn, LabelColumn ] }` (plus its PK, delete and policy columns) **when** `Authorizer.canFacet(pContext, Target)` (a target the principal cannot read contributes no data and no dependency);
+- ∪ `'#cols'` on the pivot when the Query body has `Records` (hydrated records carry every column);
+- `TenantOnly` from `FoldIR.relations(…)` over every Agg and every Variant's `PathPred` / `Where` (`Rel.Scope === 'TenantOnly'`).
+
+The wiring computes it for every Query (also with the cache off: `DependsOn`).
+
+### 42.2 Scope probes — `CacheKey.captureScopes(pContext, pDepSet, fCallback)`
+
+For each entity of the cache DepSet, in sorted order, one capture of the entity's scope **as this principal**, on a scratch context `Object.assign({}, pContext, { Memo: { Relations: {}, Captures: {}, VariantRows: {} }, Counters: { Relations: 0, BehaviorRuns: 0, Statements: 0 } })` (probes never touch the request's memo or its M2 budgets):
+
+1. `tmpQuery = Host.getExecutionDAL(E).query`; when `Host.hasDeleteColumn(E)`: `addFilter(DeleteColumn, 0, '=', 'AND', 'FacetSoftDelete')` (exactly a hop relation with no client conjuncts);
+2. `ScopeCapture.capture(probeContext, E, tmpQuery, 'Inherit', { Columns: <real columns of DepSet[E]> }, …)` — the entity's own `Reads-QueryConfiguration` on the route-bound controller, ScopeGuard, the read-side audit;
+3. callback `(null, { Captures: { E: <capture> }, Uncacheable: [ { Entity, Reason } ], ProbeRuns, ScopeRepaired })` — **never an error**: a probe error (behavior 401, guard refusal, controller-less entity) or an Opaque capture makes the request uncacheable (§42.3) and the request proceeds exactly as in M2 (its own execution produces the real error, if any). Probe failures are logged at debug (entity and reason only).
+
+`ProbeRuns` = the scratch context's `BehaviorRuns`; it is reported in `pMeta.ProbeRuns` and is **not** counted against `MaxBehaviorRunsPerRequest`. More DepSet entities than `Limits.MaxRelationsPerRequest` → no probes, `Reason: 'TooManyEntities'`. Probes run no SQL (the stock behaviors add filters; a host behavior that does I/O pays it once per entity per cacheable request).
+
+### 42.3 Cacheability — `CacheKey.cacheability(pContext, pPlan, pDeps, pProbe)` → `{ Cacheable, Reason }`
+
+Pre-execution (the first that applies is the `Reason`; `Status: 'Bypass'`):
+
+| Reason | When |
+|---|---|
+| `'Mode'` | `pContext.Mode !== 'Query'` (Records / Count / Keys are never cached) |
+| `'ForceEngine'` | an in-process `ForceEngine` (the Reference oracle) |
+| `'PlanErrors'` | `Plan.Errors` is non-empty (per-facet 400 / 403 / 422) |
+| `'NoChangeSource'` | (review §51.48) some DepSet entity is not `ChangeIntake.covers`ed |
+| `'ModelReload'` | (review §51.51) the catalog's ModelVersion differs from the one `newContext` snapshotted |
+| `'TooManyEntities'` | §42.2 |
+| `'ProbeError'` | a probe failed |
+| `'Opaque'` | a probe capture is `Opaque` (untrusted, trusted-and-stageable, or `PostOperation`) |
+| `'RecordsPostOperation'` | `Records` requested and the pivot's capture has read-side behaviors (`PostOperation` non-null, trusted or safe-column): decorations may depend on the session or other tables |
+| `'NotCacheable'` | a probe's request state has `FacetCacheable === false` (06 §7 determinism escape) |
+
+Post-execution (never stored; the answer still goes out): `'ScopeChanged'` (review §51.49, §42.8), `'Errors'` (the envelope has any `Errors` entry), `'Staged'` (`pExecution.Staged.Relations > 0`), `'TooLarge'` (entry bytes > `Cache.MaxEntryBytes`). `UNCACHEABLE_REASONS` lists all of them (`'Mode', 'ForceEngine', 'PlanErrors', 'NoChangeSource', 'ModelReload', 'TooManyEntities', 'ProbeError', 'Opaque', 'RecordsPostOperation', 'NotCacheable', 'Errors', 'Staged', 'ScopeChanged', 'TooLarge'`).
+
+### 42.4 Key material — `CacheKey.material(pContext, pPlan, pProbe)`, `key(…)`
+
+```javascript
+{
+	v: 1,                                          // KEY_VERSION
+	Instance: Options.InstanceID,
+	Boot: Generations.BootEpoch,
+	Model: pContext.ModelVersion,                  // covers definitions and policy (§30.2); snapshotted in newContext (review §51.51)
+	EngineClass: 'Live',
+	Entity: pContext.Entity, Mode: 'Query',
+	Request: { Facets, Total, Scopes, Params, Records, Warnings },   // NormalizedRequest minus Clauses / FilterString (raw), Freshness, TimeoutMS
+	Client: FilterAST.Conjuncts.map(({ Id, Origin, Shape, NeverExclude, Pred }) …),  // canonical client conjuncts incl. clause Hashes (Excluded, Filter.Applied)
+	Applied: FilterAST.Applied, FilterWarnings: FilterAST.Warnings,
+	Scope: [ [ Entity, Capture.Fingerprint ], … ],  // every probe capture (Appended + Transformed + behavior + mode), sorted by entity
+	Bind: Plan.BindHash,                           // $CurrentUser / $Param / floored $Now (§22.5)
+	Gate: Principal.RoleSetHash || '',
+	PlanForm: pContext.PlanForm, PinnedNow: <the in-process Now when pinned, else null>
+}
+Key   = 'ck:' + sha256(canonicalJSON(material))          // 64 hex
+Short = Key.slice(0, 15)                                   // logs, headers, pMeta
+```
+
+- **Never** the SessionID, the request object, cookies or headers: the material reads only the context fields above. Two principals share an entry iff their captured scopes, bound values and role sets are equal (06 §7): same-tenant users share answers over tenant-only entities; a `$CurrentUser` binding, an owner predicate or a tenant switch under one session changes the key.
+- `Principal.ScopeValues` are deliberately **not** key material (the captures carry the values the SQL uses).
+- `planHash(pContext)` = `'ph:' + 16 hex` of the `Request` + `Client` parts (logs).
+
+### 42.5 Dependencies — `CacheKey.dependencies(pContext, pDeps, pProbe)` → `[ { Entity, TenantKeys, Columns } ]`
+
+§41.4 for every entity of `pDeps.DepSet`, with `pTenantOnly = pDeps.TenantOnly.includes(E)` and the probe capture's `Appended` columns. The wiring then reads `Generations.vector(dependencies)`.
+
+### 42.6 Version — `CacheKey.version(pKey, pGenVectorHash)`
+
+`'fv1:' + sha256(pKey + '|' + pGenVectorHash).slice(0, 16)` — the same `fv1:<16 hex>` shape as M1, so the ETag regexes hold.
+
+### 42.8 Scope drift — `CacheKey.scopeDrift(pContext)` (review §51.49)
+
+The key's scope comes from the probes; the execution re-runs every Reads behavior. After probes, the Cache stage arms `pContext.ScopeLog = []`; `ScopeCapture._finishCapture` pushes `{ Entity, ScopeMode, Appended }` (what the behavior appended, before any TenantOnly relaxation) for every capture whose behavior ran (memo replays add nothing; probes run with `ScopeLog: null`). `scopeDrift` is `{ Drift: true, Entity }` when an execution capture's `Appended` differs (canonical JSON) from its entity's probe capture, or captures an entity no probe saw. `cachePostCheck` then marks the answer `Bypass 'ScopeChanged'`: never stored, the digest Version, and a single-flight joiner never takes it (§44.11). Client-operator transforms are not compared (probes carry no client conjuncts; the key's Client part covers them). A host behavior whose appended filters depend on the request's own filters therefore never caches (its execution always "drifts" from its probe) — uncacheable, never wrong.
+
+### 42.7 API (A)
+
+```javascript
+depSet(pContext, pPlan) → Deps                                   // §42.1 (sync)
+captureScopes(pContext, pDeps, fCallback)                         // §42.2
+cacheability(pContext, pPlan, pDeps, pProbe) → { Cacheable, Reason }   // §42.3 pre-execution
+material(pContext, pPlan, pProbe) → object                        // §42.4
+key(pContext, pPlan, pProbe) → { Key, Short }
+planHash(pContext) → 'ph:…'
+dependencies(pContext, pDeps, pProbe) → [ … ]                     // §42.5
+version(pKey, pGenVectorHash) → 'fv1:…'                           // §42.6
+scopeDrift(pContext) → { Drift, Entity }                          // §42.8 (review)
+```
+
+---
+
+## 43. ResultCache and Freshness (A)
+
+### 43.1 Entry
+
+```javascript
+{
+	Key: 'ck:…', GenVectorHash: 'g:…', MaxTick: 1834,
+	SeqAtCompute: 'e:4f0c2b9e:88121',
+	Body: '<JSON of the envelope with Version: null, ElapsedMS: 0>',   // a string: hits parse a fresh copy, callers can never mutate the stored answer
+	Bytes: 18233,                                  // Buffer.byteLength(Body) + 512
+	CreatedAt: 1791472445120, AsOf: '2026-10-08T15:02:11.120Z', Engine: 'Live',
+	Meta: { DependsOn: [ … ], ScopeRepaired: false, RecordsDropped: 0, Statements: 3, BindHash: 'b:…' }
+}
+```
+
+### 43.2 Bounds and eviction
+
+`Map`-based approximate LRU (no cachetrax). `set(pKey, pEntry)`: an entry over `MaxEntryBytes` is refused (`Rejected`); an existing entry with a larger `MaxTick` is kept (a slow compute never overwrites a newer answer); otherwise replace, then evict until `Entries ≤ MaxEntries` and `Bytes ≤ MaxBytes` (`Evictions`): the least recently used of the 16 oldest-inserted entries (exact LRU for small caches). `get` stamps recency (a use counter on the slot — never a Map re-insertion, review §51.54) and deletes entries older than `Cache.MaxAgeMS` (`Expired`). One entry per Key (the latest). An entry records `By` (the computing principal's key, §51.57).
+
+### 43.3 Lookup — `lookup(pKey, pGenVector, pFreshness, pNow)` → `{ Status, Entry, LagMS }`
+
+| Situation | `Exact` | `Bounded` | `Fast` |
+|---|---|---|---|
+| no entry (or expired) | Miss | Miss | Miss |
+| `entry.GenVectorHash === pGenVector.Hash` | **Hit** | **Hit** | **Hit** |
+| vector differs, `pNow − entry.CreatedAt ≤ MaxLagMS` | Miss | **Stale** | **Stale** |
+| vector differs, `MaxLagMS < age ≤ Cache.MaxAgeMS` | Miss | Miss | **Stale** |
+
+`LagMS` = `pNow − entry.CreatedAt` for Stale (conservative: the age of the answer, never less than its true staleness), `0` for Hit. An `Exact` request never takes an entry whose vector differs (so it never returns a stale answer). `MinSeq` and read-your-writes reach the cache as `Mode: 'Exact'` (§45). Counters: `Hits`, `StaleHits`, `Misses`.
+
+### 43.4 Single flight and background refresh
+
+- `refresh(pKey, fWork)` → `true` when started: at most **one** refresh per Key in flight (`Refreshing` set) and at most `Cache.MaxConcurrentRefreshes` (4) in flight overall — beyond that none starts (`RefreshesSkipped`) and the stale answer keeps being served (review §51.56); `fWork(fDone)` recomputes and stores through the normal path (§44.6) — **through the single flight** (§44.11), so a concurrent foreground miss of the same key and vector joins it; `fDone(pError)` clears the flag; an error is logged at warn and counted (`RefreshErrors`), never thrown. So under any number of viewers a stale Key costs at most one recompute per refresh.
+- `flight(pFlightKey, fWork, fCallback)`: concurrent callers with the same flight key share one `fWork` run and all receive its `(pError, pResult)`. The wiring SHOULD use it for misses (`FlightKey = Key + '|' + GenVector.Hash`); the waiters' `pMeta.Cache.Status` is `'Miss'` with `Coalesced: true`.
+
+### 43.5 Metrics — `stats()`
+
+`{ Entries, Bytes, MaxEntries, MaxBytes, Hits, StaleHits, Misses, Stores, Rejected, Evictions, Expired, Refreshes, RefreshErrors, RefreshesSkipped, Flights, NotModified, Bypass: { <Reason>: n } }`; `note(pMetric, pReason)` increments `NotModified` / `Bypass[Reason]` (the wiring calls it).
+
+### 43.6 API (A)
+
+```javascript
+get(pKey) → entry | null       set(pKey, pEntry) → boolean       delete(pKey)       clear()
+lookup(pKey, pGenVector, pFreshness, pNow) → { Status, Entry, LagMS }
+refresh(pKey, fWork) → boolean      flight(pFlightKey, fWork, fCallback)
+note(pMetric, pReason)              stats()       shutdown()   // clears flights' bookkeeping
+```
+
+---
+
+## 44. Pipeline integration (wiring)
+
+### 44.1 Order
+
+```
+Route POST …/Query (and /Scope/:Scope/Query) → RetoldFacetingService.query → queryInternal
+  1 Principal
+  2 Shape        NormalizedRequest.Freshness = { Mode, MaxLagMS, MinSeq } (§44.2)
+  3 Freshness    pContext.Freshness = ReadYourWrites.effectiveFreshness(Principal, NormalizedRequest.Freshness, now)   (§45)
+  4 Gate  5 Bind  6 Filter  7 Plan                                  (M2)
+  8 Cache        §44.3 (304 without executing; Hit / Stale served here; Miss continues)
+  9 Execute  10 Records                                             (M2)
+ 11 Post         + DependsOn; Version: generation form or digest form (§44.5)
+ 12 Store        §44.6
+ 13 Respond      headers §44.8
+```
+
+The Cache stage runs after Plan because the key needs the bound plan, the per-facet gates and the DepSet; everything before it runs no SQL. Authorization therefore always precedes any cache read and any 304 (06 §7).
+
+### 44.2 Freshness normalization (`contract/Facet-Contract-Request.js`, wiring)
+
+`normalizeRequest(pEntity, pBody, { Limits, Time, Mode, Freshness: { DefaultMode, MaxLagMS, MaxAgeMS } })`: `Freshness` absent → `{ Mode: DefaultMode, MaxLagMS, MinSeq: null }`; otherwise a plain object (else `400 FACET_REQUEST_INVALID { Field: 'Freshness' }`) whose `Mode` ∈ `FRESHNESS_MODES` (`'Exact' | 'Bounded' | 'Fast'`, else `{ Field: 'Freshness.Mode' }`), `MaxLagMS` an integer `0 ≤ v ≤ MaxAgeMS` (else `{ Field: 'Freshness.MaxLagMS', Max }`), `MinSeq` a string matching `SEQ_PATTERN` (else `{ Field: 'Freshness.MinSeq' }`); unknown keys are ignored. The route also reads `X-Retold-Facet-MinSeq` into `Freshness.MinSeq` when the body has none (02 §10). `Freshness` is never key material.
+
+### 44.3 The Cache stage
+
+`Cache.Enabled === false` → `pContext.Cache = { Status: 'Off' }`; the request runs exactly as M2 (digest Version), plus `DependsOn` and the Seq header. Otherwise:
+
+1. `Deps = CacheKey.depSet(pContext, pPlan)`; quick pre-checks of §42.3 (`Mode`, `ForceEngine`, `PlanErrors`, `NoChangeSource`, `ModelReload`) → `Bypass`.
+2. `Probe = CacheKey.captureScopes(pContext, Deps)`; `CacheKey.cacheability(…)` → `Bypass` with its Reason (`ResultCache.note('Bypass', Reason)`).
+3. `{ Key, Short } = CacheKey.key(…)`; `Dependencies = CacheKey.dependencies(…)`; `GenVector = Generations.vector(Dependencies)`; `SeqAtCompute = ChangeIntake.currentSeq()`; `Version = CacheKey.version(Key, GenVector.Hash)`; `Cacheable: true`; `pContext.ScopeLog = []` (§42.8).
+3a. (review §51.50) A `MinSeq` this process cannot prove applied — another epoch, a counter beyond the local one, or (in-process) malformed — skips steps 4–6: no 304, no lookup, no flight; the answer is computed Live, stored, and answered with the **digest** Version (`Reason: 'MinSeq'`, `Status: 'Miss'`).
+4. **304:** `pContext.CacheRefresh` false and `If-None-Match` matches `Version` (weak comparison, a list, `*`; `Routes.matchesETag`) → call back `(null, null, { NotModified: true, Version, Cache: { Status: 'NotModified', … }, Statements: 0, Seq: ChangeIntake.currentSeq(), Freshness, ProbeRuns })` — no SQL ran (`ResultCache.note('NotModified')`).
+5. `pContext.CacheRefresh` → skip the lookup (`Status: 'Refresh'`), continue to Execute.
+6. `lookup = ResultCache.lookup(Key, GenVector, pContext.Freshness, Date.now())`: **Hit** / **Stale** → serve (§44.4); **Miss** → continue (optionally through `ResultCache.flight`).
+
+### 44.4 Serving a cached entry
+
+`Envelope = JSON.parse(entry.Body)`, then: `Version` = `CacheKey.version(Key, entry.GenVectorHash)` (the representation served), `ElapsedMS` = this request's, envelope **and every FacetResult**: `Cached: true`, `Stale` (`true` for Stale), `LagMS` (Stale: the lookup's `LagMS`; Hit: 0), `Exact: !Stale`; `AsOf` and `Engine` stay the entry's. `pMeta.Statements: 0`, `pMeta.ScopeRepaired` from `entry.Meta` or the probes, `pMeta.RecordsDropped` from `entry.Meta`. A **Stale** serve also starts `ResultCache.refresh(Key, fWork)`, where `fWork` runs `queryInternal(pEntity, pBody, <refresh request>, { CacheRefresh: true }, …)` and ignores its result: the refresh request copies `params`, `query`, `headers` minus `if-none-match`, and `UserSession` from the original (same principal → same key), and its answer is stored, never sent.
+
+### 44.5 Version, ETag and 304
+
+| Answer | Version | 304 |
+|---|---|---|
+| `Cache.Enabled` and cacheable end to end (pre and post checks of §42.3 pass, except `'TooLarge'`) | **generation form** `CacheKey.version(Key, GenVector.Hash)` (computed in §44.3) | before execution when `If-None-Match` matches (§44.3 step 4) |
+| Stale serve | `CacheKey.version(Key, entry.GenVectorHash)` | — (the stage compares against the **current** Version only, so a 304 is never stale) |
+| everything else (cache off, Bypass, post-check `Errors` / `Staged`, Reference) | the M2 **digest form** (§10.5, §30.2) | after execution, as M2 (`Routes.handleQuery`) |
+
+The generation form changes after any write that bumps a key of the answer's vector (a write by another tenant to a tenant-scoped entity, or another owner's write to an owner-scoped one, does not), and is stable otherwise (no time component except a bound `$Now` bucket through `BindHash`). It never hashes the representation, so it is valid only while every write reaches the intake — hence opt-in (§51.1).
+
+### 44.6 Storing
+
+After Post, when `pContext.Cache.Cacheable` and the post checks pass: `ResultCache.set(Key, { Key, GenVectorHash: GenVector.Hash, MaxTick: GenVector.MaxTick, SeqAtCompute, Body: JSON of the envelope with Version null and ElapsedMS 0, CreatedAt: Date.now(), AsOf: envelope.AsOf, Engine, Meta })` — the vector read **before** execution (§41.5). Errors are never stored (whole-request failures never reach Store; envelopes with `Errors` fail the post check).
+
+### 44.7 Envelope additions
+
+- `Cached`, `Stale`, `LagMS`, `AsOf`, `Exact` (envelope and each FacetResult) per §44.4; computed answers keep `Cached: false, Stale: false, LagMS: 0`.
+- `DependsOn: [ 'Client', 'Project', … ]` — `CacheKey.depSet(…).Entities` (sorted; label targets only when readable), on every Query envelope (cache on or off; both engines; not a volatile field). The client refetches on SSE events for these entities (§47.2).
+- `normalizeForComparison` keeps stripping `Version`, `AsOf`, `ElapsedMS`, `Engine`, `Cached`, `LagMS`, `Stale`; `Exact` stays (a Stale answer is a different claim).
+
+### 44.8 Headers
+
+| Header | Routes | Value |
+|---|---|---|
+| `ETag`, `Cache-Control`, `Vary`, `X-Retold-Facet-Contract` | all (M1) | unchanged |
+| `X-Retold-Facet-Seq` | Query (200 and 304), Records, Count, Keys | the Seq the answer covers: computed / Miss → `SeqAtCompute` (read before execution); Hit and 304 → `currentSeq()`; Stale → `entry.SeqAtCompute`; Records / Count / Keys → `currentSeq()` read before execution. Sent when `Freshness.SeqHeader` is true, or `'Auto'` (default) on a host **without** a scope policy (review §51.58); never when the intake is `'None'` |
+| `X-Retold-Facet-Cache` | Query, only with `Cache.ExposeStatus` (review §51.57) | `Off` \| `Bypass` \| `Miss` \| `Hit` \| `Stale` \| `NotModified` |
+| `X-Retold-Facet-Freshness` | Query, only with `Cache.ExposeStatus` | the effective mode, `'; upgraded=ReadYourWrites'` / `'; upgraded=MinSeq'` when §45 upgraded it |
+
+### 44.9 `pMeta` and the in-process API
+
+The query `pMeta` (§18.1, §28.5) gains `Cache: { Status, Reason, Key: Short, GenVector: Hash, LagMS, Coalesced }`, `Seq`, `Freshness: { Mode, Requested, Upgrade }`, `ProbeRuns`, and `NotModified: true` on the 304 path (with `pEnvelope === null`). `Routes.handleQuery`: `pMeta.NotModified` → standard headers + Version + `304`, no body. New service methods: `notify`, `notifyChanged`, `notifyByFilter` (§40.5), `shutdown(fCallback)` (§44.10), and `status()` gains `{ Cache: ResultCache.stats(), Generations: Generations.stats(), Changes: ChangeIntake.stats(), SSE: SSE.stats(), ReadYourWrites: ReadYourWrites.stats() }`. Describe gains `Freshness.ReadYourWritesMS`, `Cache: { Enabled }`, `Changes: { Intake: <Source>, Stream: SSE.Enabled ? '<RoutePrefix>/Changes' : null }`.
+
+### 44.10 attach, model reload, shutdown
+
+- `attach`: after `rebuildCatalog` → `installChangeCapture()` = `ChangeIntake.install()` + the subscriptions of §39.3 (`'Generations'` first, then `'ReadYourWrites'`) + `Generations.subscribe('SSE', (b) => SSE.onBump(b))` (idempotent); `Routes.connect` also calls `SSE.connect(server)` when `SSE.Enabled`.
+- Model reload (`rebuildCatalog(pModel, true)`): `ChangeIntake.install()` again (wraps only new controllers), `ResultCache.clear()` (the ModelVersion in every key changed), `SSE.broadcastModelChanged()`.
+- **Shutdown:** at attach the service wraps the host service server's `close(fCallback)` once (marker property; wrap the object `fable.Orator.stopWebServer` actually closes — `fable.Orator.serviceServer`, normally `Host.getServiceServer()`): the wrapper runs `RetoldFacetingService.shutdown()` first — `SSE.closeAll('Shutdown')`, `ChangeIntake.shutdown()`, `ResultCache.shutdown()` — then the original `close`. So `fable.Orator.stopWebServer` (and the harness `stop`) completes with streams open, and no timer or socket keeps a Mocha run alive. Every M4 timer is `unref()`'d.
+
+### 44.11 Single flight (review §51.55, §51.56)
+
+Every cacheable miss — and the background refresh — computes through `ResultCache.flight(Key | GenVector.Hash | TimeoutMS)`: a joiner never shares a leader with another timeout. A joiner takes the leader's answer (its own parsed copy, `Coalesced: true`, `Statements: 0`) unless the leader's answer ended `Bypass` for `'Errors'` (e.g. a per-facet timeout at the leader's deadline) or `'ScopeChanged'` — then the joiner computes its own answer outside the flight. A refresh that joins a foreground computation stores nothing itself. A `MinSeq`-unproven request (§44.3 step 3a) never joins a flight.
+
+---
+
+## 45. Read-your-writes (C: `RetoldFacetingReadYourWrites`)
+
+- **Tracking:** `onChange(pEvent)` records `{ Seq, At: Date.now() }` under `pEvent.Actor.PrincipalKey` (skipped when null), in a `Map` bounded by `Freshness.ReadYourWritesMaxPrincipals` (oldest dropped). Entries older than `ReadYourWritesMS` are expired lazily.
+- **Upgrade:** `effectiveFreshness(pPrincipal, pFreshness, pNow)` → `{ Mode, MaxLagMS, MinSeq, Requested, Upgrade }`: `Requested = pFreshness.Mode`; `Mode: 'Exact'` stays (`Upgrade: null`); a `MinSeq` (any epoch) → `'Exact'`, `Upgrade: 'MinSeq'`; else when `principalKey(pPrincipal)` wrote within `ReadYourWritesMS` → `'Exact'`, `Upgrade: 'ReadYourWrites'`; else unchanged. Exact is enough for the principal's own (local) writes because generations bump synchronously at intake: an equal vector already includes them. A `MinSeq` this process cannot prove applied (another epoch, or beyond the local counter) is not enough: the Cache stage then skips the lookup and the 304 entirely (§44.3 step 3a, review §51.50).
+- **Tracking cost (review §51.54):** a principal already at the newest end of the write-order Map (a bulk write: one event per record) is updated in place, never re-inserted.
+- `lastWrite(pPrincipal)` → `{ Seq, At } | null`; `stats()` → `{ Principals, Writes, Upgrades: { ReadYourWrites, MinSeq } }`; `clear()`.
+- Without ME-3 the write response carries no `X-Retold-Change-Seq` (§51.6); the tracker is the 04 §8.3 fallback.
+
+---
+
+## 46. SSE (C: `RetoldFacetingSSE`)
+
+### 46.1 Route
+
+`GET <RoutePrefix>/Changes` (`/1.0/Facet/Changes`; `Changes` is a reserved entity name, D-17), mounted by `SSE.connect(pServiceServer)` (idempotent) when `SSE.Enabled` is true, or `'Auto'` (the default, review §51.59) on a host **with** a scope policy — without one every write would reach every stream; `true` is the operator's statement that the host is single-tenant.
+
+0. (review §51.62) A request with an `Origin` header that is neither this host (`new URL(Origin).host === Host`) nor listed in `SSE.AllowedOrigins` (`'*'` = any) → `403 FACET_FORBIDDEN { Reason: 'Origin' }`, before any principal resolves: a cross-site page can neither read a victim's stream nor hold its connection slots.
+1. Resolve the principal through `PrincipalResolver.resolve` on a context with `Entity: ''` (the M1 401 rules); a principal whose `Kind !== 'User'` → `401 FACET_UNAUTHENTICATED` (JSON, standard headers). An error → its JSON error.
+2. Limits: open connections of this `principalKey` ≥ `MaxPerPrincipal`, of its tenant ≥ the tenant's **fair share** `min(MaxPerTenant, max(1, floor(MaxConnections / active tenants incl. this one)))` (review §51.62; no per-tenant cap without a policy: one bucket is not a tenant), or in total ≥ `MaxConnections` → `429 FACET_RATE_LIMITED` with `Detail: { Limit: 'SSE.MaxPerPrincipal' | 'SSE.MaxPerTenant' | 'SSE.MaxConnections' }` (refuse new, never evict old: no reconnect ping-pong between tabs; every stream ends at its revalidation time, so shares rebalance as tenants come and go).
+3. `writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no', 'Vary': 'Cookie, Authorization', 'X-Retold-Facet-Contract': '1' })`, `socket.setTimeout(0)`, `setNoDelay(true)`; write `retry: <RetryMS × [1, 1.5) jittered>\n\n`, then the `ready` event. Restify discipline: the handler never returns a promise and calls `fNext(false)` exactly once, when the stream ends (client close, `closeAll`, revalidation failure); nothing else writes to the response.
+
+### 46.2 Events (UTF-8, one JSON object per `data:` line)
+
+```
+event: ready
+data: {"NodeEpoch":"e:4f0c2b9e","Seq":"e:4f0c2b9e:12","CoalesceMS":250,"HeartbeatMS":15000,"Reset":false}
+
+id: e:4f0c2b9e:15
+event: generation
+data: {"Entity":"Project","Generation":"g:7f3a09c1e2d4","Seq":"e:4f0c2b9e:15"}
+
+: hb
+
+event: model
+data: {"ModelVersion":"m:4a1e9b0c22d1"}
+
+event: closed
+data: {"Reason":"Shutdown" | "Revalidate"}
+```
+
+- `generation` carries **only** `Entity`, `Generation` and (optionally) `Seq`: no tenant, owner, column, row id, count or row data. `Generation` is opaque: `'g:' + 12 hex` of sha256(`Generations.BootEpoch` | principalKey | Entity | the largest tick among the bumps forwarded to this connection for this entity) — it changes when the visible data changed and reveals nothing about other tenants' write volume. `Seq` (the latest forwarded bump's) and `ready.Seq` are included when `SSE.IncludeSeq` is true, or `'Auto'` (the default) on a host **without** a scope policy (review §51.58: the node-wide counter would reveal other tenants' write volume). No `id:` line is ever written (events are not replayed).
+- `ready.Reset: true` when the request carried `Last-Event-ID` (events are not replayed; the client refetches everything visible). Clients also refetch on every `ready` after their first.
+- `model` after a model reload (`broadcastModelChanged`); clients refetch everything visible.
+
+### 46.3 Coalescing, heartbeat, backpressure
+
+(Revised by the review, §51.60–§51.61.) `onBump` runs inside every write, so it only records the entity's pending `{ MaxTick, Seq, Keys, All }` and arms ONE shared flush timer (`CoalesceMS`, unref'd): O(tenant keys of the bump) per record whatever the number of streams. The shared flush filters the candidate connections (their tenant buckets, or every connection for an `All` entity — no policy, or a `'#none'` part), checks §46.4 and writes at most **one** `generation` event per (connection, entity) per window. One shared housekeeping timer (period `min(HeartbeatMS, RevalidateMS / 4)`) sends the heartbeat comment `: hb` (skipped while blocked), closes a stream blocked (`write()` false, no `'drain'`) longer than 2 × `HeartbeatMS` (`Stalled`; its socket destroyed), and revalidates each stream at its `RevalidateMS` (jittered ±10 %). A blocked stream holds its events (coalesced per entity) until `'drain'`.
+
+**Revalidation (review §51.60):** the session a stream opened with is a snapshot (the session layer resolved it once for this request), so it is never re-read from the request object: without a host hook the stream ends with `closed { Reason: 'Revalidate' }` and the client reconnects through the host's full authentication (a logout or a tenant switch then answers 401 / another principal). A host whose sessions live in a store implements `Host.revalidatePrincipal(pRequest, fCallback(pError, pPrincipal))`; an error, a non-User principal or a different `principalKey` then closes the stream, anything else keeps it open.
+
+### 46.4 Authorization of each bump (`onBump(pBump)`)
+
+A bump of entity `E` is forwarded to a connection iff **both**:
+
+1. `Authorizer.canFacet(<connection context>, E)` — computed lazily per entity per connection and cached until revalidation or a model reload; and
+2. one of the bump's `TenantKeys` is in `Generations.principalTenantKeys(Principal, E)`: its own tenant key for a `Tenant` entity; its own `Part/o` or `Part/*` for a `Personal` entity (never the plain tenant key, so a colleague's private write is not signalled, 06 §11); for `'*'` see 3.
+
+3. `'*'` bumps (Global / Unscoped entities, unknown tenants): with a policy they are **not** forwarded individually; they are queued per entity and flushed every `GlobalTickMS` to every connection passing 1 (06 §11); with no policy (Kind `'None'`) they are forwarded immediately like tenant bumps. `'#any'` is never forwarded.
+
+Connections are indexed by visible tenant key so a bump touches only candidate connections.
+
+### 46.5 API (C)
+
+```javascript
+connect(pServiceServer) → boolean           handleChanges(pRequest, pResponse, fNext)
+onBump(pBump)                              broadcastModelChanged()
+closeAll(pReason)                          stats() → { Connections, Principals, Tenants, Enabled, Opened, Refused: { <Limit> | Origin: n }, Sent, Coalesced, Heartbeats, Closed, Revalidated, Stalled }
+enabled(), includeSeq(), originAllowed(pRequest), tenantCap(pTenantPart), flush(), housekeeping()   // review
+connections() → [ { PrincipalKey, OpenedAt, Sent } ]   // tests
+```
+
+---
+
+## 47. Client and demo (D)
+
+All paths below are under `example_applications/faceting_demo/`; D owns every file there (DEMO-SPEC.md gains §12 "Live changes (M4)" with the measured numbers).
+
+### 47.1 Provider subscribe API (`source/providers/Pict-Provider-Facet.js`, liftable)
+
+```javascript
+subscribeChanges(pDomain)            // open (or reuse) ONE stream per domain for the current principal key: GET <prefix(pDomain)>/1.0/Facet/Changes
+closeChanges(pDomain)                // one domain, or every domain when omitted (a principal switch closes all and reopens for the new principal)
+changeState(pDomain) → AppData.Facet.Changes[pDomain] = { Status: 'Connecting' | 'Open' | 'Closed' | 'Error', PrincipalKey, LastSeq, LastEventAt, Events, Reconnects }
+```
+
+- Transport: `EventSource` when the host needs no custom request headers (a cookie-session app); otherwise (the demo: the persona travels in `X-Retold-Facet-Demo-Principal`, which `EventSource` cannot send) a `fetch()` stream reader with `Accept: text/event-stream` and the provider's request headers, parsed by a pure SSE line parser (`source/providers/Facet-Changes.js`). No persona or ID ever goes into a URL. Reconnect with **jittered** backoff (`retry:` from the server, doubled, max 30 s, × [½, 1]); a `closed` event reconnects too — `'Revalidate'` at once (attempt 0: through the host's authentication), `'Shutdown'` with backoff (review §51.63); a 401 / 403 / 404 / 429 answer stops reconnecting until the next principal change. An SSE-triggered refetch waits a random 0..`ChangeJitterMS` (150) first, so every page that heard one event does not refetch in the same tick. Without a `Seq` on the event (the default on a policy host) the refetch asks `Freshness: { Mode: 'Exact' }` instead of a `MinSeq`.
+- Every received event is logged as an exchange of kind `'Change'` for the inspector.
+
+### 47.2 Coalesced refetch
+
+Each group keeps `DependsOn` from its last envelope. On `generation(Entity, Seq)` for domain `D`: every group of `D` whose `DependsOn` includes `Entity` is refetched if it is visible (the existing per-group coalescing: one POST per group per tick, with `Freshness.MinSeq: Seq` and `If-None-Match`), or marked stale (refetched when shown). `ready` (after the first) and `model` refetch every visible group of the domain. The exchange records the trigger ("Live update: Project @ e:…:15").
+
+### 47.3 Inspector
+
+The Envelope tab and the summary strip show `Cached`, `Stale` (+ `LagMS`), `Exact`, `Version` / ETag, `X-Retold-Facet-Cache`, `X-Retold-Facet-Seq`, `X-Retold-Facet-Freshness` and the trigger; 304s keep "304 from cache". A stream status chip per domain (Open / Reconnecting / Off).
+
+### 47.4 "Make a change" panels (real writes through the stock meadow-endpoints CRUD routes, as the demo principal)
+
+| Page | Action | Request (through the front proxy) |
+|---|---|---|
+| Projects for me | Set the status of a listed project (Active / At risk / On hold / Done); Undo | `PUT /api/ProjectTrack/1.0/Project` `{ IDProject, Status }` |
+| Documents by form type | Add a document of the selected form type dated 2026-03-15; Delete it; Undelete it | `POST /api/ProjectTrack/1.0/Document` `{ Title, Status: 'Draft', DocumentDate, IDFormType, IDProject }`; `DELETE …/1.0/Document/<ID>`; `GET …/1.0/Document/Undelete/<ID>` |
+| Lab forms (A) | Complete one of my started forms; Re-open it | `PUT /api/LabTrack/1.0/LabForm` `{ IDLabForm, Status: 'Complete' \| 'Pending', CompletedDate }` (the form is a Pending LabForm of mine for a Started work-list row, found through `POST …/1.0/Facet/LabForm/Records/0/1`) |
+| Bookstore explorer | Add a 5-star review to the first listed book; Remove it | `POST /api/Bookstore/1.0/Review` `{ IDBook, Rating: 5, Text }`; `DELETE …/1.0/Review/<ID>` |
+
+The panel shows the write's status; the counts then change through the SSE refetch alone (no manual reload). Writes are logged as exchanges of kind `'Write'`.
+
+### 47.5 Demo host
+
+- Domain servers: `Faceting: { Cache: { Enabled: true } }` (SSE defaults); the provider sends `Freshness: { Mode: 'Bounded', MaxLagMS: 5000 }` by default (so `Stale` is observable: e.g. user43 right after user42 adds a document shares the E2 key), `MinSeq` on SSE-triggered refetches.
+- **Write guard** (demo host, chain-wrapped through `harness.installBehavior` after boot; the intake wraps the dispatcher, so the two never touch): `Create-PreOperation` stamps the tenant column (and `OwnerIDUser` on `LabForm`) from the session and refuses (403) a body naming another, and (review §51.66) refuses a foreign key (`IDProject`, `IDBook`, `IDFormType`, … by meadow's `ID<Table>` naming) whose row is not in the persona's tenant (a shared lookup: does not exist); `Update-`, `Delete-`, `Undelete-PreOperation` refuse (403) a row outside the session's tenant (and owner on `LabForm`) and a row the persona does not own (`OWNERSHIP_RULES`): a Project it is not an active member of, a Document it neither wrote nor is an active member of the project of, a Review it did not write.
+- **Demo-only switches:** `Cache.ExposeStatus`, `Freshness.SeqHeader` and `SSE.IncludeSeq` are `true` on the demo's domains (the inspector shows the cache status and the Seq, and the MinSeq flow is visible); a multi-tenant deployment keeps their defaults.
+- Front server (`server/Faceting-Demo-Front.js`): (a) `GET /api/<Domain>/1.0/Facet/Changes` proxied as a **stream** (persona header resolved as for other facet calls, `Accept: text/event-stream` forwarded, no upstream timeout, no buffering, upstream aborted when the browser disconnects); (b) a write **allowlist** — exactly the rows of §47.4 (method + path pattern + permitted body keys; JSON only, ≤ 16 KiB); anything else under `/api/<Domain>/1.0/` stays `404 DEMO_NOT_FOUND`, extra body keys `400 DEMO_WRITE_INVALID`; (c) keep `x-retold-facet-*` response headers (already). `/api/Demo/Status` adds each domain's `faceting.status()` `Cache` / `Changes` / `SSE` stats.
+
+### 47.6 Demo checks
+
+- `npm test` (smoke, port 19301): for each §47.4 action as user42 — the write answers 2xx through the proxy; a stream opened as user42 receives a `generation` event for the entity within 2 s while a stream as user81 (tenant 8) receives none for it; the dependent group's refetch (with its pre-write ETag) answers 200 with the expected delta; an unaffected group's request with its old ETag answers 304 and `X-Retold-Facet-Cache: NotModified`; a repeat request answers `Hit`; user43's E2 request issued right after user42's Document write and before any refetch answers `Stale: true` (user42 and user43 share the E2 key: same tenant, nothing bound to `$CurrentUser`), and a later one is fresh; undo restores the totals. The smoke leaves the data as it found it.
+- `npm run check:browser` (port 19302): every page's "Make a change" updates the affected card without a manual refetch; the inspector shows Cached / Stale / Version; new screenshots `28`–`31`; the existing 141 checks stay green.
+
+---
+
+## 48. Errors (M4)
+
+No new codes. `429 FACET_RATE_LIMITED` (`Detail: { Limit }`) for SSE limits; `401 FACET_UNAUTHENTICATED` for an anonymous stream; `400 FACET_REQUEST_INVALID { Field: 'Freshness' | 'Freshness.Mode' | 'Freshness.MaxLagMS' | 'Freshness.MinSeq' }`. Intake, notify, generation, probe and cache failures are never client errors: they log (no values) and degrade to M2 behavior.
+
+---
+
+## 49. Tests (O7) and ports
+
+### 49.1 Obligations per file
+
+| File (owner, port) | Must prove |
+|---|---|
+| `test/Facet-Generations_tests.js` (A, no server) | the key grammar (`tenantKey` / `genKey`, encoding, `'*'` / `'#any'` / `'#none'` / `t/*`); `applyChange` for every Operation × Kind row of §41.2–§41.3 (exact key sets: column precision, `'#row'` for delete / tenant / owner / identity / Required columns, `'#cols'`, `'*'` for Global / Unscoped, owner-qualified keys and `t/*` for unknown owners, both tenants on a move, `'#any'` always); granularity `'Entity'`; one tick per event; `vector` determinism and sensitivity (a bump outside the deps leaves the hash unchanged, inside changes it); eviction floors with tiny bounds: no ABA (entry that saw the last bump stays valid, older one invalid), per-tenant isolation of floors, floor-map overflow → GlobalFloor; `foldTenantKeys` / `principalTenantKeys`; bump listeners isolated by try/catch |
+| `test/Facet-ResultCache_tests.js` (A, no server) | LRU by entries and by bytes, `MaxEntryBytes` refusal, `MaxAgeMS` expiry, newer-`MaxTick`-wins, the §43.3 table for every mode (Exact never stale), `LagMS`, single-flight `refresh` (N concurrent stale lookups → 1 work), `flight` waiters share one result, errors never stored, every metric |
+| `test/Facet-CacheKey_tests.js` (A, 19132) | `depSet` (hops, label targets gated, `'#cols'` with Records, TenantOnly); probes (no SQL, scratch counters, Opaque / PostOperation / 401 / controller-less → Bypass reason, never an error); `cacheability` table; key material never contains a SessionID or request header (two sessions of one principal share a key; same-tenant users share over a tenant-only entity; `$CurrentUser` scope, owner-scoped `LabForm` and a tenant switch split it; clause Hash differences split it); `dependencies` per Kind; `version` shape |
+| `test/Facet-ChangeIntake_tests.js` (B, 19133) | over HTTP on ProjectTrack / LabTrack / Bookstore-Tenant: single Create, bulk Create, Update (PUT and PUT/PATCH by id), bulk Update, Upsert (create and update paths), Upserts, Delete, Undelete each emit exactly the §40.3 events (Operation, IDs, Tenants incl. both on a move and `'*'` without a pre-image, Owners, ChangedColumns diff, KeyImages, Actor.PrincipalKey = `principalKey` of the read principal, Seq monotonic and well-formed); a pre-existing PostOperation installed before attach and one installed after both still run, in order, with the controller as `this`; a previous behavior that errors / throws still yields one event and the same client response; a throwing subscriber leaves the 2xx response and the other subscribers intact; the event is delivered before the client sees the response; `install` is idempotent across a model reload (no double events); DAL-direct writes produce nothing; `notify` / `notifyByFilter` shapes, validation (`null` + warn, never throw), settle re-delivery (`NotifySettleMS` small); the Bus adapter against a fake bus |
+| `test/Facet-SSE_tests.js` (C, 19134) | 401 anonymous; headers, `retry`, `ready`; a bump in the principal's tenant → one `generation` with only `{ Entity, Generation, Seq }`; another tenant's bump → nothing; Personal: own owner key forwarded, a colleague's not; `'*'` only through the global tick (small `GlobalTickMS`); no policy → immediate; non-facetable entity never; coalescing (many bumps in `CoalesceMS` → one event); heartbeat; 429 per principal / tenant / total; revalidation closes on a changed principal; `closeAll` ends streams and `harness.stop` completes with streams open; no timer survives |
+| `test/Facet-ReadYourWrites_tests.js` (C, 19135) | upgrade within `ReadYourWritesMS`, not after, not for another principal; `MinSeq` (own, foreign, malformed is the normalizer's 400); bound on tracked principals |
+| `test/Facet-Invalidation_tests.js` (wiring, 19136; PostgreSQL half gated; the file the M4 brief names, replacing the `Facet-Cache-M4_tests.js` skeleton) | end to end with `Cache.Enabled`: writes through every endpoint kind and `notify` / `notifyByFilter` bump exactly the expected keys (via a Generations listener) and invalidate exactly the dependent answers: dependent folds miss, unrelated folds hit (assert `stats()`), a `Title` edit does not invalidate a `Status` facet, a label-column edit invalidates the labelled facet, a global-lookup (`FormType`) edit invalidates every tenant; Exact never stale; Bounded `Stale: true` within `MaxLagMS`, one background refresh, then fresh; Fast; ETag stable / changes after a write; the 304 path runs no SQL (`Statements: 0` and a provider spy) and only after authorization (401 / 404 / 403 still win); tenant A's writes never invalidate tenant B's entries; owner-scoped isolation; read-your-writes and `MinSeq` upgrades through HTTP; `X-Retold-Facet-*` headers; cache off = M2 behavior (digest Versions, no 304 short-circuit, no lookups; the envelope differs only by `DependsOn`); uncacheable Reasons; shutdown with open streams; on PostgreSQL: write → miss → fresh counts and the 304 path |
+| `debug/m4-smoke.js` (wiring, 19192) | a manual run: E1 query, a write, the event, the miss and the hit |
+| demo smoke / browser check (D, 19301 / 19302) | §47.6 |
+
+Keep `npm test` fast: SSE / RYW / refresh tests use small `CoalesceMS`, `HeartbeatMS`, `GlobalTickMS`, `ReadYourWritesMS`, `NotifySettleMS`, and wait on conditions (stats, events) rather than fixed sleeps where possible.
+
+**Review additions (§51.46–§51.66):** `test/Facet-Invalidation-Review_tests.js` runs the write-path obligations on BOTH meadow-endpoints versions — the harness's `MeadowEndpoints: 'Installed' | 'Monorepo'` option builds the endpoints with the umbrella's 4.0.21 or `modules/meadow/meadow-endpoints` (4.1.x; the suite skips when the checkout is absent): `PUT { Deleted: 1 }`, a tenant move under an `Update-QueryConfiguration` filter, a `Create-QueryConfiguration` filter the new row fails and a bulk update's per-record failure all bump (and the Exact answer equals the Reference oracle); a mutating `Update-PreOperation`; a plain `setBehavior` after attach; a replaced dispatcher; `NoChangeSource`; the bump at PostOperation entry; then once: scope drift (`ScopeChanged`, never stored, never shared with a joiner), an unprovable `MinSeq`, `ModelReload`, per-timeout flights, the refresh joining the flight, and the client-visible defaults (no Seq / cache headers on a policy host, `Cached: false` on another principal's hit; the Seq header and no stream without a policy). Unit additions: Generations (group eviction, pinned keys, entity floors, a 50k-bump hot-path bound, `'Auto'` from `MaxBytes`, fail-closed apply), ResultCache (refresh cap, approximate LRU), ChangeIntake (the DAL failure path, rewrap, coverage, coalesced settles, linear 50k-id notify and the caps, unknown-tenant counting), SSE (Origin, fair share, stalled streams, revalidation by reconnect, `IncludeSeq` default).
+
+### 49.2 Port registry additions
+
+| Port | File |
+|---|---|
+| 19130 | `test/Facet-Generations_tests.js` (A; only if it boots a server) |
+| 19131 | `test/Facet-ResultCache_tests.js` (A; only if it boots a server) |
+| 19132 | `test/Facet-CacheKey_tests.js` (A) |
+| 19133 | `test/Facet-ChangeIntake_tests.js` (B) |
+| 19134 | `test/Facet-SSE_tests.js` (C) |
+| 19135 | `test/Facet-ReadYourWrites_tests.js` (C) |
+| 19136 | `test/Facet-Invalidation_tests.js` (wiring) |
+| 19137 | `test/Facet-Invalidation-Review_tests.js` (wiring, the review fixes; write paths on both meadow-endpoints versions) |
+| 19192 | `debug/m4-smoke.js` (pinned) |
+| 19301–19305 | the demo's own checks (19301 smoke, 19302 browser check); 19300 is the demo server, never used by a builder |
+
+---
+
+## 50. File ownership and the shared-file protocol
+
+| Owner | Files (M4) |
+|---|---|
+| **A** | `source/cache/Retold-Faceting-Generations.js`, `source/cache/Retold-Faceting-ResultCache.js`, `source/security/Retold-Faceting-CacheKey.js`, `test/Facet-Generations_tests.js`, `test/Facet-ResultCache_tests.js`, `test/Facet-CacheKey_tests.js` |
+| **B** | `source/change/Retold-Faceting-ChangeIntake.js`, `source/change/Change-Intake-Interim.js`, `source/change/Change-Intake-Bus.js`, `test/Facet-ChangeIntake_tests.js` |
+| **C** | `source/routes/Retold-Faceting-SSE.js`, `source/change/Retold-Faceting-ReadYourWrites.js`, `test/Facet-SSE_tests.js`, `test/Facet-ReadYourWrites_tests.js` |
+| **D** | everything under `example_applications/faceting_demo/` (incl. `DEMO-SPEC.md` §12, its README, screenshots) |
+| **wiring** | `source/Retold-Faceting-Service.js`, `-Service-Options.js`, `-Util.js`, `-Installers.js`, `source/routes/Retold-Faceting-Routes.js`, `source/engine/Retold-Faceting-Router.js`, `source/contract/Facet-Contract-Request.js` (Freshness), `source/contract/Facet-Contract-Envelope.js` (`DependsOn`), `source/request/Retold-Faceting-RequestNormalizer.js`, `source/host/*` (beyond `entityScopeColumns`), `README.md`, `docs/internal-contracts.md` after the builders, `test/Facet-Invalidation_tests.js`, `debug/m4-smoke.js`, and every earlier test whose expectations M4 alters (e.g. an exact envelope key list gaining `DependsOn`) |
+| **shared** | `test/Facet-Smoke_tests.js` (anyone ADDS assertions), `source/contract/Facet-Contract-Errors.js` (add codes only), `source/contract/Facet-Contract-Util.js` (add helpers only) |
+
+Protocol (M2 §35, unchanged): edit only your files; a contract change is made **here first** with a line in §51; shared files by string-replacement `Edit` only (re-read first, add rather than remove); fix (never weaken) an earlier assertion your contracted change breaks, and say so; `npm test` green after every change; `npm run test:pg` green before you report; umbrella `node_modules` only, Node 22 `fetch`, ephemeral ports (except smoke scripts), Retold style, Mocha TDD, never `git add` / `commit` / `push`, never modify files outside this module, docker only for `rfs-test-postgres`; a demo server may be running on 19300 — leave it alone, use 19301–19305 and stop what you start. Builders may build against each other's **skeletons**: B and C test their services with direct calls (synthetic events / bumps) where the other service is not done yet; the end-to-end paths are the wiring's.
+
+---
+
+## 51. Ambiguities resolved / M4 deviations from the design
+
+1. **The cache and the generation Version are opt-in (`Cache.Enabled: false` by default).** The design (05 §1.1) puts the cache on by default behind the L1 DAL hook (M-1). Without it the interim intake sees only endpoint writes; a host whose importers, DAL calls or raw SQL do not `notify()` would get stale answers and stale 304s. `Cache.Enabled: true` is the operator's statement that every write reaches the intake; it turns on the result cache, the generation Version and the 304 short-circuit together. With it off, the M2 representation-digest Version (G3) stays, so every earlier expectation holds (only an exact envelope key list sees the new `DependsOn`). The intake, generations and SSE are on by default (`ChangeCapture.Intake: 'Auto'`, `SSE.Enabled: true`): they never change an answer.
+2. **`Freshness.DefaultMode` stays `'Exact'`** (design: `'Bounded'`); the demo opts into `Bounded`.
+3. **Whole-envelope entries** (one entry per request Key) rather than per-Agg entries (09 §3.1): the cube composes facets into one statement, and the per-request key is what the ETag needs. Per-Agg reuse across different requests is a later optimization.
+4. **The cache key's scope comes from per-entity probes** (§42.2) run before execution, because M2 captures happen inside the engines (after the point where a hit or a 304 must be decided). The probe uses the entity's own `Reads-QueryConfiguration` exactly like a hop relation without client conjuncts; client-operator transforms are covered by the client conjuncts in the key plus the 06 §7 determinism rule (`FacetCacheable: false` opts out). Probes are not counted against the M2 behavior budget.
+5. **Owner-qualified keys gain `Part/*`** for writes whose owner is unknown. 05 §6.1 says "unknown owner → the tenant key only", which an owner-qualified fold does not read, so such a write would leave its entries valid. Every owner-qualified fold also reads `Part/*`.
+6. **No `X-Retold-Change-Seq` on write responses** (that is ME-3; a PostOperation behavior has no response object). Read-your-writes is the tracker (04 §8.3 fallback); `MinSeq` is accepted and upgrades to Exact.
+7. **`LagMS` of a Stale answer is its age** (`now − CreatedAt`), an upper bound of its true staleness, so `Bounded` never serves an answer staler than `MaxLagMS`.
+8. **No no-op suppression** (05 §3.3 `NoOpIgnoreColumns`): meadow stamps `UpdateDate` on every update, and an `UpdateDate` facet must see it.
+9. **`DeleteByFilter` is folded into `EntityDirty`**, and filters are carried, never executed (no materializer in M4).
+10. **SSE `Generation` is opaque** (per principal, per entity) instead of a raw tick, and `'*'` bumps go through the global tick, so the stream reveals neither other tenants' activity nor the node's write volume through the generation. The `Seq` (in `ready`, `generation` and the `X-Retold-Facet-Seq` header) is the node's change counter and does reveal the aggregate write rate; since the review both switches default to `'Auto'` — off on a host with a scope policy (§51.58).
+11. **SSE coalesces at 250 ms** (the brief) instead of 5 000 ms with burst suppression (02 §10); limits refuse (429) instead of evicting.
+12. **SSE events for a `Personal` entity are owner-qualified**, so a `TenantOnly`-relaxed facet (E3) is not pushed a colleague's completion (06 §11); it refreshes on its next request (its Version does read the tenant key).
+13. **Records-bearing Query bodies are cacheable** (the pivot reads `'#cols'`) unless the pivot has read-side behaviors (`RecordsPostOperation`). Records / Count / Keys routes are never cached (D-38) and keep their digest Versions.
+14. **Opaque answers are never cached** (`Cache.OpaqueTTLMS` and `Scope.DependsOn` are reserved).
+15. **Intake adapters are plain classes**, the third module kind besides services and pure modules (§38.2).
+16. **Envelopes with any `Errors` entry are neither stored nor given a generation Version** (a transient per-facet error must not become a 304-able answer).
+17. **The 304 short-circuit compares only the current generation Version**; a client holding a Stale Version gets a 200.
+18. **`DependsOn`** is a new envelope field (sorted entity names the answer depends on; readable entities only) so clients can match SSE events to visible groups without knowing the plan.
+
+### As built (wiring pass): decisions the builders and the wiring made beyond the text above (items continue the numbering)
+
+Wiring:
+
+19. **`CreatedAt` of an entry is the moment its GenVector was read** (before execution, `pContext.Cache.VectorAt`), not the store time: a Stale `LagMS` (the entry's age) then always covers the execution time too, so `Bounded` never serves an answer staler than `MaxLagMS` (§51.7).
+20. **Post-execution Bypass** (`Errors`, `Staged`): `X-Retold-Facet-Cache: Bypass` with the Reason in `pMeta.Cache.Reason`, the digest Version, nothing stored; the lookup's `Miss` was already counted (`Misses` counts lookups, `Bypass[Reason]` counts uncacheable answers). `TooLarge` keeps `Status: 'Miss'` and the generation Version (valid without an entry, so a later `If-None-Match` still 304s before execution), with `Reason: 'TooLarge'`, counted as `Bypass.TooLarge` and `Rejected`.
+21. **Single flight is used for every cacheable miss** (`FlightKey = Key|GenVector.Hash`). Joiners get their own copy parsed from the stored form (`Body`), their own `ElapsedMS`, the leader's Version, and `pMeta { Statements: 0, Relations: 0, BehaviorRuns: 0, Cache.Coalesced: true }` (they ran no SQL). The background refresh never joins a flight.
+22. **The background refresh** is a full `queryInternal` with `CacheRefresh: true` and the original `Now` / `PlanForm` internal options; its Freshness is forced `Exact` without consulting read-your-writes (its upgrades are not counted), and it skips the lookup (`Status: 'Refresh'`).
+23. **`X-Retold-Facet-MinSeq`** is read by the Shape stage (every mode) when the body has no `MinSeq`; a malformed header is `400 FACET_REQUEST_INVALID { Field: 'Freshness.MinSeq' }`, like a malformed body value. `normalizeRequest` shape-checks `Freshness` in every mode; only a Query reads it.
+24. **One Seq grammar**: `SEQ_PATTERN` lives in the pure `Facet-Contract-Request.js` (a client validates `MinSeq` with it); `Retold-Faceting-Util.SEQ_PATTERN` is the same object. `FRESHNESS_MODES`, `FRESHNESS_DEFAULTS`, `resolveFreshnessSettings` and `normalizeFreshness` are exported there too.
+25. **`If-None-Match: *`** matches the current generation Version (M1's `'*'` rule), so it is a 304 before execution once authorization passed; a Stale answer's route never turns into a 304, even after execution (§51.17).
+26. **`buildEnvelope` adds `DependsOn` only when it is given** (the service always gives it for a Query, both engines); Records / Count / Keys answers and older callers are unchanged.
+27. **`installChangeCapture()`** (attach, every reload; public) also warns when `Cache.Enabled` is on with no change source installed (`ChangeCapture.Intake: 'None'` / no bus): only `notify()` then moves generations, so an unnotified write leaves a cached answer and its 304 stale (tested).
+28. **The shutdown hook** wraps `fable.Orator.serviceServer.close` (else `Host.getServiceServer()`) once, marked `Symbol.for('RetoldFaceting.Shutdown')` (exported as `SHUTDOWN_MARKER`); `shutdown(fCallback)` is idempotent. SSE socket-destroy fallbacks (unref'd) clear as each socket closes, which can be a tick after the server's `close` callback.
+29. **Describe** `Changes.Stream` follows `SSE.Enabled`; `status().Cache` carries `Enabled` beside the ResultCache metrics. The service exports `CACHE_STATUSES` and `SHUTDOWN_MARKER`.
+30. **The demo browser check centers the pivot cell before its real click**: puppeteer only scrolls an element that is out of view, and a cell at the viewport's bottom edge sits under the fixed inspector bar (the click opened the drawer instead). Checked: nothing covers the cell once centered.
+
+Builder A (generations, cache key, result cache):
+
+31. `CacheKey.precheck(pContext, pPlan)` is the §44.3 step-1 check (Mode, ForceEngine, PlanErrors). `cacheability()` fails closed: no probe, or a probe without a capture for some DepSet entity, is `'ProbeError'`. An untrusted Opaque entity (the guard refuses its capture, so it is absent from `Captures`) reports `'Opaque'`, like a trusted Opaque capture.
+32. The scope part of the key carries `[ Entity, Fingerprint, { Appended, Transformed, Behavior, ScopeMode, Required, Repaired, PostOperation } ]` plus `ContextWarnings`: in Repair mode the guard adds the tenant predicate after the capture's diff, so the fingerprint alone could let two tenants share a key.
+33. With `Records`, `depSet` adds every `FilterAST.Entities` entity (with `'#cols'` and its structural columns): the Records rows are the full filter's, whatever Variant the facets planned.
+34. Generations: `clear()` raises `GlobalFloor` to `GlobalTick` (no ABA through a clear); `bumpEntity` notifies the bump listeners; a Personal entity without a tenant column uses `'#none'`; a Personal fold of a principal with no tenant value reads `[ '#any', '*' ]`.
+35. ResultCache: `set()` computes `Bytes` (and `CreatedAt` when absent), freezes the entry, refuses malformed or error entries, and returns whether the entry survived eviction (false also when a newer `MaxTick` is kept); `refresh()` runs its work on `setImmediate`; `refreshing(key)` is public and a stalled refresh releases its key after `max(60 s, 2 × Limits.TimeoutMS)`; `Flights` counts work runs started; `shutdown()` also forgets flights.
+
+Builder B (intake):
+
+36. An Update with no before-image lists the submitted model columns **without the primary key** (it only locates the row; including it would make every such update a `'#row'` bump).
+37. The audit columns `UpdateDate` / `UpdatingIDUser` are added only when the entity's model has them (FormType / LabFormType updates report just their own columns).
+38. `notify({ Records })` for a record without a matching `Before`, with `ChangedColumns` absent or null, adds `'*'` to `Tenants` (and an unknown-owner pair): the §39.2 unknown-old-tenant rule applies to notify too.
+39. Interim wrappers go inert once the intake's source is no longer `'Interim'` (no double events when the Bus arrives); after `shutdown()`, `notify` still delivers but arms no settle re-delivery.
+40. Only `Catalog.entities()` are wrapped: under a policy an entity without the tenant column must be in `Catalog.GlobalEntities` to be facetable, hence captured. ~~Host code that later calls a plain `setBehavior` on a wrapped slot silently replaces the wrapper.~~ Superseded by §51.46: the dispatcher is wrapped, never a slot. meadow-endpoints error bodies carry a debug `Stack` that gains one frame (the wrapper); the rest of the error response is byte-identical.
+41. A Personal entity with no tenant column produces `Tenants: [ '*' ]` with `Owners` carrying `Tenant: '#none'`; Generations then bumps `'*'` (over-invalidation, safe; owner isolation is lost for such an entity — no fixture has one).
+
+Builder C (read-your-writes, SSE):
+
+42. Read-your-writes ignores notify settle re-deliveries (`ChangeID` ending `'~settle'`); `ReadYourWritesMS ≤ 0` turns write tracking off (`MinSeq` still upgrades); a malformed `MinSeq` from an in-process caller still upgrades to Exact and is reported as `MinSeq: null`; `lastWrite(pPrincipal | pPrincipalKey, pNow?)`.
+43. SSE indexes connections, and counts `MaxPerTenant`, by `Generations.tenantKey(ScopeValues[Policy.Column])` (one `'*'` bucket without a policy). Bumps keyed `'#none'`, and `'*'` bumps on a host without a policy, go to every connection that passes the checks; under a policy the global tick runs from the first `'*'` bump until the last stream closes; `GlobalTickMS` is clamped to ≥ 10 ms.
+44. A server-initiated close (Shutdown, Revalidate) also ends the TCP connection, with a 1 s unref'd destroy fallback; a refused stream (401 / 429 / 500) ends the chain with `fNext(false)`; a client that disconnects while its principal resolves is never registered. `Sent` counts every event but not the `retry:` frame or heartbeats; `timerCount()` and the static `CLOSE_REASONS` are test helpers; SSE settings are read at use time (tunable on the live options object).
+
+Builder D (demo):
+
+45. The Bookstore card reviews the first listed book **without** a 5-star review (so the counts move); an answer without `DependsOn` is refetched for any change of its domain; a page with no open stream refetches itself after a write and says so; the stream stops reconnecting on 400 / 401 / 403 / 404 / 405 / 406 / 429 / 501 (anything else backs off and retries).
+
+
+### Review fixes (after the M4 build; items continue the numbering)
+
+46. **The interim intake wraps the dispatcher, not the slots** (§40.2 note). A host's ordinary single-slot `setBehavior` after attach replaced the slot wrapper silently (and a re-install trusted a marker set); wrapping `BehaviorInjection.runBehavior` means no slot assignment can remove the intake, the host's slot functions stay its own, and `_BehaviorFunctions` is never touched.
+47. **Pre-images are snapshotted at `*-PreOperation` entry.** `Record` and `OriginalRecord` are one object until the DAL update; a PreOperation that merged `RecordToModify` into it rewrote the "before" image (the real change and the old tenant vanished). Without a snapshot (a test calling a slot directly) the submitted columns join the diff and a submitted policy column whose images agree adds the unknown tenant / owner.
+48. **Coverage is checked per request** (§40.8): a replaced dispatcher is re-wrapped and its entity invalidated before the lookup; an entity no source sees is `Bypass 'NoChangeSource'` unless `ChangeCapture.NotifyManaged` names it.
+49. **Probe / execution scope drift** (§42.8): an answer computed under a scope its key does not name is never stored or shared (`'ScopeChanged'`); a joiner computes its own answer. This closes the cross-principal leak where a membership change between the probe and the execution stored a wider answer under a narrower key.
+50. **An unprovable `MinSeq` skips the cache and the 304** (§44.3 step 3a) and is answered with the digest Version. The cache is correct only while every writer runs in this process: generations live in one process (stated on `Cache.Enabled` and in the README) until the upstream bus exists.
+51. **ModelVersion is snapshotted in `newContext`** (key material) and a mismatch at the Cache stage is `Bypass 'ModelReload'`: an old-model plan is never stored under the new ModelVersion.
+52. **The bump happens at PostOperation entry** (the row is committed), before the host's own PostOperation behaviors: a slow or never-calling-back host behavior no longer decides how long Exact hits and 304s stay stale.
+53. **Generations: group eviction, pinned `'*'` / `'#any'` groups, per-entity floors, a MaxTick vector hash** (§41.5–§41.6). The single GlobalFloor made every eviction past the floor bound move every fold's vector in every tenant (and a cross-tenant ETag churn signal); keys are now evicted per (Entity, TenantKey) group, the pinned groups never fall back to a floor, an overflowing floor raises only its entity's floor, and the hash covers the dependency keys and their max tick. Residual: an idle tenant's group evicted under another tenant's pressure changes that tenant's vector only when its own last bump is newer than every key a fold reads (rare; only ever invalidates more). Per-tenant key budgets are an M5 option.
+54. **No Map re-insertion on hot paths** (P3): Generations and the ResultCache stamp a use counter and evict the least recently used of the 16 oldest-inserted entries; ReadYourWrites updates the newest writer in place.
+55. **Single flight per timeout; joiners never inherit `Errors` / `ScopeChanged`** (§44.11): a joiner with a longer deadline no longer receives the leader's per-facet timeouts, one with a shorter deadline no longer waits past its own.
+56. **Background refreshes through the flight, at most `Cache.MaxConcurrentRefreshes` at once** (§43.4).
+57. **`Cache.ExposeStatus`** (default false): `X-Retold-Facet-Cache` / `-Freshness` only for operators and demos; a hit on an entry another principal computed says `Cached: false` (entries record `By`), so the envelope no longer tells a user that a colleague ran the same query. `Stale` stays truthful. Residual: `ElapsedMS` remains a weak timing signal.
+58. **`Freshness.SeqHeader` / `SSE.IncludeSeq` default `'Auto'`**: the node-wide Seq is sent only on a host without a scope policy; the SSE `id:` line is gone. Rejected for M4: per-principal HMAC-wrapped Seq tokens (the server would have to map them back for `MinSeq`); clients on policy hosts refetch with `Mode: 'Exact'`.
+59. **`SSE.Enabled` default `'Auto'`** (mounted only with a scope policy); a probe that sees appended scope filters on a host without a policy logs a warning (generations and the stream cannot isolate tenants there); the bind warning no longer claims facets equal anonymous lists.
+60. **Revalidation by reconnect** (§46.3): the stream never trusts the session snapshot it opened with; `Host.revalidatePrincipal` is the optional keep-open hook.
+61. **SSE fan-out off the write path** (§46.3): `onBump` is O(tenant keys); one shared flush, one shared housekeeping timer (no per-connection timers); streams blocked > 2 × `HeartbeatMS` are closed. Rejected: dropping audit-column-only bumps (a Records-bearing answer reads `'#cols'`, so an `UpdateDate`-only write can change what a client shows); clients jitter instead (§47.1).
+62. **SSE `Origin` check, per-tenant fair share, no tenant cap without a policy** (§46.1). Kept: refuse-new for `MaxPerPrincipal` (evicting the oldest reintroduces tab ping-pong; the Origin check removes the cross-site slot-holding attack it was meant to stop).
+63. **The demo client reconnects after `closed`** (Shutdown with jittered backoff, Revalidate at once) and jitters SSE-triggered refetches.
+64. **Unknown-tenant notifies are counted and warned about; `ChangeCapture.RequireNotifyTenants`** refuses them (§40.5).
+65. **notify() is linear and capped** (`MaxEventIDs`, `MaxEventOwners`), and **settles coalesce per (Entity, Operation)** per window (§40.5).
+66. **Demo write guards read the rows they protect** (§47.5): foreign keys into another tenant's data, a colleague's document and a project the persona is not a member of are 403.
+67. **Documented, not changed:** `Required` policy columns (a sub-tenant restriction such as a department) share the tenant-level generation keys and stream signalling (S5): their writes invalidate and signal every principal of the tenant. A `TenantOnly`-relaxed fold over a `Personal` entity (E3) is invalidated by a colleague's write but not *pushed* (§51.12): it refreshes on its next request (poll it, or refetch on any event of the entity). Both are M5 options (Required-qualified keys; an Entity-only signal for TenantOnly readers).
+68. **Rejected (perf, minor):** answering hits from a deep-frozen parsed envelope instead of `JSON.parse(Body)` (about 40 µs on a 16 KB envelope; the string form is what guarantees no caller can mutate a stored answer) — only the needless `JSON.stringify` of answers no joiner may take is gone; memoizing the Planner output per normalized request (plans are decorated by later stages; an M5 optimization with its own invalidation).
+69. **Per-record write-path work is memoized** (P13): `Host.entityScopeColumns` per policy object, the writer's principal per request, Buffers compared with `Buffer.equals`.
+70. **Verification runs never rewrite tracked files**: the demo browser check writes screenshots to a scratch directory unless `DEMO_UPDATE_SCREENSHOTS=1`.
+---
+
+## 52. Seams for M5
+
+| Seam | M4 behavior |
+|---|---|
+| Upstream `MeadowChangeBus` (M-1) + `ChangeContext` (ME-3): `Touch` for committed-but-unread updates, DAL-direct writes, `X-Retold-Change-Seq` on writes | Bus adapter no-op; interim wrappers |
+| Multi-subscriber behaviors (ME-1 `addBehavior`) | used when present, else chain-wrapped |
+| Durable change log, Agent change feed, multi-node log tail, ProxyTap | not present |
+| Sweep / Bisect / Scrub, parity canary | not present (raw writers must `notify`) |
+| Stores (ClickHouse / Solr), `ApplyToken`, `AppliedSeq`, `applied` SSE events, `MinSeqWaitMS` | Live only; MinSeq → Exact |
+| `Cache.OpaqueTTLMS`, `Scope.DependsOn` (cacheable Opaque / decorated answers) | never cached |
+| Per-Agg cache entries, shared cache across instances | whole-envelope, in-memory, per process (every writer must run in the process, §51.50) |
+| Per-principal Seq tokens (an HMAC-wrapped Seq a policy host may hand out) | the Seq is not sent on a policy host by default (§51.58) |
+| Required-qualified tenant keys; an Entity-only signal for TenantOnly readers of a Personal entity | tenant-level keys and signals (§51.67) |
+| Per-tenant generation key budgets | group eviction + per-entity floors (§51.53) |
+| Plan memoization; frozen-envelope hits | per request (§51.68) |
+| Automatic `GenerationGranularity: 'Entity'` on high floor-raise rates | manual option only |
+| GET Query form (HTTP caching for widgets) | not mounted |
+| SSE replay from `Last-Event-ID` | `ready.Reset: true` → client refetch |
