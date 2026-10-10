@@ -782,6 +782,45 @@ suite
 								{
 									_Flags.SlowMS = 30;
 									tmpFlights = H.fable.RetoldFacetingResultCache.stats().Flights;
+									// Deterministic (no race on how many async hops each path takes before it reaches the
+									// flight): the first computation of a key does not start until all six callers of that
+									// key — the five Exact misses and the background refresh — reached flight(); a refresh
+									// with another flight key would never arrive, and after 3 s the leader goes on alone
+									// (Flights 2: the assertion below fails).
+									let tmpCache = H.fable.RetoldFacetingResultCache;
+									let fFlight = tmpCache.flight;
+									let tmpArrivals = new Map();
+									let tmpGates = new Map();
+									tmpCache.flight = function (pFlightKey, fWork, fCallback)
+									{
+										tmpArrivals.set(pFlightKey, (tmpArrivals.get(pFlightKey) || 0) + 1);
+										if (tmpGates.has(pFlightKey) && (tmpArrivals.get(pFlightKey) >= 6))
+										{
+											tmpGates.get(pFlightKey)();
+										}
+										let fGatedWork = (fWorkDone) =>
+										{
+											let tmpReleased = false;
+											let fRelease = () =>
+											{
+												if (tmpReleased)
+												{
+													return;
+												}
+												tmpReleased = true;
+												tmpGates.delete(pFlightKey);
+												return fWork(fWorkDone);
+											};
+											if (tmpArrivals.get(pFlightKey) >= 6)
+											{
+												return fRelease();
+											}
+											tmpGates.set(pFlightKey, fRelease);
+											setTimeout(fRelease, 3000);
+										};
+										return fFlight.call(this, pFlightKey, fGatedWork, fCallback);
+									};
+									let fRestoreFlight = () => { tmpCache.flight = fFlight; };
 									let tmpPending = 6;
 									let tmpStatuses = [];
 									let fOne = (pBody) =>
@@ -805,6 +844,7 @@ suite
 													setImmediate(
 														() =>
 														{
+															fRestoreFlight();
 															try
 															{
 																Expect(tmpStatuses.filter((pStatus) => { return pStatus === 'Stale'; }).length).to.equal(1);

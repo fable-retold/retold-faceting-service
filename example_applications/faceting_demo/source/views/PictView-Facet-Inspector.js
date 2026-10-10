@@ -707,6 +707,12 @@ class PictViewFacetInspector extends libPictView
 				tmpKV('Demo session', tmpHeaders['X-Retold-Facet-Demo-Session']),
 				tmpKV('Total', (typeof(tmpSummary.Total) === 'number') ? tmpSummary.Total : null)
 			];
+		if (tmpSummary.Store)
+		{
+			// M5 (internal-contracts §62.3): only when a store is registered.
+			tmpFacts.push(tmpKV('Store', `${tmpSummary.Store.Name} ${tmpSummary.Store.Available ? 'available' : 'unavailable'}${tmpSummary.Store.Fallback ? ` · fell back to Live (${tmpSummary.Store.Fallback.Reason})` : ''}`));
+			tmpFacts.push(tmpKV('LagMS', (typeof(tmpSummary.LagMS) === 'number') ? tmpSummary.LagMS : 'unknown'));
+		}
 		if (typeof(tmpSummary.Records) === 'number')
 		{
 			tmpFacts.push(tmpKV('Records', tmpSummary.Records));
@@ -743,6 +749,11 @@ class PictViewFacetInspector extends libPictView
 				if (pFacet.Semantics)
 				{
 					tmpFlags.push(pFacet.Semantics);
+				}
+				if (tmpSummary.Store && pFacet.Engine)
+				{
+					// M5: the engine of this facet, its lag when not exact, and why it stayed Live.
+					tmpFlags.push(`${pFacet.Engine}${(pFacet.Exact === false) ? ` ~${pFacet.LagMS} ms` : ''}${pFacet.StoreReason ? ` (${pFacet.StoreReason})` : ''}`);
 				}
 				let fNumber = (pValue) => { return (typeof(pValue) === 'number') ? libFacetDisplay.count(pValue) : '—'; };
 				return (

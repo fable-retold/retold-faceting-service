@@ -38,6 +38,12 @@
  *   write(pDomain, pMethod, pPath, pBody, …)     a host write (logged Kind 'Write'; never cached)
  * Events: generation(Entity, Seq) refetches every group of the domain whose last DependsOn names Entity (and drops
  * the principal's lookup rows of Entity); ready (after the first) and model refetch every group of the domain.
+ * M5 (internal-contracts §62, §66.3): setEngineMode('Auto' | 'Live' | 'Fast') — which engine every Query asks for:
+ * 'Auto' sends the body as before (the server routes each facet: a store when it is fresh enough for the request's
+ * Freshness, else Live), 'Live' adds Engine: 'Live' (the authoritative engine), 'Fast' asks Freshness Mode 'Fast'
+ * (a store whenever it can answer; an SSE refetch still asks Exact).  compareEngines(pGroupHash, fCallback) sends the
+ * group's Query once with Engine 'Live' and once with Fast (Kind 'Compare', never cached) and compares the answers
+ * facet by facet.  The exchange summary carries each facet's Engine / Exact / LagMS and the envelope's Store block.
  * Every event is logged as an exchange of Kind 'Change'.  Query bodies carry Freshness (options.Freshness, Bounded
  * by default); an answer that comes back Stale is refetched once more after StaleRefetchMS (the server refreshes
  * it in the background), at most MaxStaleRefetches times in a row.
@@ -96,6 +102,9 @@ const _DEFAULT_CONFIGURATION =
 		// does not refetch in the same tick (0: at once).
 		ChangeJitterMS: 150
 	};
+
+// M5: the engine modes of setEngineMode().
+const ENGINE_MODES = [ 'Auto', 'Live', 'Fast' ];
 
 // Stream answers that stop reconnecting until the next principal change (§47.1): no session / not allowed, no stream
 // on this server, over a connection limit.
@@ -353,6 +362,85 @@ class PictProviderFacet extends libPictProvider
 	showInternals()
 	{
 		return (this.pict.AppData.Facet.ShowInternals === true);
+	}
+
+	/**
+	 * M5: which engine every Query asks for: 'Auto' (the server routes each facet), 'Live' (Engine: 'Live', the
+	 * authoritative engine) or 'Fast' (Freshness Mode 'Fast': a store whenever it can answer).  The host refreshes.
+	 *
+	 * @param {string} pMode
+	 */
+	setEngineMode(pMode)
+	{
+		this.pict.AppData.Facet.EngineMode = (ENGINE_MODES.indexOf(pMode) >= 0) ? pMode : 'Auto';
+	}
+
+	/**
+	 * @return {string} 'Auto' | 'Live' | 'Fast'
+	 */
+	engineMode()
+	{
+		let tmpMode = this.pict.AppData.Facet.EngineMode;
+		return (ENGINE_MODES.indexOf(tmpMode) >= 0) ? tmpMode : 'Auto';
+	}
+
+	/**
+	 * M5: the group's Query (its current state, no Records) sent twice — with Engine 'Live', then with Freshness
+	 * 'Fast' — and compared facet by facet (Total, every bucket's key and count; the Total).  Both exchanges are
+	 * logged (Kind 'Compare', never cached).
+	 *
+	 * @param {string} pGroupHash
+	 * @param {(pError?: Error|null, pResult?: { Live: Record<string, any>, Store: Record<string, any>, Facets: Array<Record<string, any>>, Same: boolean }) => void} fCallback
+	 */
+	compareEngines(pGroupHash, fCallback)
+	{
+		let fDone = (typeof(fCallback) === 'function') ? fCallback : () => {};
+		let tmpState = this.group(pGroupHash);
+		if (!tmpState)
+		{
+			return fDone(new Error(`compareEngines: no group [${pGroupHash}].`));
+		}
+		let tmpBody = libFacetSelection.buildQueryBody(tmpState, null);
+		delete tmpBody.Records;
+		let tmpPath = libFacetSelection.routePath(tmpState, libFacetSelection.KIND_QUERY);
+		let tmpOptions = { GroupHash: pGroupHash, Kind: 'Compare', NoCache: true };
+		this.request(tmpState.Domain, 'POST', tmpPath, Object.assign({}, tmpBody, { Engine: 'Live' }), Object.assign({ Trigger: 'Compare engines: Live' }, tmpOptions),
+			(pLiveError, pLive) =>
+			{
+				if (pLiveError || !pLive.Body)
+				{
+					return fDone(pLiveError || new Error('compareEngines: no Live answer.'));
+				}
+				this.request(tmpState.Domain, 'POST', tmpPath, Object.assign({}, tmpBody, { Freshness: { Mode: 'Fast' } }), Object.assign({ Trigger: 'Compare engines: store (Fast)' }, tmpOptions),
+					(pStoreError, pStore) =>
+					{
+						if (pStoreError || !pStore.Body)
+						{
+							return fDone(pStoreError || new Error('compareEngines: no store answer.'));
+						}
+						let fCounts = (pFacet) =>
+						{
+							return JSON.stringify({ Total: pFacet ? pFacet.Total : null, Buckets: (pFacet && Array.isArray(pFacet.Buckets)) ? pFacet.Buckets.map((pBucket) => { return [ pBucket.Key, pBucket.Count ]; }) : null });
+						};
+						let tmpLiveFacets = pLive.Body.Facets || {};
+						let tmpStoreFacets = pStore.Body.Facets || {};
+						let tmpFacets = Object.keys(tmpLiveFacets).map(
+							(pKey) =>
+							{
+								let tmpStoreFacet = tmpStoreFacets[pKey] || null;
+								return (
+									{
+										Key: pKey,
+										Engine: tmpStoreFacet ? tmpStoreFacet.Engine : null,
+										Exact: tmpStoreFacet ? (tmpStoreFacet.Exact !== false) : null,
+										LagMS: tmpStoreFacet ? tmpStoreFacet.LagMS : null,
+										Same: fCounts(tmpLiveFacets[pKey]) === fCounts(tmpStoreFacet)
+									});
+							});
+						let tmpSame = tmpFacets.every((pFacet) => { return pFacet.Same; }) && (pLive.Body.Total === pStore.Body.Total);
+						return fDone(null, { Live: pLive.Body, Store: pStore.Body, Facets: tmpFacets, Same: tmpSame });
+					});
+			});
 	}
 
 	// ------------------------------------------------------------------ focus across re-renders
@@ -1623,7 +1711,13 @@ class PictProviderFacet extends libPictProvider
 		let tmpExact = !!((tmpPending && tmpPending.Exact) || (tmpChanged && tmpChanged.Exact) || (tmpPrevious && tmpPrevious.Exact));
 		let tmpTrigger = (tmpPending && tmpPending.Trigger) || (tmpChanged && tmpChanged.Trigger) || (tmpPrevious && tmpPrevious.Trigger) || null;
 		let tmpFreshness = null;
-		if (this.options.Freshness || tmpMinSeq || tmpExact)
+		let tmpEngineMode = this.engineMode();
+		if ((tmpEngineMode === 'Fast') && !tmpMinSeq && !tmpExact)
+		{
+			// M5: a store whenever it can answer (an SSE refetch above still asks Exact / MinSeq).
+			tmpFreshness = { Mode: 'Fast' };
+		}
+		else if (this.options.Freshness || tmpMinSeq || tmpExact)
 		{
 			tmpFreshness = libFacetSelection.freshnessBody(this.options.Freshness || { Mode: 'Exact' }, tmpMinSeq, tmpExact);
 		}
@@ -1631,6 +1725,11 @@ class PictProviderFacet extends libPictProvider
 		tmpState.Seq = (tmpState.Seq || 0) + 1;
 		let tmpPrincipal = this.principalKey();
 		let tmpBody = libFacetSelection.buildQueryBody(tmpState, tmpFreshness ? { Freshness: tmpFreshness } : null);
+		if (tmpEngineMode === 'Live')
+		{
+			// M5: the authoritative engine (internal-contracts §62.2).
+			tmpBody.Engine = 'Live';
+		}
 		Object.keys(tmpExtraSpecs).forEach(
 			(pKey) =>
 			{
@@ -2525,6 +2624,11 @@ class PictProviderFacet extends libPictProvider
 						MultiValued: tmpFacet.MultiValued === true,
 						Relaxed: tmpFacet.Relaxed === true,
 						Semantics: tmpFacet.Semantics || null,
+						// M5: the engine that answered this facet, and how current that answer is.
+						Engine: tmpFacet.Engine || null,
+						Exact: (typeof(tmpFacet.Exact) === 'boolean') ? tmpFacet.Exact : null,
+						LagMS: (typeof(tmpFacet.LagMS) === 'number') ? tmpFacet.LagMS : null,
+						StoreReason: (pBody.Store && pBody.Store.Facets && pBody.Store.Facets[pKey]) ? pBody.Store.Facets[pKey].Reason : null,
 						Error: null
 					});
 			});
@@ -2555,6 +2659,8 @@ class PictProviderFacet extends libPictProvider
 				Stale: (typeof(pBody.Stale) === 'boolean') ? pBody.Stale : null,
 				LagMS: (typeof(pBody.LagMS) === 'number') ? pBody.LagMS : null,
 				AsOf: pBody.AsOf || null,
+				// M5 (internal-contracts §62.3): only when a store is registered.
+				Store: (pBody.Store && (typeof(pBody.Store) === 'object')) ? JSON.parse(JSON.stringify(pBody.Store)) : null,
 				DependsOn: Array.isArray(pBody.DependsOn) ? pBody.DependsOn.slice() : null,
 				ModelVersion: pBody.ModelVersion || null,
 				ServerElapsedMS: pBody.ElapsedMS,
@@ -2593,6 +2699,7 @@ class PictProviderFacet extends libPictProvider
 
 module.exports = PictProviderFacet;
 module.exports.default_configuration = _DEFAULT_CONFIGURATION;
+module.exports.ENGINE_MODES = ENGINE_MODES;
 module.exports.Selection = libFacetSelection;
 module.exports.Display = libFacetDisplay;
 module.exports.Lookup = libFacetLookup;

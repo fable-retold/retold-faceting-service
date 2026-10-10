@@ -101,6 +101,7 @@ This mechanism is demo-only. A real host resolves the principal from its own ses
 | `DEMO_HOST` | `127.0.0.1` | front server bind address |
 | `DEMO_SCALE` | `Small` | fixture scale, `Small` or `Medium` (×4 rows; the expected totals above are Small's) |
 | `DEMO_PG` | unset | `1`: every domain on PostgreSQL in the throwaway `rfs-test-postgres` container, exactly as `npm run test:pg` (needs docker and `TZ=UTC`: `TZ=UTC DEMO_PG=1 npm start`; also works for `npm test`) |
+| `DEMO_CLICKHOUSE` | unset | `1` (M5): every domain also materializes every entity into the ClickHouse store, in the throwaway `rfs-test-clickhouse` container (started if needed; needs docker), database `rfs_demo_<port>_<pid>_<domain>` (one per demo process, so two demos never share or drop each other's) created and backfilled at every boot; the pages get the engine toggle (see "The ClickHouse store" below); also works for `npm test` |
 | `DEMO_LOG_LEVEL` | `error` | the domains' log level |
 | `DEMO_SKIP_BUILD` | unset | `1`: `npm start` does not build (the page asks for `npm run build` when `dist/` is missing) |
 
@@ -171,6 +172,20 @@ If the stream is cut — a server restart, a deploy — the provider reconnects 
 
 As User 81, nothing of tenant 7's activity arrives. The stream chip (Live / Reconnecting / Off) is on the card and in the summary strip. The inspector lists the stream's events (`Change`) and the writes (`Write`), and shows Cached / Stale / LagMS / DependsOn and the `X-Retold-Facet-Cache` / `-Seq` / `-Freshness` headers of every answer. Queries ask for `Freshness: Bounded` (5 s); after my own write (read-your-writes) or with an event's MinSeq the server answers Exact. Without a stream, for example on a host without M4, a card refreshes its page itself and says so. DEMO-SPEC §12 has the details and the measured numbers.
 
+## The ClickHouse store (M5, `DEMO_CLICKHOUSE=1`)
+
+```
+DEMO_CLICKHOUSE=1 npm start
+```
+
+Every domain gets `Stores.ClickHouse` with every entity materialized (`Materialize: 'All'`), `ExposeReasons: true` and `ExposeFreshness: true`, so the page can say why a facet stayed Live and how far behind the store is (on a real multi-tenant host `ExposeFreshness` stays off by default: the store's lag is global, a signal of other tenants' writes). Each domain's database is `rfs_demo_<port>_<pid>_<domain>`; it is kept when the demo stops and dropped by the test container's leftover sweep (the next `npm run test:ch`, `DEMO_CLICKHOUSE=1` boot or `npm run test:ch:up` from the module root) once that process is gone. Databases named `rfs_demo_<domain>` from earlier builds are never swept; drop them by hand if you want the space back. At boot the store backfills each domain, then applies the persona renumbering (a raw SQL write, reported to the service like any raw writer's) before the domain is ready; the banner prints each domain's database and how many entities are Live. The result cache is off in this mode: an entry only ever holds a Live answer and is served before any routing, so it would hide the store.
+
+- **The summary strip** shows which engines answered (`Engine: ClickHouse`, `ClickHouse 5 · Live 1`), a store answer that is not exact (`Store 0.4 s behind`, with its `AsOf` / `LagMS` in the tip) and a store fallback.
+- **The engine toggle** (on the filters line): `Auto` (the default: the page's `Bounded` freshness lets the server use the store when it is at most 5 s behind), `Live` (`Engine: 'Live'`: the authoritative engine) and `Store (Fast)` (`Freshness: Fast`: the store whenever it can answer). A refetch triggered by the change stream still asks Exact (MinSeq).
+- **Live vs Store** asks the page's question twice, `Engine: 'Live'` and `Freshness: Fast`, and puts the verdict in the head: both totals, how many facets ClickHouse answered, and whether the numbers are the same (and how far behind the store is when they are not). Both answers are in the inspector (`Compare` exchanges).
+- **The inspector** shows the `Store` block (available, fallback), `LagMS`, and per facet its engine, its lag when not exact and why it stayed Live (`Live (NotExact:Document)`, `Live (DeletedRowsNotMirrored)` …).
+- **After "Make a change"** the change stream's refetch asks Exact, so the page shows the new numbers at once: answered Live (`NotExact`) while the store has not applied the write, by ClickHouse once it has (about a second: the materializer's flush interval). Press **Live vs Store** right after a write to see the store's old numbers and its lag next to Live's.
+
 ## The smoke test
 
 `npm test` (or `node test-server.js`) boots everything in-process on 19301 and drives it through the front server with bodies built by the client contract (`source/providers/Facet-Selection.js`, `source/pages/FacetDemo-Pages.js`). Since M4 it also checks the following:
@@ -182,5 +197,7 @@ As User 81, nothing of tenant 7's activity arrives. The stream chip (Live / Reco
 - The browser's provider itself, run in node against the demo.
 
 Each M4 capability (stream, cache, wired pipeline) is probed separately. A missing one is skipped with a note, or fails with `DEMO_REQUIRE_LIVE=1`.
+
+`DEMO_CLICKHOUSE=1 npm test` (M5) boots the demo with the store and runs section 16 instead of sections 14 and 15 (those assert the result cache's Hit / Stale behavior on Live answers, and the cache is off with the store): the Status (every entity of every domain materialized and Live), every group as User 42 answered by the store with the browser's body and equal to `Engine: 'Live'`, and a write as User 42 read by User 43 — `Fast` right away is the store with its lag, `Exact` is the current answer (Live while the store lags), `Fast` polled until the store caught up (`LagMS` 0, the new numbers) — then the undo. 453 checks in about 10 s.
 
 It covers static files (skipped when `dist/` is not built), the demo endpoints, Describe (and the Books facet list derived from it), every group × every persona against the expected totals, a 304 revalidation, `Records/Count == Total` and paging for every list, a write-back round trip per widget kind, forged headers, the per-facet interval error, the domain servers' loopback bind and guard, and the host's own errors. Section 11 checks the client's display logic against real answers: the client's `Full` coverage equals the server's `Selected` flags at every interval (with 2 partial weeks and 1 partial year for the Documents range, Total unchanged), the work list's Started column equals the Started facet for every row, and the A/B breakdown holds for user42, user43 and user81. Against the wired M4 service it runs 583 checks in about 7 s on SQLite (most of it waiting for coalesced events) and in about 37 s on PostgreSQL (`TZ=UTC DEMO_PG=1`); a service without the stream, the cache or the wired pipeline skips those checks with a note.

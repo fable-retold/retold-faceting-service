@@ -1,6 +1,6 @@
-# retold-faceting-service — Internal Contracts (Milestones 1, 2 and 4)
+# retold-faceting-service — Internal Contracts (Milestones 1, 2, 4 and 5)
 
-> **Part III (§38–§52) is the Milestone 4 contract (change capture, generations, result cache, freshness, SSE) and wins over Parts I and II wherever they conflict** (§38.2 lists every earlier rule it changes). **Part II (§19–§37) is the Milestone 2 contract and wins over Part I wherever they conflict** (§19.2 lists every Part I rule it changes). Part I (§0–§18) below is the Milestone 1 contract as built. (Milestone 3 was the `example_applications/faceting_demo` app; its spec is that folder's `DEMO-SPEC.md`.)
+> **Part IV (§53–§70) is the Milestone 5 contract (the ClickHouse store: MirrorSpec, materializer, rebuild, reconcile, freshness, the ClickHouse fold compiler and engine) and wins over Parts I–III wherever they conflict** (§53.2 lists every earlier rule it changes). **Part III (§38–§52) is the Milestone 4 contract (change capture, generations, result cache, freshness, SSE) and wins over Parts I and II wherever they conflict** (§38.2 lists every earlier rule it changes). **Part II (§19–§37) is the Milestone 2 contract and wins over Part I wherever they conflict** (§19.2 lists every Part I rule it changes). Part I (§0–§18) below is the Milestone 1 contract as built. (Milestone 3 was the `example_applications/faceting_demo` app; its spec is that folder's `DEMO-SPEC.md`.)
 
 > **Binding.** This file is the interface spec Milestone 1 is coded against. Every shape, method name, field name and error code here is a contract between modules. If you need to change a contract, change it here first; never silently diverge. Where this file and the design set (`/Users/steven/Documents/retold-faceting-service-design/design/`) disagree, **this file wins for M1** and §16 lists every deliberate deviation.
 
@@ -989,7 +989,8 @@ See §9.3. The harness's `reference()` and the HTTP `facetQuery()` must produce 
 | 19120–19129 | M2 test files (§32.4) |
 | 19196–19198 | `example_applications/faceting_demo` (registry tags of the ProjectTrack, LabTrack and Bookstore domains; binds ephemeral; the demo's own ports are 19300–19310: 19300 `npm start`, 19301 its `npm test`, 19302 its `npm run check:browser`) |
 | 19130–19137, 19192 | M4 test files and `debug/m4-smoke.js` (§49.2) |
-| 19138–19189, 19193–19195, 19199 | free; claim one by adding a row here |
+| 19140–19147, 19193 | M5 test files and `debug/m5-smoke.js` (§69.2) |
+| 19138–19139, 19148–19189, 19194–19195, 19199 | free; claim one by adding a row here |
 
 ---
 
@@ -3345,3 +3346,1255 @@ Builder D (demo):
 | Automatic `GenerationGranularity: 'Entity'` on high floor-raise rates | manual option only |
 | GET Query form (HTTP caching for widgets) | not mounted |
 | SSE replay from `Last-Event-ID` | `ready.Reset: true` → client refetch |
+
+
+---
+
+# Part IV — Milestone 5: the ClickHouse store
+
+> **Binding for M5.** Part IV wins over Parts I–III wherever they conflict; §53.2 lists every earlier rule it changes. Where Part IV and the design set disagree, Part IV wins for M5 and §68 lists each deliberate deviation. The M5 builders are **A** (store contract, ClickHouse client, type map, DDL, the ClickHouse store's connection / registration / schema / state / write side, MirrorSpec and the Materialize schema), **B** (materializer: PendingSet, WriterClock, WriterLoop, FlushBuffer, MaterializeSource-InProcess, Freshness), **C** (the ClickHouse fold compiler and `EngineClickHouse`), **D** (Rebuilder, Reconciler, the O10 chaos suite) and the **wiring** agent (Router and service integration, Describe, envelope, harness `Store` option, O3 conformance, `debug/m5-smoke.js`, the demo toggle); §67 is the ownership table. Design references: `04` (authoritative: §2–§10, §13, §14), `05 §6.4 / §8 / §10–§12`, `03 §10–§11`, `06 §4.2–§4.3 / §12`, `09 §4.4–§4.6, §4.9, §4.13–§4.15, §4.26, §4.29, §4.31–§4.33`, `10 §5.1` (O3, O10).
+
+---
+
+## 53. Overview, precedence, services, options, context
+
+### 53.1 What M5 adds
+
+| Area | Addition | Owner |
+|---|---|---|
+| Store contract | `RetoldFacetingStoreBase` (04 §2, split: the write side and lifecycle on the store, the query side on an engine, §54) | A |
+| ClickHouse client | `ClickHouse-Client.js`: dependency-free HTTP client lifted from Sluice, callbacks, `{name:Type}` parameters, settings passthrough, 64-bit normalization, JSONEachRow insert with `insert_deduplication_token`, ping, a test fault injector (§57) | A |
+| ClickHouse store | `RetoldFacetingStoreClickHouse`: feature-not-boot registration, database `rfs_<InstanceKey>`, DDL (mirror, keymap, `_rfs_entity_state`), the write-side contract, shadow tables, state, checksums (§54, §56) | A |
+| MirrorSpec | `RetoldFacetingMirrorSpec` + `Materialize-Schema.json`: which entities and columns are mirrored, sort keys, SpecHash, the closure rule (§55) | A |
+| Materializer | `RetoldFacetingMaterializer` + per (store, entity) `PendingSet`, `WriterLoop`, `FlushBuffer`, per store `WriterClock`; `MaterializeSource-InProcess` (trusted DAL reads, no behaviors); event → pending; latest-read-wins cycles; one mirror INSERT per flush; keymap; AppliedSeq after the ack; crash safety (§58) | B |
+| Freshness | `RetoldFacetingFreshness`: per (store, entity) state machine, `ObservedSeq` / `AppliedSeq` / `LagMS`, admission per request Freshness mode, circuit breaker per (engine, entity) (§61) | B |
+| Rebuild / reconcile | `RetoldFacetingRebuilder` (backfill, shadow + `EXCHANGE TABLES`, wipe recovery) and `RetoldFacetingReconciler` (Sweep, Bisect, Scrub, Unverified recovery, admin triggers) (§59, §60) | D |
+| Compiler / engine | `ClickHouse-FoldCompiler.js` (FoldIR + captured scope → ClickHouse SQL, every kind Live supports) and `RetoldFacetingEngineClickHouse` (`capable` / `freshness` / `execute`) (§63, §64) | C |
+| Pipeline | Router: stores before Live per Agg, same-request fallback, breaker; envelope `Store` block and per-facet `Engine / Exact / AsOf / LagMS`; store answers never cached (digest Version); Describe; harness `Store` option; demo toggle (§62) | wiring |
+
+### 53.2 Earlier rules changed by Part IV
+
+| Earlier | Rule there | M5 rule |
+|---|---|---|
+| §9.4 / §18.3 / §27.3 Router | `ForceEngine`, else the first engine that accepts every Agg (Live) | per Agg: a registered store engine that is `capable` and admitted by Freshness answers it, everything else is Live; same-request fallback on a store error; `PreferEngine` (in-process) (§62.1) |
+| §9.1 engine interface | `capable(pAgg, pContext)` pure | unchanged for Live; the store engine's `capable` is pure and static, its `execute` may additionally refuse Aggs at capture time (`Execution.Refused`, §64) |
+| §10.1 / §10.2 envelope | `Engine` of the Total; `Exact: true, LagMS: 0` | per-facet `Engine`, `Exact`, `AsOf`, `LagMS` from the engine that answered it; envelope-level rules §62.3; a `Store` block when a store is registered (§62.3) |
+| §10.4 `normalizeForComparison` | strips `Version, AsOf, ElapsedMS, Engine, Cached, LagMS, Stale` | also strips `Store` (wiring adds it to `VOLATILE_FIELDS`) |
+| §44.5 Version / §44.6 storing | generation Version for cacheable answers | an answer with **any** store-served facet is post-execution `Bypass 'Store'`: digest Version, never stored (ApplyToken caching is a seam, §70) |
+| §39.3 intake subscribers | `'Generations'`, `'ReadYourWrites'` | + `'Freshness'`, then `'Materializer'` (in that order, after the M4 two) (§58.2) |
+| §38.4 options | `Stores`, `Materialize`, `Materializer`, `Reconcile` placeholders | defined (§53.4) |
+| §3 normalized request | `Freshness` | + `Engine: 'Auto' \| 'Live'` (§62.2) |
+| §38.6 context | | + `Store` (§53.5); `pInternalOptions.PreferEngine` |
+| §12.1 host | | unchanged (the materializer reads through `Host.getDAL`, §58.7) |
+| §14.4 / §32.4 / §49.2 ports | | + §69.2 |
+| §33 docker | `rfs-test-postgres` is the only container | + `rfs-test-clickhouse` (§69.1); still never any other container |
+
+Everything earlier that is not listed here still holds. In particular: Records / Count / Keys are always Live and Exact (D-38); labels are always the Live scoped label read (§18.6), never a dictionary; the Reference engine never reads a store; a store never answers a Show-deleted request.
+
+### 53.3 New files and services
+
+| File | Export | Kind | Registered | Owner |
+|---|---|---|---|---|
+| `source/store/Retold-Faceting-StoreBase.js` | `RetoldFacetingStoreBase` (+ statics `TARGET_LIVE`, `BUILD_ID_PATTERN`, `shadowTarget`, `isShadowTarget`, `abstractError`) | service (abstract) | no | A |
+| `source/store/clickhouse/ClickHouse-Client.js` | class `ClickHouseClient` (+ statics `PARAM_NAME_PATTERN`, `SETTING_NAME_PATTERN`, `QUALIFIED_TABLE_PATTERN`, `redact`, `normalizeRows`) | plain class (liftable: no fable, no sibling requires); **working** from the contracts pass (ping, query, command, insert with tokens, parameters, 64-bit normalization, fault injector, typed errors — verified against 24.8); A hardens and tests it | no | A |
+| `source/store/clickhouse/ClickHouse-TypeMap.js` | `{ TYPE_MAP_VERSION, DATETIME_MIN, DATETIME_MAX, mirrorType, baseType, paramType, isNullableType, toStoreValue, toStoreRow, fromStoreValue, canonicalDateLiteral }` | pure module | — | A |
+| `source/store/clickhouse/ClickHouse-DDL.js` | `{ DDL_VERSION, IDENTIFIER_PATTERN, META_COLUMNS, STATE_TABLE, KEYMAP_PREFIX, SHADOW_INFIX, sanitizeInstanceKey, databaseName, quoteIdentifier, qualified, mirrorTableName, keymapTableName, createDatabaseDDL, mirrorDDL, keymapDDL, entityStateDDL, addColumnsDDL, exchangeDDL, renameDDL, dropTableDDL, specComment, parseSpecComment }` | pure module | — | A |
+| `source/store/clickhouse/Retold-Faceting-StoreClickHouse.js` | `RetoldFacetingStoreClickHouse` (+ statics `STORE_NAME`, `WIPE_ERROR_CODES`) | service | `SUB_SERVICES` | A |
+| `source/persistence/Retold-Faceting-MirrorSpec.js` | `RetoldFacetingMirrorSpec` (+ statics `SPEC_VERSION`, `MATERIALIZE_SCHEMA`, `UNSUPPORTED_KEYS`) | service | `SUB_SERVICES` | A |
+| `source/persistence/Materialize-Schema.json` | draft-07 schema of `RetoldFaceting.Materialize` | data | — | A |
+| `source/persistence/Retold-Faceting-Materializer.js` | `RetoldFacetingMaterializer` (+ statics `HINT_SOURCES`) | service | `SUB_SERVICES` | B |
+| `source/persistence/Retold-Faceting-WriterLoop.js` | `RetoldFacetingWriterLoop` (+ statics `WORK_KINDS`, `TEST_HOOKS`) | service class, one per (store, entity) | no: constructed by the Materializer | B |
+| `source/persistence/Retold-Faceting-WriterClock.js` | `RetoldFacetingWriterClock` (`next()`, `seed()`, `Last`: implemented by the contracts pass, pinned by the smoke test) | service class, one per store | no: constructed by the Materializer | B |
+| `source/persistence/Retold-Faceting-PendingSet.js` | `RetoldFacetingPendingSet` | service class, one per (store, entity) | no | B |
+| `source/persistence/Retold-Faceting-FlushBuffer.js` | `RetoldFacetingFlushBuffer` | service class, one per (store, entity) | no | B |
+| `source/persistence/MaterializeSource-InProcess.js` | `RetoldFacetingMaterializeSourceInProcess` | service | `SUB_SERVICES` | B |
+| `source/persistence/Retold-Faceting-Freshness.js` | `RetoldFacetingFreshness` (+ statics `STATES`, `ADMISSION`, `BREAKER_DEFAULTS`) | service | `SUB_SERVICES` | B |
+| `source/store/clickhouse/ClickHouse-FoldCompiler.js` | `{ COMPILER_VERSION, OPERATOR_MAP, READ_SETTINGS, REASON_CLASSES, paramName, compileFilter, compileRelation, compileFoldPred, dimensionExpression, compileAgg, compileCube }` | pure module | — | C |
+| `source/engine/Retold-Faceting-EngineClickHouse.js` | `RetoldFacetingEngineClickHouse` (extends `RetoldFacetingEngineBase`; + static `ENGINE_NAME`) | service | `SUB_SERVICES`; registered with the Router only when the store is configured (§54.2) | C |
+| `source/persistence/Retold-Faceting-Rebuilder.js` | `RetoldFacetingRebuilder` (+ static `REBUILD_REASONS`) | service | `SUB_SERVICES` | D |
+| `source/persistence/Retold-Faceting-Reconciler.js` | `RetoldFacetingReconciler` (+ static `LEVELS`) | service | `SUB_SERVICES` | D |
+| `test/support/Facet-Docker-ClickHouse.js` | the `rfs-test-clickhouse` container helper (implemented by the contracts pass) | test support | — | A (after the contracts pass) |
+| `test/support/Facet-ClickHouse-Support.js` | gate, fresh databases, store options, `loadMirrors`, `assertMirrorEqualsSource` (§66.1) | test support | — | A |
+| `test/support/Facet-Store-Fake.js` | an in-memory store implementing the §54.3 write side, with fault injection (§66.1) | test support | — | B (D uses it) |
+
+`SUB_SERVICES` order (the contracts pass inserted them after `RetoldFacetingReadYourWrites` and before `RetoldFacetingRouter`, so the M4 order assertions — the five M4 services after the LabelResolver, `Router`, `Routes`, `SSE` last — still hold): `RetoldFacetingMirrorSpec`, `RetoldFacetingFreshness`, `RetoldFacetingMaterializeSourceInProcess`, `RetoldFacetingStoreClickHouse`, `RetoldFacetingMaterializer`, `RetoldFacetingRebuilder`, `RetoldFacetingReconciler`, `RetoldFacetingEngineClickHouse`. Every constructor is side-effect free (no timers, no I/O, no subscriptions): nothing happens until the wiring calls `installStores()` (§54.2), so a host without `Stores.ClickHouse` behaves exactly as M4. The per-(store, entity) classes are fable service classes (they extend `fable-serviceproviderbase`, set `serviceType`, resolve options, so the smoke test constructs them) but are **constructed by the Materializer** with `new libX(this.fable, this.options, '<Store>:<Entity>')` and reached only through it (`Materializer.loop(pStore, pEntity)`), never through `fable.<Type>`. Services find each other through `this.fable.<serviceType>` as before; the Materializer hands its per-entity objects to D through `loop()` / `pendingInfo()`.
+
+The ClickHouse client and the three pure `store/clickhouse/*` modules require nothing outside `source/contract/` and `source/store/clickhouse/` (the client: nothing but `http` / `https` / `crypto`), so they can move to the planned `meadow-connection-clickhouse` module unchanged (README note, §68 #1).
+
+### 53.4 Options (M5)
+
+```javascript
+Stores:
+{
+	ClickHouse: false | {                          // an object registers the store (§54.2); false (default) = on-the-fly only
+		URL: null, URLEnv: null,                    // 'http(s)://host:port' (no credentials in it); URLEnv names an environment variable
+		User: 'default', UserEnv: null,
+		Password: '', PasswordEnv: null,            // secrets only by value from code or by env-var name; never logged
+		Database: null,                             // default 'rfs_' + InstanceKey (§56.1); must match ^[A-Za-z_][A-Za-z0-9_]{0,63}$;
+		                                            //   REQUIRED (or a non-default InstanceID): the default 'main' → Misconfigured (review)
+		TimeoutMS: 20000, PingTimeoutMS: 3000,
+		RetryConnectMS: 60000,                      // feature-not-boot retry period while unavailable (unref'd timer)
+		InsertRetries: 2,                           // same-token retries of ONE insert on a network error / 5xx (§57)
+		QuerySettings: { },                         // operator extras for every read (names ^[a-z_][a-z0-9_]*$, scalar values)
+		SourceStringOrder: 'Auto',                  // 'Auto' | 'Binary' | 'Collated': may String range operators compile (§63.3)
+		ExposeReasons: false,                       // envelope Store.Facets[k].Reason: the full reason (true) or its class only (§62.3)
+		// --- review additions (§68 "Review fixes") ---
+		ExposeFreshness: 'Auto',                    // per-facet LagMS / AsOf, freshness reasons, Describe's per-entity State / LagMS:
+		                                            //   'Auto' = only on a host WITHOUT a scope policy (the lag is global: other tenants'
+		                                            //   write activity); Admin.authorize principals always get Describe's detail
+		ReaderUser: null, ReaderUserEnv: null,      // a least-privilege credential (SELECT on the database) for request reads;
+		ReaderPassword: '', ReaderPasswordEnv: null, //  unset → the writer's.  Every request read runs with readonly = 2 regardless
+		MaxConcurrentReads: 32,                     // request reads in flight (own socket pool); beyond → that facet Live, 'StoreBusy'
+		WriterMaxSockets: 16,                       // the materializer's pool (separate from the readers')
+		ReadLimits: { MaxMemoryBytes: 4294967296, MaxRowsToRead: 0, MaxBytesToRead: 0 },   // per request read (0 = server default)
+		HealthMinTimeoutMS: 1000,                   // a time-out counts as a store fault only when the statement had at least this long
+		UnreachableAfterFailures: 2,                // network failures / time-outs within BreakerWindowMS → the store 'Unreachable'
+		UnreachablePingMS: 2000,                    //   (every facet Live at once, O(1)) until a background ping succeeds
+		AllowInsecure: false,                       // http:// to a non-loopback host is warned about unless true
+		CA: null, Cert: null, Key: null, RejectUnauthorized: true,   // https:// options (PEM text)
+		Owner: 'Check'                              // the database's owner marker (§56.1): 'Check' refuses another deployment's
+		                                            //   database ('Misconfigured'); 'Adopt' takes it over
+	},
+	Solr: false, OpenSearch: false
+},
+Materialize: { },                                  // { Entity: <declaration> } (§55.1)
+Materializer:
+{
+	Enabled: 'Auto',                                // 'Auto' = true when a store is registered; false = the store is never used
+	BatchIDs: 2000, ReadChunkIDs: 1000,
+	FlushIntervalMS: 1000, FlushRows: 50000,
+	RebuildPageSize: 25000,                         // review: was 100000 (one page = one source read + one insert per target)
+	OverflowIDs: 100000,                           // PendingSet bound; beyond it the entity collapses to Dirty (§58.3)
+	MaxBackoffMS: 30000, DrainOnStopMS: 5000, IdleTickMS: 50,
+	// --- review additions ---
+	StreamDelayMS: 'Auto',                          // a stream hint waits up to this for company ('Auto' = the flush interval in force;
+	                                                //   0 = a cycle per arrival): ~one source read, keymap read and insert set per interval
+	PromptRangeKinds: [ 'Resync', 'RebuildPage' ],  // range pages flushed at once; Scrub / Fill pages wait for the interval
+	MaxConcurrentBuilds: 2,                         // backfills / rebuilds / boot verifies per store at once (the rest queue)
+	StateWriteIntervalMS: 5000,                     // AppliedSeq / cursor-only state changes coalesced into one multi-row INSERT per store
+	PartsBackoffAbove: 150, HealthCheckMS: 30000,   // active parts above → the flush interval stretched ×4 until merges catch up
+	Lease: { Enabled: true, TTLMS: 30000, HeartbeatMS: 10000, SettleMS: 250 }   // one materializer per store (§58.10)
+},
+Reconcile:
+{
+	AutoStart: true,                                // timers per entity; tests set false and call the in-process API
+	SweepIntervalMS: 'Auto',                        // 'Auto' = 600000 with an intake and the entity not in RawWriterEntities, else 60000
+	RawWriterEntities: [ ], MaxTxnMS: 60000, SweepCap: 5000,
+	LeafRange: 2000, BisectIntervalMS: 86400000, HardDeleteBisectIntervalMS: 3600000, RebuildDivergenceRatio: 0.01,
+	ScrubPeriodMS: 86400000, ScrubRowsPerSecond: 2000, ScrubTickMS: 1000,
+	ScrubUnknownTotalRowsPerTick: 256,              // review: the pace while the row count is unknown (seeded from the store at start)
+	BootBisectAfterMS: 300000,                      // review: a clean restart after more downtime than this Bisects before Exact
+	JitterRatio: 0.15                               // review: timers start at a random phase, periods ± this share
+},
+Freshness: { …M4, BreakerFailures: 5, BreakerWindowMS: 30000, BreakerOpenMS: 30000 },
+Admin: { RebuildCooldownMS: 600000, Routes: false, authorize: null }   // §60.5; authorize also gates Describe's store detail
+```
+
+The contracts pass added every key above to `DEFAULTS` (`Stores.ClickHouse` stays `false`); the object form's defaults are the exported `libOptions.STORE_DEFAULTS.ClickHouse` (`deepMerge` cannot merge an object over `false`, so `StoreClickHouse.configure` merges the host's section over them). `Freshness.DefaultMode` stays `'Exact'` (§51.2): with a store configured a default request uses the store only when it is fully caught up (§61.3).
+
+### 53.5 Request context and pMeta additions
+
+```javascript
+pContext.Store =                                     // set by the Router (wiring) on every Query once a store is registered; null otherwise
+{
+	Prefer: 'Auto' | 'Live' | 'ClickHouse',          // NormalizedRequest.Engine ('Live') or pInternalOptions.PreferEngine (tests, O3)
+	Decisions: { '<AggKey>': { Engine: 'ClickHouse' | 'Live', Reason: null | '<§65 reason>', Freshness: <§61.3 result> | null } },
+	Fallback: null | { Reason: 'Error' | 'Timeout' | 'Breaker', Detail },
+	Statements: 0                                     // ClickHouse statements this request ran
+}
+pMeta.Store = { Used: [ AggKey … ], Refused: { AggKey: Reason }, Fallback, Statements, ElapsedMS }   // in-process only; full reasons
+```
+
+`pInternalOptions.PreferEngine: 'ClickHouse'` (tests only, never from a client) routes every Agg the store engine is `capable` of to the store **without** the freshness admission (the O3 suites quiesce the materializer first); capability, closure and eligibility still apply.
+
+---
+
+## 54. The store contract and its registration
+
+### 54.1 Split of the design's store class
+
+04 §2 makes a store both a writer target and an engine. M5 splits it: `RetoldFacetingStoreBase` / `RetoldFacetingStoreClickHouse` (A) own the lifecycle and the write side and run raw statements; `RetoldFacetingEngineClickHouse` (C) is the engine the Router talks to (`capable` / `freshness` / `execute`), compiling through `ClickHouse-FoldCompiler.js` and executing through `Store.queryRows`. `StoreBase` keeps the design's query-side names as thin delegates so a later Solr store can choose either shape.
+
+### 54.2 Registration and feature-not-boot (wiring + A)
+
+At `attach`, after `rebuildCatalog` and `installChangeCapture()`, the wiring calls `installStores()` (public, idempotent; also after every model reload):
+
+1. `Stores.ClickHouse` not a plain object (false / absent) → nothing; the Router keeps M4 behavior; Describe `Engines.ClickHouse: { Available: false, Configured: false }`.
+2. `Materializer.Enabled === false` → the store is not used (log info, `Configured: true, Available: false, Reason: 'NoMaterializer'`); a non-materializing reader process is a seam (§70).
+3. `StoreClickHouse.configure(<resolved Stores.ClickHouse>)` (resolves `URLEnv` / `UserEnv` / `PasswordEnv`, the database name; **never** throws: a configuration problem — no URL, bad database name — sets `Available: false, Reason: 'Misconfigured'` and logs an error without secrets).
+4. `Router.register(EngineClickHouse)` **before** Live (preference order), then `Materializer.start(fCallback)` (§58.1). `start` never fails `attach`: ping failure, DDL failure or an invalid `Materialize` entry leave the store or that entity unavailable, logged, retried every `RetryConnectMS` (unref'd); the service boots and answers Live.
+5. Model reload: `Materializer.reload()` (MirrorSpec recompile, additive ALTER or rebuild per entity, §55.4).
+6. Shutdown (`RetoldFacetingService.shutdown`, M4 §44.10): `Materializer.stop()` first (drain ≤ `DrainOnStopMS`, final flush, clean-shutdown flags), then the M4 steps.
+
+`StoreClickHouse.status()` → `{ Configured, Available, Reason, Database, Version, LastError: <message without values> | null, ConnectedAt }`.
+
+### 54.3 `RetoldFacetingStoreBase` methods (A; ClickHouse implements all)
+
+Every async method calls back `(pError, pResult)` and never throws; an error carries `.StoreError = true`, `.Code` (ClickHouse error code number when known), `.Status` (HTTP status), and a message **without** bound values. `pTarget` is `'Live'` or `'Shadow:<BuildID>'` (`StoreBase.shadowTarget(pBuildID)`).
+
+| Method | Contract |
+|---|---|
+| `configure(pStoreOptions)` | sync; §54.2 step 3 |
+| `connect(fCallback)` | ping + `SELECT version()`; `(null, { Up, Version })` — `Up: false` is not an error |
+| `ensureSchema(pSpecs, fCallback)` | `CREATE DATABASE IF NOT EXISTS … ENGINE = Atomic` and `_rfs_entity_state`, then **reports** per spec what exists → `{ Entities: { E: { MirrorExists, KeymapExists, SpecHash: <from the table COMMENT> \| null, Columns: [ name … ] } } }`; it never creates a live mirror or keymap: live tables come only from a backfill's `RENAME` (§59.1), so a live table always holds a complete build |
+| `createLive(pEntity, pSpec, fCallback)` | the live mirror and keymap `IF NOT EXISTS` — for `Facet-ClickHouse-Support.loadMirrors` and tests only; the Materializer never calls it |
+| `addColumns(pEntity, pSpec, pColumns, fCallback)` | additive `ALTER TABLE … ADD COLUMN IF NOT EXISTS` on the mirror (and the keymap for tracked columns), then the COMMENT updated to the new SpecHash |
+| `health(fCallback)` | `{ Up, Version, Database, Tables, ActivePartsMax }` |
+| `maxVersion(fCallback)` | the largest `_Version` in any mirror, keymap or state table of the database (0 when none) — the WriterClock floor (§58.4) |
+| `readKeys(pEntity, pIDs, pTarget, fCallback)` | keymap point read (`FINAL`, `_IsDeleted = 0`, `Identity IN {ids:Array(Int64)}`) → `Map<ID, Array<{ Key: { <SortKey scope columns> }, Tracked: { … }, UpdateDate, Version }>>` — **every** live keymap row of the ID (§58.5 superset invariant) |
+| `readKeyRange(pEntity, pAfterID, pToID, pTarget, fCallback)` | the same for `AfterID < Identity ≤ ToID` |
+| `writeBatch(pEntity, pBatch, pToken, pTarget, fCallback)` | the three-insert flush protocol of §58.6 for one target; `pBatch = { Rows, Tombstones, KeyIntents, KeyRetires }`; `pToken = '<Entity>:<FlushID>:<Target>'`; chunk tokens `'<pToken>:K<i>'`, `':M<i>'`, `':R<i>'`; the mirror receives **one** INSERT per chunk carrying rows **and** tombstones; each INSERT retried up to `InsertRetries` times with its own token on a network error or 5xx |
+| `beginShadow(pEntity, pBuildID, pSpec, fCallback)` | `CREATE TABLE <E>__shadow_<BuildID>` and `_rfs_keys_<E>__shadow_<BuildID>` from the spec's DDL (drops leftovers of the same name first) |
+| `swapShadow(pEntity, pBuildID, pFirstEnable, fCallback)` | first enable: `RENAME TABLE` shadow → live (mirror, then keymap); otherwise `EXCHANGE TABLES <E> AND <E>__shadow_<BuildID>`, then the keymaps |
+| `dropShadow(pEntity, pBuildID, fCallback)` | `DROP TABLE IF EXISTS` both shadow tables (after a swap they hold the old data) |
+| `readState(pEntity, fCallback)` / `writeState(pEntity, pState, fCallback)` | `_rfs_entity_state` (§56.5); read → the state object or `null` |
+| `bucketChecksums(pEntity, pLeafRange, pTarget, fCallback)` | over the keymap's live **distinct** IDs: `{ '<bucket>': { Count, IDSum } }`, bucket = `intDiv(ID, LeafRange)` (§60.2) |
+| `readLeafRows(pEntity, pAfterID, pToID, pColumns, fCallback)` | mirror `FINAL`, `_IsDeleted = 0` rows of the range (content compare, `assertMirrorEqualsSource`) |
+| `queryRows(pSQL, pParams, pTypes, pSettings, fCallback)` | a read with the §57.3 read settings merged under `pSettings`; rows normalized (§57.2) |
+| `command(pSQL, pParams, pSettings, fCallback)` | DDL / admin statement (rebuild, wipe tests) |
+| `dropDatabase(fCallback)` | `DROP DATABASE IF EXISTS <db> SYNC` — tests and the wipe scenario only |
+| `capabilities()` | `{ Folds: [ every §5.3 / §24.9 kind ], Predicates: 'Portable', Paths: 'Subquery', CountModes: [ 'Rows', 'PivotDistinct', 'KeyDistinct' ], TimeZones: [ 'UTC' ] }` |
+| `status()` | §54.2 |
+
+---
+
+## 55. Materialize declaration, MirrorSpec and the closure rule (A)
+
+### 55.1 The declaration (`RetoldFaceting.Materialize`, schema `source/persistence/Materialize-Schema.json`)
+
+```javascript
+Materialize:
+{
+	Document:
+	{
+		Store: [ 'ClickHouse' ],                     // required; every name must be a configured store
+		Columns: 'Auto',                             // 'Auto' (rule 1 below) | [ explicit column list ] (scope, identity, delete, UpdateDate and Join columns are always added)
+		IncludeColumns: [ ],                         // added to 'Auto' (e.g. a GUID or a String longer than 256 that filters need)
+		ExcludeColumns: [ ],                         // removed from 'Auto' (never a scope / identity / delete column: that entry is invalid)
+		SortKey: 'Auto',                             // 'Auto' only in M5 (§55.3)
+		Watermark: 'Auto',                           // 'Auto' | 'UpdateDate' | false (§60.1)
+		Mutability: 'Mutable',                       // 'AppendOnly' accepted with a warning and treated as 'Mutable' (no aggregates in M5)
+		// design keys accepted with a load warning 'Unsupported:<Key>' and ignored in M5 (rows are still mirrored; folds use Subquery mode):
+		PathColumns: { }, RelationFields: { }, Rollups: { }, Aggregates: { }, Dictionary: false
+	}
+}
+```
+
+Validation (at `start` and every reload): the built-in validator of §20.2 against `Materialize-Schema.json` (A cross-checks with ajv in tests), then semantics: the entity is in `Catalog.entities()` (facetable) and has a DAL; it is not a `NeverFacet` / reserved / `_rfs_*` name; every named column is a catalog column (`Catalog.column`), never Sensitive; `Store` names a configured store. An invalid entry disables **that entity in that store** with a logged `FACET_DEFINITION_INVALID`-style error (`MirrorSpec.disabled()`), never a partial spec; the other entities load.
+
+### 55.2 MirrorSpec
+
+```javascript
+{
+	Entity: 'LabForm', Store: 'ClickHouse',
+	Identity: 'IDLabForm',
+	Kind: 'Personal',                                // Host.entityScopeColumns(E).Kind (§41.2)
+	TenantColumn: 'IDCustomer', OwnerColumn: 'OwnerIDUser', RequiredColumns: [ ], DeleteColumn: 'Deleted',
+	SortKey: [ 'IDCustomer', 'OwnerIDUser', 'IDLabForm' ],
+	Columns:
+	[
+		{ Column: 'IDLabForm', DataType: 'ID', Mirror: 'Int64', Role: 'Identity' },
+		{ Column: 'IDCustomer', DataType: 'Numeric', Mirror: 'Int64', Role: 'Tenant' },
+		{ Column: 'OwnerIDUser', DataType: 'Numeric', Mirror: 'Nullable(Int64)', Role: 'Owner', Join: 'IDUser' },
+		{ Column: 'Deleted', DataType: 'Boolean', Mirror: 'Nullable(UInt8)', Role: 'Delete' },
+		{ Column: 'UpdateDate', DataType: 'DateTime', Mirror: "Nullable(DateTime64(3, 'UTC'))", Role: 'Watermark' },
+		{ Column: 'IDMaterialIntake', DataType: 'Numeric', Mirror: 'Nullable(Int64)', Role: 'FK', Join: 'IDMaterialIntake' },
+		{ Column: 'Status', DataType: 'String', Mirror: 'Nullable(String)', Role: 'Column' },
+		…
+	],
+	ColumnNames: [ … ],                               // sorted, for the closure check
+	KeymapColumns: [ 'IDLabForm', 'IDCustomer', 'OwnerIDUser', 'IDMaterialIntake', 'IDLabFormType', 'UpdateDate' ],   // identity, sort-key scope, TrackedKeyColumns, UpdateDate
+	TrackedKeyColumns: [ 'IDCustomer', 'OwnerIDUser', 'IDMaterialIntake', 'IDLabFormType' ],   // scope ∪ FK (Join) columns
+	SourceColumns: [ … ],                             // what MaterializeSource reads: Columns (no meta columns)
+	Watermark: 'UpdateDate' | null,
+	Warnings: [ 'Unsupported:PathColumns', … ],
+	SpecHash: 'ms:4be1d0c2'
+}
+```
+
+**Compilation rules** (04 §4, adapted):
+
+1. **Columns** (`'Auto'`): the identity; the policy columns `Host.entityScopeColumns` reports (tenant, owner, every `Required` column); the delete column; `UpdateDate` / `CreateDate` when present; every `Join` column; every catalog **filterable** column whose DataType the type map mirrors (§56.3) — `String` only up to Size 256, never `Text` / `JSON` / `JSONProxy`, never Sensitive (`Catalog.column` is null), never a GUID column — plus `IncludeColumns`, minus `ExcludeColumns`. An explicit `Columns` list is that list plus the always-added columns.
+2. **TrackedKeyColumns** = the scope columns ∪ every `Join` column; **KeymapColumns** = identity ∪ sort-key scope columns ∪ TrackedKeyColumns ∪ `UpdateDate` (when mirrored).
+3. **SortKey** (`'Auto'`): `Tenant` / `Personal` entity → `[ TenantColumn, OwnerColumn?, Identity ]`; a `Personal` entity without a tenant column → `[ OwnerColumn, Identity ]`; `Global` / `Unscoped` → `[ Identity ]`. `Required` columns are mirrored, never in the sort key.
+4. **SpecHash** = `'ms:' + sha1(canonicalJSON({ Columns: [ [ Column, Mirror ] … ] (sorted), SortKey, KeymapColumns, TypeMap: TYPE_MAP_VERSION, DDL: DDL_VERSION }))[0..8]`.
+5. The spec covers only its own entity: M5 compiles no PathColumns, dictionaries, relation fields or rollups, so a mirror never holds derived data and no DependencyIndex / fan-out exists (§68 #4).
+
+### 55.3 The closure rule (store eligibility, A provides the check, C applies it)
+
+A fold is store-eligible only if **every** entity of its DepSet is mirrored in that store with **every** column the fold reads:
+
+- statically (`EngineClickHouse.capable`): `MirrorSpec.covers(pStore, pDepSet)` → `{ Covered: true }` or `{ Covered: false, Reason: 'NotMirrored:<E>' | 'NotMirrored:<E>.<C>' }`, where `pDepSet` is the Agg's DepSet (§24.10: every Rel's PK, delete column, policy columns, Project columns, Where fields, inner On columns, the pivot's conjunct fields) unioned with its Variant's (`FoldIR.depSet`), and columns still being filled after an additive change (§55.4) count as not mirrored;
+- dynamically (§63.2): every column a captured filter names (a behavior may append a column the DepSet does not list) must be a spec column, else `NotMirrored:<E>.<C>`.
+
+`MirrorSpec.compile` does **not** add closure entities automatically (04 §3.4 "advice, never auto-enable" — §68 #3): it logs one warning per declared facet / scope whose `Entities` are not all mirrored (`ClosureIncomplete`, listed in `MirrorSpec.warnings()`), so an operator sees which definitions will stay Live.
+
+### 55.4 Spec changes
+
+At `start` and on reload, per entity: no state row or no live table → backfill (§59.1). Same SpecHash → resume (§58.1). A **new** SpecHash whose columns are a superset of the live table's with the same types, sort key and keymap layout → **additive**: `Store.addColumns`, the new columns go into `entityInfo.FillingColumns` (they read as not mirrored) until a full Scrub pass completes (§60.3), then the state row records the new SpecHash. Anything else (a removed or retyped column, a changed sort key) → shadow rebuild (§59.2, Reason `'SpecChange'`). An entity removed from `Materialize` stops its loop; its tables are left in place (never dropped automatically).
+
+### 55.5 MirrorSpec API (A)
+
+```javascript
+compile(pMaterialize, pEnvironment) → { Specs: { Store: { Entity: MirrorSpec } }, Disabled: [ … ], Warnings: [ … ] }   // pure over Catalog, Host, Registry; also stores the result
+validate(pMaterialize, pEnvironment) → { Valid, Errors, Warnings }                                                       // no state change
+spec(pStore, pEntity) → MirrorSpec | null
+entities(pStore) → [ Entity … ]
+covers(pStore, pDepSet, pFilling) → { Covered, Reason }     // pFilling: { Entity: [ columns ] } still being filled (from the Materializer)
+column(pStore, pEntity, pColumn) → spec column | null
+disabled() / warnings()
+```
+
+---
+
+## 56. ClickHouse layout, DDL and the type map (A)
+
+### 56.1 Names
+
+- **Database** `Stores.ClickHouse.Database`, else `'rfs_' + InstanceKey` where `InstanceKey = InstanceID.replace(/[^A-Za-z0-9_]/g, '_')` (`DDL.databaseName`); when the sanitized key differs from the InstanceID (or is longer than 50 characters) the name is `rfs_<key[0..50]>_<FNV-1a hash of the InstanceID>`, so two InstanceIDs never share a database (review). With neither `Database` nor a non-default `InstanceID` the store is `Misconfigured` (every deployment left at the defaults would share `rfs_main`). Always `ENGINE = Atomic` (needed for `EXCHANGE TABLES`). Tests use `rfs_<pid>_<n>` (§69.3); the demo `rfs_demo_<port>_<pid>_<domain>` (§69.3).
+- **Tables:** mirror `<Entity>`; keymap `_rfs_keys_<Entity>` (`index_granularity = 256`, `non_replicated_deduplication_window = 1000`: point reads by ID touch ~25× fewer rows, §68 review); shadows `<Entity>__shadow_<BuildID>` and `_rfs_keys_<Entity>__shadow_<BuildID>` (`BuildID` = 8 lowercase hex); state `_rfs_entity_state`; the materializer lease `_rfs_lease` (`Store, Owner, ExpiresAtMS, Released, _Version`; ReplacingMergeTree by `_Version`, read FINAL: the latest claim wins, §58.10); the owner marker `_rfs_owner` (`Store, InstanceID, Fingerprint, _Version`: written on first use with this deployment's InstanceID and the source fingerprint `sf:<sha256 of dialect, host, port, database, SQLite file>`; a different InstanceID or source → `Misconfigured` unless `Owner: 'Adopt'`). Every identifier matches `DDL.IDENTIFIER_PATTERN` (`^[A-Za-z_][A-Za-z0-9_]{0,63}$`, shadow names are built from validated parts) and is backtick-quoted (`DDL.quoteIdentifier`); an entity named `_rfs_*` is refused at MirrorSpec validation.
+- **Meta columns** (`DDL.META_COLUMNS`): `_Version UInt64` (WriterClock, never `UpdateDate`), `_IsDeleted UInt8` (1 = tombstone), `_AppliedAt DateTime64(3, 'UTC') DEFAULT now64(3)` (mirror only). A model column named like a meta column disables the entity.
+
+### 56.2 DDL (generated by `ClickHouse-DDL.js`; verified on 24.8 by the contracts pass)
+
+```sql
+CREATE DATABASE IF NOT EXISTS `rfs_main` ENGINE = Atomic;
+
+-- Mirror (example: LabTrack.LabForm, a Personal entity: tenant IDCustomer, owner OwnerIDUser)
+CREATE TABLE IF NOT EXISTS `rfs_main`.`LabForm`
+(
+	`IDLabForm`        Int64,                                    -- identity: never Nullable
+	`IDCustomer`       Int64,                                    -- tenant (sort key): never Nullable (unset → quarantined, §56.4)
+	`OwnerIDUser`      Nullable(Int64),                          -- owner (sort key): Nullable, allow_nullable_key
+	`CreateDate`       Nullable(DateTime64(3, 'UTC')),
+	`CreatingIDUser`   Nullable(Int64),
+	`UpdateDate`       Nullable(DateTime64(3, 'UTC')),
+	`UpdatingIDUser`   Nullable(Int64),
+	`Deleted`          Nullable(UInt8),                          -- always 0 on live rows; mirrored so compiled filters stay valid
+	`DeleteDate`       Nullable(DateTime64(3, 'UTC')),
+	`DeletingIDUser`   Nullable(Int64),
+	`IDMaterialIntake` Nullable(Int64),
+	`IDLabFormType`    Nullable(Int64),
+	`Status`           Nullable(String),
+	`CompletedDate`    Nullable(DateTime64(3, 'UTC')),
+	`_Version`         UInt64,
+	`_IsDeleted`       UInt8,
+	`_AppliedAt`       DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+ENGINE = ReplacingMergeTree(`_Version`, `_IsDeleted`)
+ORDER BY (`IDCustomer`, `OwnerIDUser`, `IDLabForm`)
+SETTINGS allow_nullable_key = 1, index_granularity = 8192, non_replicated_deduplication_window = 1000
+COMMENT 'rfs mirror LabForm spec=ms:0123abcd';
+
+-- Keymap (the before-image of record, §58.5): one row per (identity, sort-key scope values) ever written live
+CREATE TABLE IF NOT EXISTS `rfs_main`.`_rfs_keys_LabForm`
+(
+	`IDLabForm` Int64, `IDCustomer` Int64, `OwnerIDUser` Nullable(Int64),
+	`IDMaterialIntake` Nullable(Int64), `IDLabFormType` Nullable(Int64), `UpdateDate` Nullable(DateTime64(3, 'UTC')),
+	`_Version` UInt64, `_IsDeleted` UInt8
+)
+ENGINE = ReplacingMergeTree(`_Version`, `_IsDeleted`)
+ORDER BY (`IDLabForm`, `IDCustomer`, `OwnerIDUser`)
+SETTINGS allow_nullable_key = 1, non_replicated_deduplication_window = 1000
+COMMENT 'rfs keymap LabForm spec=ms:0123abcd';
+
+-- Per (store, entity) state, inside the store it describes (04 §8.1)
+CREATE TABLE IF NOT EXISTS `rfs_main`.`_rfs_entity_state`
+(
+	`Store` LowCardinality(String), `Entity` String,
+	`State` LowCardinality(String), `Epoch` UInt32, `SpecHash` String,
+	`AppliedSeq` String,                                          -- JSON { "<NodeEpoch>": n } (informational across restarts, §61.2)
+	`CleanShutdown` UInt8,                                        -- 1 only after a graceful stop drained and flushed
+	`LossyColumns` String,                                        -- JSON { "<Column>": "Compare" | "Value" } (§56.3)
+	`FillingColumns` String,                                      -- JSON [ … ] (§55.4)
+	`SweepWatermark` Nullable(String), `ScrubCursor` Nullable(Int64), `ScrubbedThrough` Nullable(DateTime64(3, 'UTC')),
+	`LastRebuild` Nullable(DateTime64(3, 'UTC')), `LastBisect` Nullable(DateTime64(3, 'UTC')), `UnverifiedSince` Nullable(DateTime64(3, 'UTC')),
+	`Detail` String,                                              -- JSON: counters (Quarantined, LastError code), never values
+	`_Version` UInt64, `_UpdatedAt` DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+ENGINE = ReplacingMergeTree(`_Version`) ORDER BY (`Store`, `Entity`);
+```
+
+- Sort key per §55.2 rule 3; a `Global` / `Unscoped` entity is `ORDER BY (<Identity>)`. The keymap is `ORDER BY (<Identity>, <sort-key scope columns>)` so **several** live keys of one ID can coexist there (§58.5); its `_IsDeleted` rows retire keys. (The design's EmbeddedRocksDB keymap holds one key per ID and cannot keep that invariant across a partial flush: §68 #6.)
+- No `PARTITION BY` in M5 (no `do_not_merge_across_partitions_select_final` needed); partitions above `PartitionAboveRows` are a seam.
+- Every read of a mirror or keymap uses `FINAL` **and** `_IsDeleted = 0` (FINAL already drops `is_deleted` rows on 24.8; the predicate stays, belt and braces).
+- `_rfs_entity_state` reads use `FINAL` (latest `_Version` per `(Store, Entity)`); every write is a full row (the latest state object), version from the WriterClock.
+- No `_rfs_clock` table: the clock floor is `Store.maxVersion()` (§58.4, §68 #7).
+
+### 56.3 Type map and value conversion (`ClickHouse-TypeMap.js`)
+
+`TYPE_MAP_VERSION = 1`. `mirrorType(pColumnInfo, pRole)` → the column type; `toStoreValue(pColumnInfo, pValue, pSourceDialect)` → `{ Value, Lossy: null | 'Compare' | 'Value' }`; `toStoreRow(pSpec, pSourceRow, pSourceDialect)` → `{ Row, Lossy: { Column: 'Compare' | 'Value' }, Quarantined: false | '<reason>' }` (`Row` holds the spec's columns only, JSONEachRow-ready); `paramType(pMirrorType)` strips `Nullable(…)`; `canonicalDateLiteral(pValue, pOperator, pSourceDialect)` (§63.3).
+
+| Catalog DataType | Mirror type (`Nullable(…)` except identity and tenant) | Value written | Lossy |
+|---|---|---|---|
+| `ID` (the identity) | `Int64` | a safe integer (number, bigint, integer-literal string) | anything else: the row is skipped, `Lossy.<Identity> = 'Value'` (the entity becomes ineligible) |
+| `ForeignKey`, `Numeric` with `IsInteger` | `Nullable(Int64)` | safe integer; `null` → NULL | non-integer number, unsafe magnitude, non-numeric text (SQLite `''` / `' '`): NULL + `'Value'` |
+| `Decimal`, non-integer `Numeric` | `Nullable(Float64)` | `Number(v)` (a JS number as is; a numeric string — PostgreSQL `numeric` — parsed) | more than 15 significant digits, or non-numeric text: NULL + `'Value'` |
+| `String` | `Nullable(String)` | `String(v)` (a Buffer as UTF-8) | — |
+| `DateTime` | `Nullable(DateTime64(3, 'UTC'))` | `canonicalDateTime(v) + '.000'` (a JS `Date` read in UTC; `TZ=UTC` on PostgreSQL) | unparseable or `''` → NULL + `'Value'`; outside `DATETIME_MIN` `'1900-01-01 00:00:00'` … `DATETIME_MAX` `'2299-12-31 23:59:59'` → NULL + `'Value'`; on a **SQLite** source, a parseable value whose stored text is not exactly the canonical text (`'2022-01-01T00:00:00'`, `'2023-07-01 00:00'`) → `'Compare'` |
+| `Boolean` (incl. the delete column) | `Nullable(UInt8)` | `true / 1 / '1' / 'true'` → 1, `false / 0 / '0' / 'false'` → 0 | anything else: NULL + `'Value'` |
+| `GUID` | `Nullable(String)` (only when named in `IncludeColumns`) | `String(v)` | — |
+| `Text`, `JSON`, `JSONProxy`, unknown | not mirrored | | |
+
+- **Tenant sort-key column**: the base type, not Nullable; **owner** sort-key column: Nullable (with `allow_nullable_key = 1`). A tenant column of DataType `String` maps to `String`.
+- **Lossy flags** accumulate per (store, entity, column) in the WriterLoop (§58.5 step 5) and persist in `_rfs_entity_state.LossyColumns`; they only grow, except that a completed rebuild resets them to what the rebuild saw. `'Value'`: the mirror cannot reproduce the source value, so **any** fold reading the column (dimension, measure, predicate, On pair) is ineligible (`LossyColumn:<E>.<C>`). `'Compare'`: the value buckets identically but the source compares it as text, so a fold whose **predicates** (client conjuncts, `Where`, scope entries, On pairs) name the column is ineligible; dimension and measure reads stay eligible. On PostgreSQL typed columns cannot hold such values, so in practice only out-of-range dates are lossy there.
+- **Integer / decimal parity:** integers stay exact as `Int64`; decimals become doubles, which is exactly what both Live dialects compare (SQLite `REAL`; PostgreSQL `numeric` against the double edge expressions of §10.3.2); Stats sums are integer units (§63.4) and so exact to the scale.
+- **Date parity (D-22):** values are the naive wall clock in `StorageTimeZone` (`UTC`, the M1 wire format `YYYY-MM-DD HH:mm:ss`), labelled `'UTC'` in ClickHouse purely as a label; bucketing uses the `toStartOf*` family with `enable_extended_results_for_datetime_functions = 1` (Date32: correct from 1900 to 2299; without it `toStartOfMonth` wraps dates before 1970, verified), formatted back to the wire format.
+
+### 56.4 Row liveness and quarantine
+
+A source row is **live** iff it exists, its delete column (when the entity has one) is exactly `0` (`NULL` or any other value is not live: Live's explicit `Deleted = 0` excludes it too), and — for a `Tenant` / `Personal` entity — its tenant value is set (`!isUnsetScopeValue(v, Scope.UnsetValues)`). A non-live row is never mirrored (tombstoned if the keymap has it). A row whose only fault is an unset tenant is **quarantined**: counted in `Materializer.status()…Quarantined` and `_rfs_entity_state.Detail`, visible only through Live, where no principal sees it (tenant-0 principals are refused, 06 §2.2). An unset owner is not a quarantine: the owner sort-key column is Nullable.
+
+---
+
+## 57. The ClickHouse client (`ClickHouse-Client.js`, A)
+
+### 57.1 Shape
+
+```javascript
+const libClickHouseClient = require('…/store/clickhouse/ClickHouse-Client.js');
+let tmpClient = new libClickHouseClient({ URL: 'http://127.0.0.1:18123', User: 'rfs_test', Password: '…', Database: 'default', TimeoutMS: 20000, PingTimeoutMS: 3000 });
+tmpClient.ping((pError, pUp) => …)                                              // GET /ping → Up when 200 and 'Ok.'
+tmpClient.query(pSQL, pParams, pSettings, (pError, pRows, pMeta) => …)           // FORMAT JSON → rows (normalized, §57.2), meta [ { name, type } ]
+tmpClient.command(pSQL, pParams, pSettings, (pError) => …)                       // no result rows (DDL, EXCHANGE, …)
+tmpClient.insert(pTable, pRows, { Token, Settings }, (pError, pCount) => …)      // INSERT INTO <pTable> FORMAT JSONEachRow; Token → insert_deduplication_token
+tmpClient.formatParam(pValue) → string                                           // the param_<name> text (§57.2)
+tmpClient.setFaultInjector(fInjector | null)                                     // tests only (§57.4)
+ClickHouseClient.redact(pText) → string                                          // strips the password if a server echoes it
+```
+
+Callbacks, never promises (Part I §0). `pTable` must be a pre-quoted qualified name built by `ClickHouse-DDL.qualified`. Credentials go in `X-ClickHouse-User` / `X-ClickHouse-Key` headers, never in the URL or a log. An error is `Error('ClickHouse <status>: <first 400 chars>')` with `.StoreError = true`, `.Status`, `.Code` (parsed from `Code: <n>.`), and a network error / timeout has `.Status = 0`, `.Retryable = true` (5xx are retryable too, 4xx never).
+
+### 57.2 Parameters and results
+
+- Every value travels as a query parameter `param_<name>`, referenced in the SQL as `{name:Type}`; parameter names match `^[A-Za-z_][A-Za-z0-9_]*$` (anything else is a programming error: `FACET_INTERNAL`). ClickHouse parses a parameter's text in the **Escaped** (TSV) format, so `formatParam` (`ClickHouseClient.formatParamText`) escapes: `null` → `\N`; numbers / bigints → their decimal text; booleans → `1` / `0`; **strings → `\` `TAB` `LF` `CR` `NUL` `BS` `FF` backslash-escaped** (review: a raw `C:\temp` was read as `C:<TAB>emp`, a raw `\N` as NULL); arrays → a ClickHouse array literal (`[1,2]`, `['a\'b','c\\d',NULL]`: items single-quoted with `\`, `'` and the control characters escaped, then the whole text escaped once more as above). Values never enter SQL text.
+- **Size:** a parameter whose text exceeds `MAX_PARAM_TEXT` (100 000 bytes; the server refuses fields over `http_max_field_value_size`, 128 KiB, code 1000) is refused before sending (`.ParameterSize`, `.Deterministic`); the fold compiler refuses such a binding earlier (`ParameterSize`, at 90 % of it), so that facet answers Live. Parameter values travel in the request URI: a proxy or server that logs URIs logs them (README).
+- **Call options** (review): `query` / `command` take an optional fourth `pCallOptions` `{ TimeoutMS }` and `insert` a `TimeoutMS` option: an overall deadline from issue (connect, send, server time and the response body), after which the request is destroyed and fails `.TimedOut` (`NetworkCode 'ETIMEDOUT'`). `close()` destroys in-flight requests (a bounded shutdown). TLS: `CA`, `Cert`, `Key`, `RejectUnauthorized`; `MaxSockets` sizes the keep-alive pool; `isLoopback()` / `isHttps()` let the store warn about clear-text credentials.
+- **Error classes** (review): `.Deterministic` (the statement itself is wrong: parse / type / parameter / unknown-identifier codes, `DETERMINISTIC_CODES`), `.Limit` (a per-query limit: `LIMIT_CODES` 158, 241, 307, 396), `.TimedOut` (`TIMEOUT_CODES` 159, 160, or the client deadline). None of them counts as a store fault (§61.4).
+- Settings are URL parameters merged from the client defaults, the call's `pSettings`; a setting name must match `^[a-z_][a-z0-9_]*$` and its value be a scalar.
+- **64-bit normalization:** queries ask `output_format_json_quote_64bit_integers = 1`; using the `meta` types, `Int64` / `UInt64` / `Int128`… (and their `Nullable` / `LowCardinality` forms) become JS numbers when `Number.isSafeInteger`, else stay decimal strings; `Float64` values that ClickHouse quotes (`inf`, `nan`) stay strings; everything else is JSON as returned.
+- `insert` serializes each row with `JSON.stringify` (one per line); `null` → JSON null; DateTime64 values are `'YYYY-MM-DD HH:mm:ss.SSS'` strings (the WriterLoop already converted them). `pCount` = rows sent. Settings `insert_deduplication_token` (when `Token`), `insert_deduplicate = 1`.
+
+### 57.3 Read settings (every `Store.queryRows`)
+
+`readonly = 2` (review: a request read can never write, even if a statement were ever mis-built; settings still apply), `enable_extended_results_for_datetime_functions = 1`, `precise_float_parsing = 1` (Float64 values are bound as `toFloat64({p:String})`, never `{p:Float64}`: §68 #22), `join_use_nulls = 1`, `transform_null_in = 0`, `cancel_http_readonly_queries_on_client_close = 1`, `output_format_json_quote_64bit_integers = 1`, `max_execution_time = max(1, ceil(0.4 × remaining deadline seconds))` (the engine passes it), `max_result_rows = Limits.CubeMaxGroups + 2` with `result_overflow_mode = 'throw'` for grouped statements (the engine passes it), plus `Stores.ClickHouse.QuerySettings` and `ReadLimits` (`max_memory_usage`, `max_rows_to_read`, `max_bytes_to_read`). Request reads go through their own client (`ReaderUser` when configured: grant it `SELECT` on the database only) with `MaxConcurrentReads` sockets; beyond that a facet answers Live (`StoreBusy`). Each read carries the request's remaining store budget as its client `TimeoutMS` as well as `max_execution_time`. (Row policies as a tenancy backstop remain a seam, §70.)
+
+### 57.4 Fault injection (tests)
+
+`setFaultInjector(fInjector)`: before each HTTP request the client calls `fInjector({ Kind: 'Query' | 'Command' | 'Insert' | 'Ping', SQL, Table, Token, Attempt })`; a return of `null` proceeds; `{ Status: 500, Text, When: 'Before' }` fails the call without sending it; `{ Status: 500, Text, When: 'After' }` sends it, lets it land, then reports the failure (the "insert landed but the client saw a 5xx" case that dedup tokens exist for); `{ Error: <Error> }` fails as a network error. Production code never sets one.
+
+---
+
+## 58. The materializer (B)
+
+### 58.1 Lifecycle (`RetoldFacetingMaterializer`)
+
+```
+start(fCallback)                                       // §54.2 step 4; idempotent; never calls back an error that should fail attach
+  per configured store S (M5: 'ClickHouse'):
+    Store.connect → Up false → S Unavailable; retry every RetryConnectMS (unref'd); return (Live answers meanwhile)
+    MirrorSpec.compile(Materialize) → specs of S (invalid entries disabled, logged)
+    Store.ensureSchema(specs) (database + _rfs_entity_state; reports which live tables exist) → error → Unavailable + retry
+    WriterClock(S).seed(Store.maxVersion())
+    per entity E of S: construct PendingSet, FlushBuffer, WriterLoop; state = Store.readState(E):
+      null (or no live table)                         → Building; Rebuilder.backfill(S, E)          (§59.1)
+      SpecHash differs: additive                      → Store.addColumns; FillingColumns; Scrub     (§55.4)
+      SpecHash differs: not additive                  → Rebuilding; Rebuilder.rebuild(S, E, 'SpecChange')
+      CleanShutdown = 1                               → CatchingUp; Watermark → Reconciler.sweep from the watermark; then Live
+      CleanShutdown = 0                               → Unverified (UnverifiedSince = now); Reconciler.verify(S, E) (§60.4)
+      then writeState(E, { …, CleanShutdown: 0 })     // running: an unclean exit from here on is detectable
+    Reconciler.start(S) when Reconcile.AutoStart
+stop(fCallback)          // graceful: stop accepting work, drain every loop ≤ DrainOnStopMS (flush), CleanShutdown = 1 for each
+                         // entity that drained and flushed (0 for the others), clear timers; idempotent
+crash()                  // TESTS ONLY: drop every in-memory structure and timer without writing anything (a kill -9)
+reload()                 // model reload: recompile specs; §55.4 per entity
+onChange(pEvent)         // ChangeIntake subscriber 'Materializer' (§58.2); synchronous, no I/O, O(IDs)
+enqueue(pStore, pEntity, pIDs, { Source, SeqN? })     // Reconciler / filter resolution / admin: IDs into the PendingSet
+loop(pStore, pEntity) → WriterLoop | null
+flushNow(pStore, pEntity, fCallback)                  // flush buffered cycles now (tests, MinSeq seam)
+quiesce(pStore, pEntities | null, pTimeoutMS, fCallback)   // until no pending, in-flight, buffered, Dirty or resolving work remains and the
+                                                           // last flush acked; (error after pTimeoutMS); the O3 / O10 suites' "quiescence"
+pendingInfo(pStore, pEntity) → { Pending, InFlight, Buffered, Resolving, OldestFirstSeen, MinSeqN, Dirty: null | { Since, MinSeqN, Generation }, Overflow }
+entityInfo(pStore, pEntity) → { Spec, State, Epoch, Lossy: { Column: 'Compare'|'Value' }, FillingColumns: [ … ], Quarantined, Available }
+setState(pStore, pEntity, pState, pReason)            // through Freshness (§61.1); persisted with the next writeState
+recoverWipe(pStore)                                   // §59.3: every entity Absent → ensureSchema → backfill (Reason 'Wipe')
+status() → { Stores: { S: { Available, Entities: { E: { State, Pending, InFlight, Buffered, LagMS, AppliedSeq, Cycles, Flushes, FlushErrors, Rows, Tombstones, Quarantined, Lossy } } } } }
+```
+
+`Materializer.Enabled === false` → `start` does nothing (and the Router never uses the store).
+
+Review changes to the lifecycle (§68 "Review fixes"): after `ensureSchema` (which also creates `_rfs_lease` / `_rfs_owner` and checks the owner marker, §56.1; a mismatch is `Misconfigured`, never retried) and the clock seed, the store's **lease** is taken (§58.10); without it the store stays unused (`NotLeader`) and the start is retried every `HeartbeatMS`. Backfills, SpecChange rebuilds and boot verifies run at most `MaxConcurrentBuilds` at a time per store (the rest queue; a failed backfill is retried with back-off). A `CleanShutdown = 1` boot after more than `Reconcile.BootBisectAfterMS` of downtime Bisects before the entity serves Exact. State rows: lifecycle changes (State, CleanShutdown, SpecHash, Lossy / Filling columns, Epoch) are written at once; AppliedSeq / cursor-only changes are coalesced into one multi-row INSERT per store every `StateWriteIntervalMS`. `stop` is bounded: at `DrainOnStopMS` (+ a grace of min(2 s, max(250 ms, DrainOnStopMS / 5))) the store's connections are destroyed; the lease is released last. `quiesce` also waits for due coalesced state writes and for an armed notify settle re-delivery of the entity (`ChangeIntake.settling(E)`: a change already reported that will be delivered once more). `recoverWipe` confirms the loss first (`Store.tablesExist`) and rebuilds only the entities whose live table or keymap is gone. `storeAvailable(S)` is the O(1) readiness check the engine uses per Agg (never `status()` on the request path).
+
+### 58.2 Event → pending (`onChange`)
+
+The wiring subscribes, after the M4 two: `ChangeIntake.subscribe('Freshness', (e) => Freshness.observe(e))`, then `ChangeIntake.subscribe('Materializer', (e) => Materializer.onChange(e))`. For every store S that mirrors `e.Entity` (others are ignored; `Freshness.observe` still records the Seq):
+
+| Event | Pending |
+|---|---|
+| `Create` / `Update` / `Delete` / `Undelete` / `Touch` with `IDs` non-empty | each ID → `PendingSet(S, E).add(ID, SeqN)` (integer-literal strings such as a URL's `'1201'` are read as numbers); an ID that is still not a safe integer → `Dirty` instead |
+| any operation with `IDs: []` and no `Filter` (capped events, fail-closed `EntityDirty`, a rewrap, a notify naming no IDs) | `PendingSet(S, E).markDirty(SeqN, Tenants)` → a whole-entity **Resync** (§58.3) |
+| `EntityDirty` with a `Filter` (`notifyByFilter`) | a filter-resolution task (§58.8); on any failure → `markDirty` |
+| notify settle re-deliveries (`ChangeID` ending `'~settle'`) | as any event (a harmless re-hint) |
+
+`SeqN` = `parseSeq(e.Seq).N` (the local NodeEpoch; a foreign-epoch Bus Seq → null, which makes the hint's lag but not its Seq count). The add is synchronous, in the same tick as `Freshness.observe`, so a store can never be judged Exact for an entity with an observed, unapplied change (§61.2).
+
+### 58.3 PendingSet (`RetoldFacetingPendingSet`, one per (store, entity))
+
+```javascript
+add(pID, pSeqN, pNow)            // pNow = the local monotonic clock (performance.now()); entry { FirstSeen, LastSeen, Hints, MinSeqN, InFlight: null }
+                                 // re-hint of a pending ID: LastSeen = pNow, Hints++, MinSeqN = min(…); of an IN-FLIGHT ID: also Rehint = { FirstSeen, MinSeqN }
+take(pMax) → [ { ID, Snapshot: { LastSeen, Hints, MinSeqN } } ]   // oldest FirstSeen first; marks them InFlight
+ack(pTaken, pReadStart)          // after the flush: delete entries whose LastSeen ≤ pReadStart and Hints === Snapshot.Hints;
+                                 // others stay pending (InFlight cleared; MinSeqN/FirstSeen from Rehint)
+release(pTaken)                  // flush failed: InFlight cleared, entries stay pending unchanged (the retry is a NEW cycle: new v, fresh read)
+markDirty(pSeqN, pTenants, pNow) // Dirty = { Since, MinSeqN, Tenants, Generation: ++n } (an existing Dirty keeps its Since / MinSeqN, bumps Generation)
+clearDirty(pGeneration)          // only when no newer markDirty arrived since the Resync started
+size() / inFlight() / info()     // info → pendingInfo fields (§58.1)
+```
+
+Lag is measured from `FirstSeen`, acks use `LastSeen` / `Hints` (04 §6.2): a change committed after the read is never acked away. **Overflow:** more than `Materializer.OverflowIDs` pending IDs → the set keeps accepting into a fresh map while the overflowed IDs collapse into `markDirty` (a whole-entity Resync; the design's tenant-scoped Scrub + Sweep + fan-out remediation is simplified, §68 #9). `Resync` = a Range pass over the whole entity through the WriterLoop at stream priority (§58.5), started by the loop when Dirty is set and no Resync is running.
+
+### 58.4 WriterClock (`RetoldFacetingWriterClock`, one per store)
+
+`next()` → `max(Date.now() × 1000, last + 1)` (microseconds, a safe integer for centuries); `seed(pFloor)` → `last = max(last, pFloor)`. At `start` the floor is `Store.maxVersion()`, so a restart, a restore or wall-clock skew can never go backwards. Versions are global to the store (every entity of S draws from one clock).
+
+### 58.5 WriterLoop cycle (`RetoldFacetingWriterLoop`, one per (store, entity); serialized: at most one cycle in flight)
+
+Work kinds (`WORK_KINDS`), taken in priority order: **Stream** (≤ `BatchIDs` IDs from the PendingSet) → **Range** tasks (`Resync`, `Scrub`, `Fill`; an ID range `(AfterID, ToID]` or `(AfterID, +∞)` capped) → one **RebuildPage** (§59.2). The loop runs on `setImmediate` while work exists, else idles (`IdleTickMS` poll for due flushes; unref'd).
+
+```
+1  v = WriterClock(S).next()                                   // BEFORE the read (04 §6.1)
+2  take work; readStart = performance.now()
+3  source read (MaterializeSource-InProcess, trusted, NO behaviors, IncludeDeleted):
+     Stream: readRows(E, IDs, { Columns: Spec.SourceColumns })   (chunks of ReadChunkIDs)
+     Range / RebuildPage: readRange(E, AfterID, Cap, { Columns, ToID })   → also defines the covered range (AfterID, LastID]
+4  before-image, per target T in targets() ([ 'Live' ], or [ 'Live', 'Shadow:<b>' ] while rebuilding, [ 'Shadow:<b>' ] while Building):
+     Stream: Store.readKeys(E, IDs, T)        Range / RebuildPage: Store.readKeyRange(E, AfterID, LastID, T)
+5  per ID, per target (TypeMap.toStoreRow(Spec, sourceRow, SourceDialect) → { Row, Lossy, Quarantined }; Lossy merged into the entity's flags):
+     source missing, or not live (§56.4)               → a tombstone for EVERY live keymap key of the ID; KeyRetire each
+     source live, key K = (sort-key scope values)      → mirror row at K (_Version v, _IsDeleted 0); KeyIntent (ID, K, Tracked, UpdateDate) @v;
+                                                         a tombstone + KeyRetire for every live keymap key ≠ K (tenant / owner moves)
+     source missing and no keymap key                   → nothing
+   (RebuildPage writes only to its shadow target; it diffs against the shadow keymap.)
+6  FlushBuffer.append(T, { Rows, Tombstones, KeyIntents, KeyRetires }, { Version: v, ReadStart: readStart, Taken })
+7  flush when FlushIntervalMS has passed since the buffer's first append, or ≥ FlushRows rows are buffered, or flushNow(),
+   or before a swap / finishRebuild / stop:  for each target, Store.writeBatch(E, batch, '<E>:<FlushID>:<Target>', T)   (§58.6)
+   error → for every covered cycle PendingSet.release(Taken) (Range tasks re-queued), back off (×2 from 100 ms to MaxBackoffMS),
+           Freshness.recordWriteFailure(S, E); a wipe error (§59.3) → Materializer.recoverWipe(S)
+8  ack, after EVERY target of the flush succeeded: PendingSet.ack(Taken, ReadStart) per covered cycle; Range progress / completion callbacks;
+   Freshness.applied(S, E) (recomputes AppliedSeq, §61.2); Store.writeState(E, { State, Epoch, SpecHash, AppliedSeq, LossyColumns, … }) with v
+```
+
+- **Latest-read-wins** (04 §6.3): cycles are serialized per (S, E) and `v` is assigned before the read, so a higher `_Version` always carries an equal or newer source state; ReplacingMergeTree keeps the highest; duplicate or out-of-order hints are harmless re-reads.
+- **Keymap superset invariant:** the keymap's live keys of an ID ⊇ the mirror's live keys of that ID at every point a reader or a later cycle can observe (guaranteed by the §58.6 order: intents before the mirror insert, retirements after). So a partial flush (a crash or a failed insert between the three inserts) can leave a superfluous tombstone or intent, never a ghost row no later cycle tombstones.
+- **Quarantine / Lossy** per §56.3–§56.4; the cycle never fails because of a value.
+- **Range coverage:** A Range read that returns fewer rows than its `Cap` is the last page of its pass: its covered keymap range is `(AfterID, +∞)` (or `(AfterID, ToID]`), so keymap IDs above the last source ID — a hard-deleted tail — are tombstoned too.
+- **Test hooks** (`TEST_HOOKS`, `loop.setTestHook(pName, fHook)`; null in production): `'afterRead'`, `'afterFlushBeforeAck'` (the crash test: the hook calls `Materializer.crash()`), `'beforeSwap'`.
+- **Batching (review):** a Stream cycle starts only when `BatchIDs` IDs wait, or the oldest waiting hint is `StreamDelayMS` old ('Auto' = the flush interval in force, stretched ×4 above `PartsBackoffAbove` active parts), or a flush / quiesce / stop / swap asks — so a steady write stream costs about one source read, one keymap read and one insert set per interval per entity (measured: 150 writes over 3 s → ≤ 10 inserts per table, `test/Facet-M5-Review_tests.js`), not one per write; the lag stays about one flush interval. `PromptRangeKinds` pages flush as soon as nothing else is runnable; Scrub / Fill pages wait for the interval. The keymap point read is done without FINAL (`Store._liveKeyEntries`: the latest `_Version` per (ID, key) wins in JS, a tie goes to the retirement), measured 20–40 % faster than FINAL at 10M–40M keymap rows (`debug/m5-keymap-bench.js`).
+- **Rebuild pins (review):** `beginRebuild` pins the shadow to the spec it was built for; `finishRebuild` makes the live target follow the shadow's spec, and a model reload during a rebuild keeps the live spec (`KeepLiveSpec`) until the swap. A swap error never drops the shadow (§59.2). The Lossy flags a rebuild collects are per ID (capped at `LOSSY_ID_CAP`, beyond → sticky until a full Scrub rotation), so a corrected row clears its flag.
+
+WriterLoop API (B; D drives the Range / rebuild parts):
+
+```javascript
+targets() → [ 'Live' | 'Shadow:<BuildID>' … ]
+addRangeTask({ Kind: 'Resync' | 'Scrub' | 'Fill' | 'RebuildPage', Target: 'Live' | 'Shadow:<b>', AfterID, ToID: null | n, Cap }, fOnDone(pError, { LastID, Rows, Exhausted }))
+beginRebuild(pBuildID, pFirstEnable, fCallback)   // Store.beginShadow; targets gain the shadow (first enable: targets = [ shadow ] only)
+finishRebuild(pBuildID, fCallback)                // at a between-flush point: flush everything, Store.swapShadow, Store.dropShadow,
+                                                  // targets = [ 'Live' ], Epoch++ ; no write is in flight to a table being exchanged
+abortRebuild(pBuildID, fCallback)                 // targets back to [ 'Live' ], Store.dropShadow
+flush(fCallback) / idle() → boolean / stats()
+```
+
+### 58.6 FlushBuffer and the flush protocol (`RetoldFacetingFlushBuffer` + `Store.writeBatch`)
+
+`FlushID` = the `_Version` of the first cycle in the flush (decimal); token base `'<Entity>:<FlushID>:<Target>'`. Per target, in this order, each chunked at `FlushRows`:
+
+1. **Keymap intents** — `INSERT INTO _rfs_keys_<E>[__shadow_b]` the KeyIntents (`_IsDeleted 0`), token `…:K<i>`;
+2. **Mirror** — **one** `INSERT INTO <E>[__shadow_b]` per chunk carrying the rows **and** the tombstones (tombstones: identity + sort-key columns + `_Version` + `_IsDeleted 1`, every other column NULL), token `…:M<i>`;
+3. **Keymap retirements** — `INSERT` the KeyRetires (`_IsDeleted 1`), token `…:R<i>`.
+
+A retried INSERT (client retry on 5xx / network) reuses its token, so an insert that landed is a no-op the second time; a new flush has a new FlushID and never collides (the per-flush token of 04 §5.2; the mirror never receives rows and tombstones of one cycle in two inserts). A later cycle re-reads instead of re-sending (§58.5 step 7). The buffer exposes `append`, `due(pNow)`, `size()`, `take()`, `rows()`.
+
+### 58.7 MaterializeSource-InProcess (`RetoldFacetingMaterializeSourceInProcess`)
+
+The trusted reader (D-26, 06 §12): `Host.getDAL(E)` (the DAL, never the route-bound controller), a fresh `DAL.query`, `setDisableDeleteTracking(true)` (sees soft-deleted rows), an explicit projection of `Spec.SourceColumns` (never `SELECT *`, never Sensitive), **no behaviors**, `provider.Read` directly (raw rows; copied to plain objects), always an explicit `setCap` (meadow's default is 250). Its output goes only into the store.
+
+```javascript
+readRows(pEntity, pIDs, { Columns }, fCallback)                      // Identity IN (chunk) → rows (missing IDs = hard-deleted)
+readRange(pEntity, pAfterID, pCap, { Columns, ToID }, fCallback)     // keyset: Identity > AfterID [AND ≤ ToID] ORDER BY Identity LIMIT Cap
+readIDs(pEntity, pAfterID, pToID, fCallback)                         // [ { ID, Live } ] of the range (Bisect leaves)
+sweep(pEntity, { Column, From: { At, ID }, Cap }, fCallback)         // compound keyset (04 §9.1): rows { ID, At } ordered (At, ID); → { Rows, Next }
+checksums(pEntity, pLeafRange, fCallback)                            // { '<bucket>': { Count, IDSum } } over LIVE rows (§56.4: delete column = 0,
+                                                                     // tenant set) — one aggregate statement per dialect (SQLite / PostgreSQL)
+idsByFilter(pEntity, pFilterEntries, { Cap }, fCallback)             // FoxHound filter entries + setDisableDeleteTracking(true) → IDs (keyset-paged)
+dialect(pEntity) → 'SQLite' | 'PostgreSQL'                           // the SourceDialect the type map and the compiler use
+```
+
+Aggregate statements (`checksums`) are `queryOverride` reads built only from validated identifiers and bound values, like the Live shells.
+
+### 58.8 Filter-scoped hints (`notifyByFilter`, 09 §4.29)
+
+`Materializer.resolveFilter(S, E, pFilter, pTenants, pSeqN)` (the entity counts as `Resolving` until done): (1) the filter as FoxHound entries — a meadow-filter string through `FilterAST.build(E, { FilterString })` + `applyToQuery` on a scratch `DAL.query`, an entry array as given; (2) **mirror** IDs: `FoldCompiler.compileFilter(Spec, Entries, { SourceDialect })` → `SELECT DISTINCT <Identity> FROM <E> FINAL WHERE _IsDeleted = 0 AND (<where>)` through `Store.queryRows` (the PRE-write predicate: rows that left the filter are found here); (3) **source** IDs: `MaterializeSource.idsByFilter` (includes rows the write soft-deleted); (4) `enqueue(S, E, M ∪ S, { Source: 'Filter', SeqN })`. A compile refusal or any error → `markDirty` (whole-entity Resync). Hard-deleted rows appear in M only and are tombstoned by the cycle's diff.
+
+### 58.9 Crash safety
+
+- In memory only: the PendingSet, in-flight cycles and the buffer. A crash loses them; the store's `CleanShutdown` flag is 0 while running, so the next `start` puts every entity in `Unverified` until `Reconciler.verify` (Bisect + a full Scrub) completes (§60.4). Exact requests never use an `Unverified` entity.
+- `AppliedSeq` and the state row are written only after the flush's inserts were acknowledged, so a persisted state never claims data the store does not hold; a wiped store loses its state with its data (checkpoints live inside the store they describe, 04 §1.8).
+
+
+---
+
+### 58.10 The materializer lease (review: one materializer per store, D-28 enforced)
+
+`_rfs_lease` holds one row per store (latest `_Version` wins, read FINAL). `_acquireLease`: read; an unexpired, unreleased lease of another owner → not the leader (`NotLeader`, asked again every `HeartbeatMS`); else write a claim `{ Owner: OwnerID, ExpiresAtMS: now + TTLMS }`, wait `SettleMS` (a concurrent claimant's row lands), read back: the owner of the latest row leads (of two simultaneous claimants exactly one wins). The holder renews every `HeartbeatMS` (never after `ValidUntil = claim + TTL − min(HeartbeatMS, TTL / 3)`: a process paused past it loses the lease rather than override a successor); every flush and state write checks `leaseValid(S)` first (a flush without it fails `NotLeader` and is not charged to the write breaker). A lost lease halts every loop of the store (cycles back to pending), marks its entities Absent and the store unused (`LeaseLost`), and retries; a re-acquired store boots from its state rows. A graceful `stop` writes `Released` last, so a successor takes over within a heartbeat. A process that is not the leader answers every facet Live (`StoreUnavailable`); reader-only processes that query a store another process materializes are an M6 seam (§70).
+
+## 59. Backfill, rebuild and wipe recovery (D: `RetoldFacetingRebuilder`)
+
+### 59.1 Backfill (first enable)
+
+`Rebuilder.backfill(pStore, pEntity, pOptions, fCallback)`: state `Building` (never used by the Router); `BuildID` = 8 hex; `WriterLoop.beginRebuild(BuildID, true)` (targets = the shadow only, so stream hints that arrive during the build land in the shadow too); pages `addRangeTask({ Kind: 'RebuildPage', Target: shadow, AfterID, Cap: RebuildPageSize })` from `AfterID = -∞` until exhausted, interleaved by the loop's priority with Stream cycles; then `WriterLoop.finishRebuild(BuildID)` (flush, `RENAME` shadow → live, mirror then keymap); state `CatchingUp` → `Live` once the PendingSet drains. The callback reports `{ BuildID, Pages, Rows, ElapsedMS }`.
+
+### 59.2 Rebuild (shadow + swap, 04 §7)
+
+`Rebuilder.rebuild(pStore, pEntity, { Reason: 'Admin' | 'SpecChange' | 'Divergence' | 'Wipe' }, fCallback)` — at most one in flight per (store, entity) (a second call joins the first):
+
+```
+WriterLoop.beginRebuild(BuildID, false)        → CREATE <E>__shadow_<b> + its keymap; targets = [ Live, Shadow:<b> ]; state Rebuilding
+loop: v = clock.next(); readRange(E, AfterID, RebuildPageSize) → rows @v into the shadow only (+ shadow keymap); AfterID = last ID
+      (Stream cycles keep running and dual-write: each target diffed against ITS keymap)
+WriterLoop.finishRebuild(b)                    → between two flushes, nothing in flight: EXCHANGE TABLES <E> AND <E>__shadow_<b>,
+                                                  then the keymaps; DROP the shadows (they now hold the old data); targets = [ Live ]; Epoch++
+state → Live, or Unverified when Reason is 'Divergence' (04 §8.1); LossyColumns reset to what the rebuild saw
+```
+
+**Swap failures (review):** `EXCHANGE` of the mirror and of the keymap are two statements; the store records each shadow table's UUID at `beginShadow` and, on a retry, checks whether the live name already holds the shadow's UUID (the half landed, even if the client saw an error) and resumes with the other half. A failed swap never drops the shadow: the loop holds writes, the entity is marked `Rebuilding`/`Divergence` (never Exact while the live table may be the new build and the keymap not), and `finishRebuild` is retried with back-off (500 ms ×2 to `MaxBackoffMS`) until it lands or the loop no longer runs that build. A completed build records the source's `maxStamp(Watermark)` read before its first page as the entity's `SweepWatermark`, so the next Sweep starts there.
+
+Correctness of the dual-write window (04 §7): a row changed before its page was read is in the page; a row changed after its page was read produces a hint → a later stream cycle with a higher `_Version`, written to both tables; a row deleted after its page was read gets a tombstone in the shadow too (each target is diffed against its own keymap). Rebuild pages carry versions from the same clock as stream cycles.
+
+### 59.3 Wipe recovery
+
+A store error with a missing database or table (ClickHouse codes `81` `UNKNOWN_DATABASE`, `60` `UNKNOWN_TABLE`: `StoreClickHouse.WIPE_ERROR_CODES`) on a write, a state read or a request read (`Materializer.suspectWipe`, at most once per min(60 s, `RebuildCooldownMS`)) → `Materializer.recoverWipe(S)`: the loss is confirmed first (`Store.tablesExist`: which entities lost their live mirror or keymap; all of them when the database is gone); only those go `Absent` and are backfilled (Reason `'Wipe'`) after `ensureSchema`; intact entities keep running (review: one dropped table no longer rebuilt every entity). A false alarm changes nothing. The Router serves Live meanwhile (04 §13.4: "A store volume was wiped: nothing"). The O10 volume-wipe test drops the database (`Store.dropDatabase`) under a running materializer.
+
+### 59.4 Rebuilder API (D)
+
+```javascript
+backfill(pStore, pEntity, pOptions, fCallback)
+rebuild(pStore, pEntity, { Reason }, fCallback)          // REBUILD_REASONS = [ 'Admin', 'SpecChange', 'Divergence', 'Wipe' ]
+status(pStore, pEntity) → null | { BuildID, Reason, Phase: 'Pages' | 'Swapping', Pages, Rows, StartedAt }
+cancel(pStore, pEntity, fCallback)                       // abortRebuild; state back to the prior one (Unverified when the prior was a divergence)
+```
+
+---
+
+## 60. Reconcile (D: `RetoldFacetingReconciler`)
+
+All three levels only **enqueue** IDs or Range tasks; the WriterLoop's re-read and diff do every repair (04 §9). `LEVELS = [ 'Sweep', 'Bisect', 'Scrub', 'Verify' ]`.
+
+### 60.1 Sweep (entities with a watermark only)
+
+`Spec.Watermark` is `'UpdateDate'` when the declaration says so, or (`'Auto'`) when the entity has `UpdateDate` **and** its model column is marked `Indexed` — else null (`NoWatermark`: no Sweep; Describe / Health say so). `Reconciler.sweep(S, E, pOptions, fCallback)`: compound keyset pages through `MaterializeSource.sweep` from `(W − OverlapMS, 0)` (`OverlapMS = Reconcile.MaxTxnMS`, + 3 600 000 when the source session time zone is not UTC), `Cap = Reconcile.SweepCap`, every ID in the window that is not already pending → `Materializer.enqueue(…, { Source: 'Sweep' })` (no compare); after a **complete** pass `W = max(UpdateDate seen)` (the DB's stamps), persisted in `_rfs_entity_state.SweepWatermark`. → `{ Enqueued, Watermark, Pages }`. Interval `Reconcile.SweepIntervalMS` (`'Auto'` per §53.4).
+
+### 60.2 Bisect (inserts and hard deletes)
+
+`Reconciler.bisect(S, E, pOptions, fCallback)`: one pass per side — `MaterializeSource.checksums(E, LeafRange)` (live rows, §56.4) and `Store.bucketChecksums(E, LeafRange, 'Live')` (the keymap's live distinct IDs) — diffed in JS on `{ Count, IDSum }`; each differing leaf → `MaterializeSource.readIDs` and `Store.readKeyRange` → every ID present on exactly one side → `enqueue(…, { Source: 'Bisect' })`. Divergence = differing IDs / total live, **excluding** IDs pending or in flight and source rows stamped after `BisectStart − OverlapMS`; above `Reconcile.RebuildDivergenceRatio` → `Rebuilder.rebuild(S, E, { Reason: 'Divergence' })` (ends `Unverified`). → `{ Buckets, DifferingLeaves, Enqueued, Divergence, Rebuilt }`; `LastBisect` persisted. Interval `BisectIntervalMS` (`HardDeleteBisectIntervalMS` for `NoWatermark` entities). Bisect cannot see in-place updates (04 §9.2): the Scrub bounds those.
+
+### 60.3 Scrub (everything, by rotation)
+
+`Reconciler.scrub(S, E, { Full }, fCallback)`: Range tasks `{ Kind: 'Scrub', Target: 'Live', AfterID: ScrubCursor, Cap: ScrubRowsPerSecond × ScrubTickMS / 1000 }` at Range priority (below Stream); the cursor advances and persists (`ScrubCursor`); a wrap sets `ScrubbedThrough = <the pass's start time>`. `{ Full: true }` runs one complete pass now, as fast as the loop allows, and calls back when it wrapped (tests, `verify`, the additive-column fill with `Kind: 'Fill'`). Unconditional: no compare, because re-reads are idempotent. → `{ Ranges, Rows, Wrapped }`. Store-internal audits are a seam (no derived fields in M5).
+
+### 60.4 Unverified recovery — `Reconciler.verify(S, E, fCallback)`
+
+`bisect`, then a full `scrub` from the last `ScrubbedThrough` high-water (M5: the whole entity); when both completed and no newer Unverified trigger arrived → state `Live` (`UnverifiedSince` cleared, persisted). Runs at `start` for every entity booted without the clean-shutdown flag (04 §13.1, 09 §4.33).
+
+### 60.5 Triggers
+
+- **Timers** (`Reconcile.AutoStart`): per entity, Sweep at `SweepIntervalMS`, Bisect at `BisectIntervalMS` / `HardDeleteBisectIntervalMS`, Scrub ticking every `ScrubTickMS` with a full rotation per `ScrubPeriodMS` (`ScrubRowsPerSecond` is a ceiling); all unref'd; `stop()` clears them.
+- **In-process admin** (wiring exposes it): `RetoldFacetingService.storeAdmin(pAction, pStore, pEntity, pOptions, fCallback)` with `pAction ∈ { 'Rebuild', 'Sweep', 'Bisect', 'Scrub', 'Verify' }` → the Rebuilder / Reconciler call; unknown store or entity → `404 FACET_UNKNOWN_ENTITY`; store unavailable → `503 FACET_ENGINE_UNAVAILABLE`; one in flight per (store, entity, action) and `Admin.RebuildCooldownMS` between rebuilds → `429 FACET_RATE_LIMITED { Limit: 'Admin.InFlight' | 'Admin.RebuildCooldownMS' }`.
+- **Admin routes** (platform / test only): `POST <RoutePrefix>/Admin/Rebuild/:Store/:Entity` and `POST <RoutePrefix>/Admin/Reconcile/:Store/:Entity` `{ Level }` are mounted **only** when `Admin.Routes === true`; every request resolves the principal (M1 401 rules) and must pass `Admin.authorize(pRequest, pPrincipal) === true` (a host function; absent or anything else → `403 FACET_FORBIDDEN`, no Detail); `202 { Started: true, Action, Store, Entity }`. The demo never mounts them.
+
+`Reconciler` API (D): `start(pStore)`, `stop()`, `sweep`, `bisect`, `scrub`, `verify`, `status(pStore, pEntity) → { LastSweep, Watermark, LastBisect, Divergence, ScrubCursor, ScrubbedThrough, Running: [ Level … ] }`.
+
+---
+
+## 61. Freshness (B: `RetoldFacetingFreshness`)
+
+### 61.1 State machine (per (store, entity); 04 §8.1)
+
+```
+Absent ──start──► Building ──swap──► CatchingUp ──drained──► Live ◄──► Lagging   (Lagging: computed, LagMS > Freshness.LagWarnMS)
+                                                               │
+           SpecChange / Admin rebuild ──► Rebuilding ──swap──► Live (Unverified when the trigger was a divergence)
+           breaker open on writes (5 write failures / 30 s) ──► Degraded ──flush succeeds──► CatchingUp
+           unclean boot / divergence rebuild ──► Unverified ──verify done──► Live
+           wipe ──► Absent ──► Building …
+```
+
+`STATES = [ 'Absent', 'Building', 'CatchingUp', 'Live', 'Lagging', 'Rebuilding', 'Unverified', 'Degraded' ]`. Transitions go through `Freshness.setState(S, E, pState, pReason)` (the Materializer, Rebuilder and Reconciler call it); the state is persisted with the next `writeState` (`Lagging` is never persisted: it is `Live` plus a lag).
+
+### 61.2 The numbers
+
+- **ObservedSeq(E)** — `observe(pEvent)` (intake subscriber `'Freshness'`, synchronous): `{ <NodeEpoch>: highest n }` per entity.
+- **Pending work(S, E)** — from `Materializer.pendingInfo`: pending, in-flight and buffered hints, Range tasks of a Resync, a Dirty mark, filter resolutions.
+- **Exact(S, E)** ⇔ state ∈ { `Live`, `Lagging`, `Rebuilding` (not divergence-triggered) } ∧ no pending work ∧ `ChangeIntake.covers(E)` (an entity whose writes no source sees can never be proven current: `NoChangeSource:<E>`) ∧ no `FillingColumns` read by the fold (checked by C).
+- **AppliedSeq(S, E)** = `ObservedSeq(E)` when there is no pending work; else `min(MinSeqN of pending / in-flight / buffered entries, Dirty.MinSeqN) − 1` for the local epoch. Advanced only after a flush ack (§58.5 step 8); persisted with the state row (informational after a restart: a new process is a new epoch).
+- **LagMS(S, E)** = `now − min(FirstSeen)` over pending work (0 when none); `Unverified` → `now − UnverifiedSince`; Dirty → `now − Dirty.Since`; `Building` / `Absent` / `Degraded` → `Infinity`.
+- For a DepSet: `Exact` = every entity Exact; `LagMS` = max; `AsOf` = `new Date(now − LagMS).toISOString()` (`pContext.Now` when 0); `State` = the worst entity state (the `STATES` order above, `Live` best); `ApplyToken` = `'at:' + sha256(canonicalJSON([ [ E, AppliedSeq, Epoch ] … ]))[0..16]` (reported; the cache does not bind it in M5, §62.4).
+
+### 61.3 Admission (`ADMISSION`, per entity; `admits` checks every DepSet entity)
+
+| State | `Exact` (also any `MinSeq`, read-your-writes upgrades) | `Bounded` (`MaxLagMS`) | `Fast` |
+|---|---|---|---|
+| `Absent`, `Building`, `Degraded` | no | no | no |
+| `CatchingUp` | no | no | yes |
+| `Live`, `Lagging` | iff Exact(S, E) | iff `LagMS ≤ MaxLagMS` | yes |
+| `Rebuilding` | iff Exact(S, E) and not divergence-triggered | iff `LagMS ≤ MaxLagMS` | yes |
+| `Unverified` | no | iff `LagMS ≤ MaxLagMS` | yes |
+| breaker open on (`ClickHouse`, E) | no | no | no |
+
+`admits(pStore, pDepSet, pFreshness, pNow)` → `{ Admit, Reason: null | 'State:<State>:<E>' | 'Unverified:<E>' | 'NotExact:<E>' | 'Lagging:<E>' | 'NoChangeSource:<E>' | 'Breaker:<E>', Freshness: { Exact, LagMS, AsOf, State, ApplyToken, Entities } }`. `MinSeq` waiting (`MinSeqWaitMS`, nudging a flush) is a seam (§70): a `MinSeq` request is an `Exact` request.
+
+### 61.4 Circuit breaker (per (engine, entity))
+
+`recordFailure(pEngine, pEntity, pNow)` / `recordSuccess(…)` / `breakerOpen(pEngine, pEntity, pNow)`: `BreakerFailures` (5) failures within `BreakerWindowMS` (30 s) open the breaker for `BreakerOpenMS` (30 s); then half-open: one request is let through, a success closes it, a failure re-opens it. Read failures (the Router, §62.1) and write failures (the WriterLoop; an open write breaker is the `Degraded` state) are counted separately (`Kind: 'Read' | 'Write'`).
+
+Review changes: only **store faults** count — `Store.isHealthFailure(pError, pBudgetMS)`: a network error, a 5xx marked retryable, or a time-out of a statement that had at least `HealthMinTimeoutMS`; never a deterministic error (a statement the server cannot parse, a parameter it cannot read: one bad request must not take the store away from every tenant), a per-query limit, `StoreBusy`, `ParameterSize` or a missing shadow. A whole-request read failure is charged once to the pivot entity, not to every DepSet entity. Half-open admits exactly one probe request: `breakerOpen(…, pClaim)` hands the probe to the first claimant (a per-request token, so every Agg of that request may use the store), `releaseProbe` frees it when the probe's request refused the store anyway; capability reads (no claim) see a half-open breaker as closed. Network failures and time-outs additionally feed the store-wide `Unreachable` detection (`UnreachableAfterFailures` within `BreakerWindowMS` → `Store.status().Available = false`, every facet Live at once with no round trip, a background ping every `UnreachablePingMS` restores it).
+
+### 61.5 Freshness API (B)
+
+```javascript
+observe(pEvent)                    observedSeq(pEntity) → { Epoch: n }
+register(pStore, pEntity, pState)  setState(pStore, pEntity, pState, pReason)   state(pStore, pEntity) → { State, Since, Reason, Epoch, Divergence }
+applied(pStore, pEntity)           entityFreshness(pStore, pEntity, pNow) → { State, Exact, LagMS, AppliedSeq, ObservedSeq, Pending }
+freshness(pStore, pDepSet, pNow) → §61.2 DepSet result        admits(pStore, pDepSet, pFreshness, pNow) → §61.3
+recordFailure / recordSuccess / breakerOpen (pEngine, pEntity, pNow, pKind)
+recordWriteFailure(pStore, pEntity) / recordWriteSuccess(pStore, pEntity)
+stats() → { Entities: { 'S:E': { State, LagMS, Exact } }, Breakers: { 'Engine:E:Kind': { Open, Failures } } }
+```
+
+---
+
+## 62. Router, envelope, Describe and the cache (wiring)
+
+### 62.1 Routing (`Router.route`, 03 §10 as M5 needs it)
+
+```
+route(pAggs, pContext, fCallback):
+  ForceEngine set                                  → that engine only (M4; the Reference never reads a store)
+  no store engine registered, or Mode ≠ 'Query'   → M4 behavior (Live)
+  Prefer = NormalizedRequest.Engine === 'Live' ? 'Live' : (pInternalOptions.PreferEngine || 'Auto')
+  for each Agg:                                     (Prefer 'Live' → every Agg Live, Reason 'Requested')
+      c = EngineClickHouse.capable(Agg, pContext)             // static (§64.1); never I/O
+      a = Freshness.admits('ClickHouse', DepSet(Agg), pContext.Freshness, now)   // skipped under PreferEngine 'ClickHouse'
+      store Agg iff c.Capable ∧ a.Admit; else Live with Reason c.Reason || a.Reason
+  storeAggs non-empty → EngineClickHouse.execute(pContext, storeAggs, (pError, pExecution) …)
+      pError (a store error: .StoreError)          → Freshness.recordFailure('ClickHouse', E, now, 'Read') for each DepSet entity,
+                                                      Warning FACET_STORE_FALLBACK, every store Agg re-run on Live (same request, same deadline)
+      pExecution.Refused { AggKey: Reason }        → those Aggs re-run on Live (capture-time refusals, §64.2); no warning
+      success                                       → Freshness.recordSuccess(…)
+  Live Aggs → EngineLive.execute(pContext, liveAggs, …)        (a CubePlan whose members are split across engines runs each
+                                                                 engine over its own members only: the wiring passes each engine
+                                                                 the cube restricted to the Aggs it got)
+  merge: Results, Errors, Captures (union), Statements (sum), Engines { AggKey: 'ClickHouse' | 'Live' }, Freshness { AggKey: … }
+```
+
+The store attempt's deadline is `0.4 ×` the remaining request deadline (`max_execution_time`, §57.3), so a fallback still has time. A whole-request store error never becomes a client error: it falls back. A per-Agg store failure (a timeout of one statement) falls that Agg back. Records / Count / Keys never route (D-38).
+
+Review changes: the store attempt's budget is `pContext.Store.DeadlineAt = now + 0.4 × (Deadline − now)`, carried by every statement both as `max_execution_time` and as the client's own `TimeoutMS` (a hung server — accepting and never answering — is cut off by the client, not only by the server). The Live Aggs of the request run **concurrently** with the store attempt (not after it); a fallback runs a second Live execution for the store Aggs that failed, within the same request deadline. `pRun.Abandon` lets a request whose deadline passed stop issuing statements. Store-side warnings are rate-limited (`WARN_EVERY_MS` 10 s per reason). A request read that hits a wipe code calls `Materializer.suspectWipe(S)`.
+
+### 62.2 Request
+
+`NormalizedRequest.Engine: 'Auto' (default) | 'Live'` (`contract/Facet-Contract-Request.js`, every mode reads it, only a Query uses it; anything else → `400 FACET_REQUEST_INVALID { Field: 'Engine' }`). `'Live'` never routes to a store (the demo's "Live" side of the toggle; a client may always ask for the authoritative engine). It is not key material: it can only make an answer a Live answer.
+
+### 62.3 Envelope (wiring; `contract/Facet-Contract-Envelope.js`)
+
+- Each FacetResult's `Engine`, `Exact`, `AsOf`, `LagMS` come from the engine that answered its Agg: Live → `Engine: 'Live', Exact: true, LagMS: 0, AsOf: pContext.Now`; ClickHouse → `Engine: 'ClickHouse'` and the Agg's `Freshness.freshness('ClickHouse', DepSet(Agg))` read **before** execution (`Exact`, `LagMS`, `AsOf`); `Stale: false` and `Cached: false` for every computed answer (Stale stays the cache's notion, 02 §4.1).
+- Envelope: `Engine` = the Total's engine when the Total was requested, else the first facet's (request order); `Exact` = every facet and the Total Exact; `LagMS` = max; `AsOf` = the oldest.
+- `Store` block — present **only** when a store is registered (so M1–M4 envelopes are unchanged):
+  ```javascript
+  Store: { Name: 'ClickHouse', Available: true,
+           Facets: { '<Key>': { Engine: 'ClickHouse' | 'Live', Reason: null | '<reason>' } },   // '#Total' included
+           Fallback: null | { Reason: 'Error' | 'Timeout' | 'Breaker' } }
+  ```
+  `Reason` is the full §65 reason when `Stores.ClickHouse.ExposeReasons` is true (the demo), else its class (the text before the first `':'`, e.g. `'NotMirrored'`) — entity and column names of other tables and the names of behavior-appended columns stay in the logs and `pMeta.Store`. `normalizeForComparison` strips `Store` (added to `VOLATILE_FIELDS`).
+- `Warnings`: `{ Code: 'FACET_STORE_FALLBACK', Detail: { Store: 'ClickHouse', Reason } }` once per request whose store attempt failed. Capability / freshness refusals add no warning.
+
+### 62.4 Version and the result cache
+
+An answer with **any** facet served by a store is post-execution `Bypass 'Store'` (added to `UNCACHEABLE_REASONS`): the digest Version (§10.5 — it hashes the representation, so a 304 is never stale) and never stored. Binding a store answer to the cache needs an `ApplyToken` in the entry (05 §6.4) — a seam (§70). A cache **hit** or a 304 for a request that would have used the store is still correct: those entries and generation Versions belong to Live answers, which a matching GenVector proves current. `Engine: 'Live'` requests and every Live-only answer cache exactly as in M4.
+
+### 62.5 Describe (wiring)
+
+`Engines.ClickHouse = { Configured, Available, Reason, Entities: { E: { State, LagMS, Exact } } }` (only `canRead` entities). `Entities[E].Store = { ClickHouse: { Materialized: true | false, State, Reason: null | 'NotDeclared' | 'Disabled' | 'LossyColumn:<C>' …, Watermark: 'UpdateDate' | null } }` when a store is registered; facet descriptors list `Engines: [ 'Live', 'ClickHouse' ]` when every entity they read is mirrored. `status()` gains `{ Stores: Materializer.status(), Freshness: Freshness.stats(), StoreClickHouse: StoreClickHouse.status() }`.
+
+### 62.6 Harness `Store` option (wiring, `test/support/Facet-Test-Harness.js`)
+
+`start({ …, Store: 'ClickHouse', StoreOptions: { Materialize: 'All' | { … }, Reconcile: { … } } })`: requires the CH gate (else the harness calls back `.Skip === true`, like PostgreSQL); a fresh database `rfs_<pid>_<n>` (§69.3) put into `Faceting.Stores.ClickHouse`; `Materialize: 'All'` declares every catalog entity of the fixture; `Reconcile.AutoStart: false` unless given; after attach the harness waits for `Materializer.quiesce` (backfill done). Members: `store` (the StoreClickHouse service), `materializer`, `quiesce(fCallback)`, `storeQuery(pEntity, pBody, pOptions, cb)` (in-process with `PreferEngine: 'ClickHouse'`), `compareStore(pEntity, pBody, pOptions, cb)` → `{ Store, Live, Reference, StoreNormalized, LiveNormalized, ReferenceNormalized, Engines }` (O3 in one call); `stop` drops the database.
+
+---
+
+## 63. The ClickHouse fold compiler (C: `ClickHouse-FoldCompiler.js`)
+
+### 63.1 Input and output
+
+Pure functions, no I/O, no fable:
+
+```javascript
+compileAgg(pAgg, pInput) → { Statements: [ { Purpose, SQL, Params: { name: value }, Types: { name: 'Int64' … }, Settings: { … } } ], Fold: '<row shape, §63.5>' }
+                         | { Refused: '<§65 reason>' }
+compileCube(pCubePlan, pMemberAggs, pInput) → { Statement, Fold: 'CubeGrain' } | { Refused }     // the grain statement for CubeExecutor.marginalize
+compileRelation(pRel, pInput) → { SQL: '(SELECT … FINAL WHERE …) AS `<As>`', Params, Types } | { Refused }
+compileFilter(pSpec, pEntries, pInput) → { SQL, Params, Types } | { Refused }                     // FoxHound entries → a WHERE fragment (also §58.8)
+compileFoldPred(pPred, pInput) → { SQL, Params, Types } | { Refused }
+dimensionExpression(pDimension, pColumnSQL, pInput) → { SQL, Params, Types } | { Refused }
+
+pInput =
+{
+	Database: 'rfs_main',
+	Specs: { Entity: MirrorSpec },                     // the identifier whitelist
+	Relations: { '<As>': { Entity, Filter: [ <final FoxHound entries> ], Capture } },   // §64.2, one per Rel alias the Agg reaches
+	Fragments: { … },                                  // the probed PredicateFragment operator transforms (§63.3), from PredicateCompiler.probeTransforms
+	Lossy: { Entity: { Column: 'Compare' | 'Value' } }, Filling: { Entity: [ … ] },
+	SourceDialect: 'SQLite' | 'PostgreSQL', SourceStringOrder: 'Binary' | 'Collated',
+	Limits: <resolved Limits>, Geometry: null | <§10.3.2 geometry, NumericHistogram second phase>
+}
+```
+
+### 63.2 Relations, scope and identifiers
+
+- A `Rel` compiles to a derived table `(SELECT <Project> FROM `<Database>`.`<Entity>` FINAL WHERE `_IsDeleted` = 0 AND (<compileFilter(Relations[As].Filter)>)) AS `<As>`` — the **final** FoxHound filter of that Rel's capture: the client fence, the `Where` fence, the explicit soft delete, every behavior-appended entry, behavior operator transforms and TenantOnly relaxations already applied, exactly what Live renders (§64.2). One `FINAL` scan per relation; the pivot relation appears once per statement (the cube makes it one per pivot, §63.6).
+- Identifiers only from the spec (`Specs[E].ColumnNames`, the DDL names), validated against `IDENTIFIER_PATTERN` and backtick-quoted; a column the spec lacks → `NotMirrored:<E>.<C>`; one still filling → `NotMirrored:<E>.<C>`; a `'Value'`-lossy column read anywhere, or a `'Compare'`-lossy one in a predicate or On pair → `LossyColumn:<E>.<C>`.
+- **Fail closed** (06 §4.3): a `Tenant` / `Personal` entity whose final filter has no depth-0 `=` `AND` entry on its tenant column → `ScopeMissing:<E>` (the guard should have refused first; the compiler never emits an unscoped query). A non-Portable or Opaque capture never reaches the compiler (`OpaqueScope:<E>`, §64.2).
+- **Parameters** are all `{name:Type}`: filter entries of relation `<As>` are `<As>_<i>` (i = the entry's ordinal among value-bearing entries), statement values `f<Name>` (`fMaxGroups`, `fSelected`, `fE<i>`, `fLoUnits` …), fragment values `q<n>_<i>`; types from `TypeMap.paramType` of the spec column (`Array(T)` for `IN` / `NOT IN`), shell numbers `Int64` / `UInt32` / `Float64`. No value is ever concatenated into SQL.
+
+### 63.3 Predicates (`compileFilter`, `compileFoldPred`)
+
+FoxHound entry → ClickHouse (04 §5.4), connectors and `(` / `)` groups as FoxHound renders them (the first entry of a group ignores its connector):
+
+| Entry | ClickHouse |
+|---|---|
+| `=` `!=` `<>` `<` `<=` `>` `>=` | the same, `` `C` <op> {p:T} `` (`<>` → `!=`) |
+| `IN` / `NOT IN` (array value) | `` `C` IN {p:Array(T)} `` / `` (isNotNull(`C`) AND NOT (`C` IN {p:Array(T)})) `` (review: a column NOT IN drops a NULL row, as FoxHound's `C NOT IN (…)` does under SQL's three-valued logic); Float64 lists as `has(arrayMap(…), C)`; an empty array → `0` / `1` |
+| `IS` with `null`, `IS NULL` / `IS NOT NULL` | `isNull(`C`)` / `isNotNull(`C`)` |
+| `LIKE` / `NOT LIKE` | SQLite source: `ilike` / `NOT ilike` (SQLite LIKE is ASCII case-insensitive) with every `\` in the pattern doubled (SQLite has no LIKE escape; ClickHouse treats `\` as one); a pattern with a non-ASCII character → `LikeCase:<E>.<C>`. PostgreSQL source: `like` / `notLike` as given |
+| `ILIKE` / `NOT ILIKE` (a behavior transform) | `ilike` / `NOT ilike` |
+| any other operator | `OperatorUnsupported:<op>` |
+
+- **Three-valued logic:** a comparison with NULL is NULL (false in WHERE) in both systems; only negations need care. A **column** `NOT IN` is unknown for a NULL column and drops the row (Live's `C NOT IN (…)`), so it renders `isNotNull(C) AND NOT (C IN …)` (corrected by the review: the as-built `NOT ifNull(C IN …, 0)` kept NULL rows the list does not return — O3 now covers NOT IN over nullable String, Int64 and Float64 columns, alone and inside an OR group). **Anti-joins** (path NOT EXISTS) keep `NOT ifNull(… IN …, 0)`: a row with no (or a NULL) correlation value is kept, exactly as Live's `NOT EXISTS` keeps it.
+- **Value typing:** each value must parse exactly as the column's mirror type (JS-side check before binding): integers for `Int64` (a FilterString value `'4.5'` on an integer column → `ValueType:<E>.<C>`), finite numbers for `Float64`, `0` / `1` (or the boolean words) for `UInt8`; `LIKE` only on `String` columns (`OperatorType:<E>.<C>`).
+- **DateTime literals** (`TypeMap.canonicalDateLiteral`): a canonical `'YYYY-MM-DD HH:mm:ss'` binds as itself under any operator; a day-only `'YYYY-MM-DD'` binds as `'YYYY-MM-DD 00:00:00'` under `>=` / `<` on both dialects (what clause compilation emits, M1 §16.22) and under any operator on PostgreSQL (a timestamp literal); any other form, or a day-only literal under `>` / `<=` / `=` / `!=` on SQLite (a text comparison there) → `DateLiteral:<E>.<C>`.
+- **String ranges:** `<` `<=` `>` `>=` on a `String` column compile only when `SourceStringOrder` is `'Binary'` (`'Auto'` → `'Binary'` on SQLite, `'Collated'` on PostgreSQL), else `StringOrder:<E>.<C>`.
+- **PredicateFragments** (`Cmp` leaves outside a relation: scope leaves under `Any`, W_def leaves, cube flags, nested Where leaves on a hop alias) render the **post-behavior** operator recorded by the per-entity fragment probe (`PredicateCompiler.probeTransforms`, §26.4), as Live does; a leaf whose transform the compiler cannot reproduce → `Transformed:<E>`.
+- **Existence nodes** (`FoldPred`), at outer alias `o`:
+  - `Exists { Rel, On, Where }` → `ifNull((o.A1[, o.A2 …]) IN (SELECT r.I1[, r.I2 …] FROM <Rel> WHERE <Where>), 0)` (a one-pair `On` uses the scalar form); nested `Where` compiled recursively with the inner alias in scope;
+  - `NotExists` → `NOT ifNull(… IN (…), 0)` (verified: a NULL outer value keeps the row; a tuple with a NULL element never matches);
+  - `CountCmp { Rel, On, Where, Op, N }` with `P(c) = c Op N`: when `P(0)` is false → `ifNull(o.A IN (SELECT r.I FROM <Rel> WHERE … GROUP BY r.I HAVING P(count())), 0)`; when `P(0)` is true → `NOT ifNull(o.A IN (SELECT … HAVING NOT P(count())), 0)`;
+  - `And` / `Or` / `True` / `False` → `(… AND …)` / `(… OR …)` / `1` / `0`.
+
+### 63.4 Dimensions and measures (`dimensionExpression`)
+
+| Dim | ClickHouse key expression (value `v`) |
+|---|---|
+| `Column` | `v` (keys normalized by DataType in the fold, §9.2) |
+| `DateBucket` | `day` `toDate32(v)`, `week` `toMonday(v)`, `month` `toStartOfMonth(v)`, `quarter` `toStartOfQuarter(v)`, `year` `toStartOfYear(v)` — Date32 under `enable_extended_results_for_datetime_functions = 1`, then `formatDateTime(b, '%Y-%m-%d 00:00:00')` on the ≤ `MaxDateBuckets + 2` result rows; bounds `formatDateTime(min(v) / max(v), '%Y-%m-%d %H:%i:%S')` |
+| `NumericBucket` Nice | units `u = if(v < 0, -floor(-v * {fFactor} + 0.5), floor(v * {fFactor} + 0.5))` (half away from zero, = `FacetBuckets.units`); `c = least(intDiv(toInt64(u) - {fLoUnits:Int64}, {fWidthUnits:Int64}), {fLastIndex:Int64})` (non-negative by construction, so `intDiv` floors); `multiIf(v < ({fLoUnits} + c * {fWidthUnits}) / {fFactor}, c - 1, c < {fLastIndex} AND v >= ({fLoUnits} + (c + 1) * {fWidthUnits}) / {fFactor}, c + 1, c)` — §10.3.2 exactly; integer columns `fFactor = 1` |
+| `NumericBucket` Edges | `multiIf(v >= {fE0} AND v < {fE1}, 0, …, v >= {fEn}, n, NULL)` (the open bucket only when `OpenEnded`; outside → NULL, no group) |
+| `Range` | `multiIf(isNull(v), -1, <cond0>, 0, <cond1>, 1, …, -2)` with `From` / `To` bound `Float64` (first match wins, CASE semantics; `-1` NULL → Missing, `-2` → `NO_RANGE_KEY`) |
+| `Via` (K8) | `ANY LEFT JOIN (SELECT r.<To> AS `l1_k`, r.<Field> AS `l1_v` FROM <Rel l1>) AS l1 ON <outer FK> = l1.l1_k` per link (`join_use_nulls = 1`: an invisible target is NULL, never a dropped row); the derived table projects only the join key and uniquely aliased values so unqualified pivot columns still resolve |
+| `Multi` (K9) | inner joins along the chain from the pivot set; `Count = uniqExact(p.<PK>)` per key (`PivotDistinct`); a NULL `KeyField` is no key; `Total` = count of the pivot set; covered = `uniqExact(p.<PK>)` over rows with a key → `MissingCount = Total − covered` (three statements or one with `GROUPING SETS`, C's choice; the row shapes are Live's MultiTerms / Count / MultiCovered) |
+| `ChildAgg` (K12) | `p LEFT JOIN (SELECT r.<inner> AS K, count() AS N FROM <child Rel> WHERE <Where> AND r.<inner> IN (SELECT <outer> FROM <pivot Rel>) GROUP BY K) AS x ON p.<outer> = x.K`, band `multiIf(ifNull(x.N, 0) < {fE0}, 0, … , n)` with `Edges[0] = 1` (band 0 = no visible matching child, 01 §4.6) |
+| `ExistsFlag` (K20) | the `Exists` expression of §63.3 as the `UInt8` key (`1` / `0`) |
+| TuplePivot (K18) | `FROM <side p> INNER JOIN <side u1> ON p.a = u1.b …` (sides Home first, §24.4), counts `uniqExact(tuple(<Key columns>))` per key and in total (`KeyDistinct`) |
+
+Measures: `count()` rows; `Stats` → `count() AS Rows, count(v) AS NonNull, min(v) AS Min, max(v) AS Max, sum(toInt64(<units of v>)) AS SumUnits` (dates: `formatDateTime(min(v), …)`, `SumUnits` NULL); `DistinctCount` → `uniqExact(v)` (`ExactDistinctMaxRows` / `uniqCombined64` is a seam); `Missing` → `count() AS Rows, count(v) AS NonNull`.
+
+### 63.5 Per-kind statements and row shapes
+
+Every statement returns **the row shape the Live shell of the same kind returns**, so `EngineLive.foldRows` folds both (one normalization path; C may call it, it is pure over `pRows`):
+
+| Kind | Rows |
+|---|---|
+| `Count` | `{ Total }` |
+| `Terms` (K1, K8 via, K14 axis forms) | `{ Key, Count, FacetTotal, FacetMissing, FacetDistinct }` — ranked `ORDER BY isNull(Key), Count DESC, Key ASC`, at most `max(Top + 1, MaxTermsGroups)` ranked rows plus every `Agg.SelectedKeys` key (`fSelected`) |
+| `DateHistogram` | `{ Key, Count, Lo, Hi }` per bucket, the NULL-key row = Missing; at most `MaxDateBuckets + 2` rows |
+| `NumericHistogram` | bounds `{ Rows, NonNull, Lo, Hi }`, then `{ Key: <index>, Count }` (two statements; the geometry comes from `FacetBuckets` between them, exactly as Live) |
+| `Ranges` | `{ Key: <index or -1>, Count }` |
+| `Stats` / `DistinctCount` / `Missing` | `{ Rows, NonNull, Min, Max, SumUnits }` / `{ Rows, NonNull, Distinct }` / `{ Rows, NonNull }` |
+| `Pivot` (K14) | `{ K1, K2, Count }` (index keys for Range axes), at most `CubeMaxGroups + 1` rows |
+| `ChildRollup` / `ExistsSplit` | `{ Key, Count }` |
+| Multi Terms (K9) | `MultiTerms { Key, Count, FacetDistinct }`, `Count { Total }`, `MultiCovered { Covered }` |
+
+Total / Variant semantics are §5.3 and §24.9 unchanged: every count over the Agg's Variant base set (`Rel.Client` in the pivot relation, `Variant.PathPred` and `Agg.Where` as pivot-level predicates **before** any dimension join, §26.4).
+
+### 63.6 The cube (one FINAL scan per pivot)
+
+When the plan carries a `CubePlan` (§25.2) and every member is store-routed, `compileCube` emits the grain statement — the Common relation, the flags `b<n>` / `w<n>` as `UInt8` expressions of §63.3, the `d<n>` dimension expressions, `count() AS N`, the bounds and measure columns — one `GROUP BY` with at most `CubeMaxGroups + 1` rows, and the engine marginalizes with `CubeExecutor.marginalize` (pure). It falls back to per-Variant statements exactly when Live does (a `Transformed` Common capture or flag leaf, over `CubeMaxGroups`), and its members' RawFacetResults must equal the per-Variant ones (O5 on ClickHouse).
+
+### 63.7 Worked examples (the compiler's output for these FoldIR inputs must be equivalent; the goldens pin the exact text)
+
+Conventions: database `rfs_main`; ProjectTrack / LabTrack tenant 1 (`IDCustomer`), principal `IDUser` 42; whitespace is illustrative. All five were executed on 24.8 by the contracts pass.
+
+**K1 Terms** — `Project.Status`, `Exclude: 'Self'`, a kept client clause `IDClient IN (3, 5)`; the pivot relation's final filter is `( IDClient IN [3,5] ) AND Deleted = 0 AND IDCustomer = 1` (fence, explicit soft delete, the tenancy behavior's entry):
+
+```sql
+SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct
+FROM
+(
+	SELECT Key, Count,
+		sum(Count) OVER () AS FacetTotal,
+		sumIf(Count, isNull(Key)) OVER () AS FacetMissing,
+		countIf(isNotNull(Key)) OVER () AS FacetDistinct,
+		row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRank
+	FROM
+	(
+		SELECT p.`Status` AS Key, count() AS Count
+		FROM (SELECT `IDProject`, `Status` FROM `rfs_main`.`Project` FINAL
+		      WHERE `_IsDeleted` = 0 AND (( `IDClient` IN {p_0:Array(Int64)} ) AND `Deleted` = {p_1:UInt8} AND `IDCustomer` = {p_2:Int64})) AS p
+		GROUP BY Key
+	)
+)
+WHERE FacetRank <= {fMaxGroups:UInt32} OR Key IN {fSelected:Array(String)}
+ORDER BY FacetRank
+-- p_0 = [3,5], p_1 = 0, p_2 = 1, fMaxGroups = max(Top + 1, MaxTermsGroups), fSelected = Agg.SelectedKeys ([] here)
+```
+
+**K2 DateHistogram** — `Document.DocumentDate`, `Interval: 'month'`, kept clause `IDFormType IN (4)`:
+
+```sql
+SELECT if(isNull(B), NULL, formatDateTime(B, '%Y-%m-%d 00:00:00')) AS Key, Count,
+       formatDateTime(LoV, '%Y-%m-%d %H:%i:%S') AS Lo, formatDateTime(HiV, '%Y-%m-%d %H:%i:%S') AS Hi
+FROM
+(
+	SELECT toStartOfMonth(p.`DocumentDate`) AS B, count() AS Count, min(p.`DocumentDate`) AS LoV, max(p.`DocumentDate`) AS HiV
+	FROM (SELECT `IDDocument`, `DocumentDate` FROM `rfs_main`.`Document` FINAL
+	      WHERE `_IsDeleted` = 0 AND (( `IDFormType` IN {p_0:Array(Int64)} ) AND `Deleted` = {p_1:UInt8} AND `IDCustomer` = {p_2:Int64})) AS p
+	GROUP BY B
+)
+ORDER BY isNull(B), B
+LIMIT {fMaxGroups:UInt32}
+SETTINGS enable_extended_results_for_datetime_functions = 1     -- (sent as a URL setting, §57.3)
+-- fMaxGroups = MaxDateBuckets + 2; gap fill and TOO_FINE stay in post-processing (§5.3)
+```
+
+**K10 PathSemiJoin** — the `#Total` of `Project` under the Variant path predicate `Exists { <ProjectMembership.IDProject, Where IDUser = 42 AND Active = 1 }` (hop alias `h1`, its own captured scope):
+
+```sql
+SELECT count() AS Total
+FROM (SELECT `IDProject` FROM `rfs_main`.`Project` FINAL
+      WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p
+WHERE ifNull(p.`IDProject` IN
+	(SELECT h1.`IDProject`
+	 FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL
+	       WHERE `_IsDeleted` = 0 AND ((`IDUser` = {h1_0:Int64} AND `Active` = {h1_1:UInt8}) AND `Deleted` = {h1_2:UInt8} AND `IDCustomer` = {h1_3:Int64})) AS h1), 0)
+```
+
+**K11 AntiPath, composite correlation, TenantOnly hop** — E3A `MaterialIntakeRequirement.MyFormsToDo/ByDiscipline`-style Terms on `IDLabFormType` with `NotExists { =LabForm.IDMaterialIntake (TenantOnly), Where Status = 'Complete', Correlate IDLabFormType }`; the LabForm relation's final filter has the tenant entry but **no** `OwnerIDUser` entry (relaxed by the capture, §26.2):
+
+```sql
+SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct
+FROM ( SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing,
+              countIf(isNotNull(Key)) OVER () AS FacetDistinct, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRank
+       FROM ( SELECT p.`IDLabFormType` AS Key, count() AS Count
+              FROM (SELECT `IDMaterialIntakeRequirement`, `IDMaterialIntake`, `IDLabFormType` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL
+                    WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p
+              WHERE NOT ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN
+                    (SELECT h2.`IDMaterialIntake`, h2.`IDLabFormType`
+                     FROM (SELECT `IDLabForm`, `IDMaterialIntake`, `IDLabFormType` FROM `rfs_main`.`LabForm` FINAL
+                           WHERE `_IsDeleted` = 0 AND ((`Status` = {h2_0:String}) AND `Deleted` = {h2_1:UInt8} AND `IDCustomer` = {h2_2:Int64})) AS h2), 0)
+              GROUP BY Key ) )
+WHERE FacetRank <= {fMaxGroups:UInt32} OR Key IN {fSelected:Array(Int64)}
+ORDER BY FacetRank
+-- a requirement whose IDMaterialIntake is NULL stays "to do" (NOT EXISTS semantics), verified
+```
+
+**K12 ChildRollup** — `Project.MyOverdueBand` (`Edges: [1, 3, 10]`), child `Task` with `Where AssignedIDUser = 42 AND DueDate < $Now`:
+
+```sql
+SELECT multiIf(ifNull(x1.N, 0) < {fE0:Int64}, 0, ifNull(x1.N, 0) < {fE1:Int64}, 1, ifNull(x1.N, 0) < {fE2:Int64}, 2, 3) AS Key, count() AS Count
+FROM (SELECT `IDProject` FROM `rfs_main`.`Project` FINAL
+      WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p
+LEFT JOIN
+	(SELECT x1i.`IDProject` AS K, count() AS N
+	 FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL
+	       WHERE `_IsDeleted` = 0 AND ((`AssignedIDUser` = {x1_0:Int64} AND `DueDate` < {x1_1:DateTime64(3, 'UTC')}) AND `Deleted` = {x1_2:UInt8} AND `IDCustomer` = {x1_3:Int64})) AS x1i
+	 WHERE x1i.`IDProject` IN (SELECT `IDProject` FROM `rfs_main`.`Project` FINAL
+	                          WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64}))
+	 GROUP BY K) AS x1
+ON p.`IDProject` = x1.K
+GROUP BY Key ORDER BY Key
+-- fE0 = 1, fE1 = 3, fE2 = 10; x1_1 = the bound $Now ('2026-10-08 12:00:00'); join_use_nulls = 1 → a project with no visible overdue task is band 0
+```
+
+---
+
+## 64. `RetoldFacetingEngineClickHouse` (C)
+
+### 64.1 `capable(pAgg, pContext)` — pure, static
+
+`{ Capable: true }` iff all hold, else `{ Capable: false, Reason }` with the first failing reason: the store is `Available` and its materializer running (`StoreUnavailable`); `pContext.Mode === 'Query'` (`Mode`); the kind is one Live supports (§27.1; anything Live refuses the store refuses: `KindUnsupported:<Kind>`); the Variant is not `IncludesDeleted` and excludes no conjunct that `NamesDeleted` (`DeletedRowsNotMirrored`); `MirrorSpec.covers('ClickHouse', DepSet, Filling)` (`NotMirrored:<E>` / `NotMirrored:<E>.<C>`); no Lossy column read per §56.3 (`LossyColumn:<E>.<C>`, from `Materializer.entityInfo`); the read breaker is closed for every DepSet entity (`Breaker:<E>`). Freshness admission is the Router's (§62.1).
+
+### 64.2 `execute(pContext, pAggs, fCallback)`
+
+1. **Captures.** For every Rel the Aggs reach (pivot relations per Variant, hops of `PathPred` / `Agg.Where`, Via / Multi / Child / tuple sides): `ScopedRelationBuilder.captureRelation(pContext, pRel)` — §26.1 steps 1–5 without projection, build or harvest (C adds this method to the builder, add-only; memoized per request with the relation key minus `Project`, counted against `MaxRelationsPerRequest` / `MaxBehaviorRunsPerRequest` like Live) → `{ Entity, Alias, Filter: <deep copy of query.parameters.filter after capture, relaxation and guard repair>, Capture, Opaque }`. A capture error that Live would also raise (401, a Strict guard 500, `TOO_LARGE`) is returned exactly as Live returns it (whole request or per facet, §36 #34): the store never hides a security error behind a fallback. An Opaque / non-Portable capture → that Agg is `Refused: 'OpaqueScope:<E>'` (never staged). Fragment probes as Live (`PredicateCompiler.probeTransforms`).
+2. **Compile** each Agg (`compileAgg`, or `compileCube` for a cube whose members are all here); a `{ Refused }` goes to `Execution.Refused[AggKey]`.
+3. **Freshness** per Agg (`Freshness.freshness('ClickHouse', DepSet(Agg))`, read before the statements run) → the RawFacetResult's engine fields.
+4. **Run** through `Store.queryRows` with `max_execution_time` from the deadline (§57.3); statements of one request may run concurrently up to `Execution.MaxParallelStatements`; rows → `EngineLive.foldRows` / NumericHistogram two-phase / Multi three statements / `CubeExecutor.marginalize`.
+5. **Errors.** A store error (`.StoreError`) → `fCallback(error)` (the Router falls back and counts the breaker) unless only some Aggs failed, in which case those go to `Refused` with `'StoreError'` and the rest return; a per-facet `FACET_TOO_LARGE` / `FACET_INTERVAL_TOO_FINE` from post-processing rules stays a per-facet error exactly as on Live (the same contract math raises it).
+
+`Execution` = the §9.1 shape with `Engine: 'ClickHouse'`, `Exact` / `AsOf` / `LagMS` per Agg in `Freshness: { AggKey: … }`, `Refused: { AggKey: Reason }`, `Statements` (ClickHouse statements), `Captures` (as Live, so Versions and `ScopeRepaired` keep working).
+
+`freshness(pDepSet)` → `Freshness.freshness('ClickHouse', pDepSet, Date.now())`.
+
+---
+
+## 65. Store-eligibility reasons
+
+A store answers an Agg only when every check passes; otherwise the Agg runs Live and its reason is reported (`Store.Facets[Key].Reason`, `pMeta.Store.Refused`, debug log). **Refusal is never a wrong number** (O3).
+
+| Reason | Where | Rule |
+|---|---|---|
+| `Requested` | Router | the request asked `Engine: 'Live'` |
+| `StoreUnavailable` | capable | not configured / not connected / materializer off |
+| `Mode` | capable | Records / Count / Keys (never routed) |
+| `KindUnsupported:<Kind>` | capable | a kind Live refuses too |
+| `DeletedRowsNotMirrored` | capable | Show-deleted: the Variant names the delete column |
+| `NotMirrored:<E>` / `NotMirrored:<E>.<C>` | capable / compile | closure rule (§55.3), filling columns, behavior-appended columns |
+| `LossyColumn:<E>.<C>` | capable / compile | §56.3 |
+| `Breaker:<E>` | capable / admits | §61.4 |
+| `State:<State>:<E>`, `Unverified:<E>`, `NotExact:<E>`, `Lagging:<E>`, `NoChangeSource:<E>` | admits | §61.3 |
+| `OpaqueScope:<E>` | execute | an Opaque / non-Portable capture (06 §4.3) |
+| `ScopeMissing:<E>` | compile | fail-closed tenant check (§63.2) |
+| `OperatorUnsupported:<op>`, `OperatorType:<E>.<C>`, `ValueType:<E>.<C>`, `DateLiteral:<E>.<C>`, `LikeCase:<E>.<C>`, `StringOrder:<E>.<C>`, `Transformed:<E>` | compile | §63.3 |
+| `StoreError` | execute | a statement failed (the request also gets `FACET_STORE_FALLBACK` when the whole store attempt failed) |
+
+`REASON_CLASSES` (the compiler module) lists every class; `Reason.split(':')[0]` is always one of them.
+
+---
+
+## 66. Tests (O3, O10) and obligations per file
+
+### 66.1 Gating and shared support
+
+- **Gate:** `RFS_TEST_CLICKHOUSE=1` (the `rfs-test-clickhouse` container) or `RFS_TEST_CLICKHOUSE_URL=http://user:password@host:port` (that server; only `rfs_<pid>_<n>` databases are created and dropped there, never swept). Neither → every ClickHouse suite is **skipped**, so `npm test` stays fast and docker-free. With the gate on, an unreachable server is a hard failure in `suiteSetup`, never a pending test. Suites that also need PostgreSQL gate on both (`RFS_TEST_POSTGRES=1 RFS_TEST_CLICKHOUSE=1`).
+- **`test/support/Facet-Docker-ClickHouse.js`** (§69.1) — implemented by the contracts pass.
+- **`test/support/Facet-ClickHouse-Support.js`** (A): `available()` → `{ Available, Reason }`; `ensure(fCallback)` (once per process, through the docker helper); `freshDatabase()` → `'rfs_<pid>_<n>'` (registered for the leftover sweep's keep list); `storeOptions(pDatabase, pExtra)` → a `Stores.ClickHouse` object for the test server; `release(pDatabase, fCallback)` (DROP DATABASE); `loadMirrors(pHarness, { Database, Entities }, fCallback)` — the **static loader** C's execution tests and A's own tests use before the materializer exists: MirrorSpec compile → `Store.configure / connect / ensureSchema / createLive` → every source row through `MaterializeSource`-equivalent trusted DAL reads → `TypeMap.toStoreRow` → `Store.writeBatch(…, 'Live')`; `assertMirrorEqualsSource(pHarness, pStoreName, pEntity, fCallback)` — the O10 invariant: the live, non-quarantined source rows converted by `TypeMap.toStoreRow` equal `Store.readLeafRows` over the whole range, row for row and column for column (meta columns excluded), and the keymap's live keys equal the mirror's; mismatch → an Error with `.Report = { Missing, Extra, Different }` (IDs only, never values).
+- **`test/support/Facet-Store-Fake.js`** (B): an in-memory store implementing every write-side method of §54.3 (`readKeys`, `readKeyRange`, `writeBatch` with per-table token dedup, shadows and swaps, state, `bucketChecksums`, `readLeafRows`, `maxVersion`) plus `failNext(pMethod, pWhen)` fault injection and `tables()` for assertions; B's and D's unit tests run the WriterLoop / Rebuilder / Reconciler against it with no ClickHouse.
+- Every ClickHouse suite uses a fresh database per harness and drops it in `suiteTeardown`; none touches the demo's `rfs_demo_*` databases.
+
+### 66.2 Obligations per file
+
+| File (owner, port) | Must prove |
+|---|---|
+| `test/Facet-Store-ClickHouse_tests.js` (A, 19141) | **unit (no CH):** `formatParam` (scalars, NULL, arrays with quotes / backslashes / NULL), setting-name and param-name validation, 64-bit normalization from `meta`, error parsing (`Code`, `Status`, `Retryable`, no secret in a message); TypeMap every row of §56.3 incl. every Lossy case (SQLite `''` in an integer column, 499.996-style decimals stay exact, `'2022-01-01T00:00:00'` → Compare, `'1899-12-31'` → Value, bigints, Buffers, Booleans), quarantine; DDL text goldens for a Tenant, a Personal, a Global and an Unscoped entity (sort keys, keymap order, Nullable rules, COMMENT / SpecHash); `sanitizeInstanceKey` / `databaseName`. **CH-gated:** ping, query, command, insert with a dedup token (a second insert with the same token is dropped, a new token is not), `insert` retry with `When: 'After'` fault → one copy; `ensureSchema` idempotent (twice → same tables, COMMENT read back); `writeBatch` three-insert order (intent / mirror / retire) and the superset invariant under a fault between each pair; `readKeys` returns every live key of a moved ID; shadow create / `EXCHANGE` / `RENAME` (first enable) / drop; `readState` / `writeState` latest-wins; `bucketChecksums` / `readLeafRows`; `maxVersion`; a `Date32` bucket before 1970 (the extended-results setting is on); feature-not-boot: a wrong URL / port → `connect` `Up: false`, no throw, `status().Available: false` |
+| `test/Facet-MirrorSpec_tests.js` (A, 19140 only if it boots) | the Materialize schema (built-in validator == ajv on fixtures and negative cases); every compilation rule of §55.2 on the three domains (columns Auto / explicit / Include / Exclude, never Sensitive / Text / long String / GUID, scope + delete + Join always, sort keys per Kind, TrackedKeyColumns, SpecHash stable and sensitive to type / column / sort-key changes); invalid entries disabled per entity with reasons, nothing partial; `Unsupported:<Key>` warnings; `covers` (DepSet within the spec, a missing entity, a missing column, filling columns); `ClosureIncomplete` warnings for definitions whose entities are not all mirrored; additive vs non-additive change classification (§55.4) |
+| `test/Facet-Materializer_tests.js` (B, 19142) | **unit (fake store):** PendingSet add / re-hint / take / ack (a re-hint during the read keeps the entry; LastSeen / Hints rule), release, Dirty generations, overflow → Dirty; WriterClock monotone above `seed`, never backwards across a restart seed; one cycle per kind of diff (insert, update, soft delete → tombstone, hard delete → tombstone, undelete, tenant move, owner move, quarantine, Lossy flags); one flush = one mirror INSERT carrying rows + tombstones, the K / M / R order, tokens `'<E>:<FlushID>:<Target>:<Phase><i>'`; flush failure → hints released, new cycle with a higher `v` and a fresh read; ack only after every target succeeded; `AppliedSeq` advances only after the ack; event → pending mapping of §58.2 (IDs, empty IDs → Dirty, settle, foreign seq); filter resolution (mirror ∪ source, refusal → Dirty); Freshness state machine transitions, Exact / LagMS / AppliedSeq numbers, the §61.3 admission table cell by cell, the breaker (open, half-open, close), `NoChangeSource`; `quiesce`; `stop` writes `CleanShutdown = 1` only when drained, `crash()` writes nothing. **CH-gated:** a harness (SQLite, ProjectTrack) with the store: CRUD writes reach the mirror (`assertMirrorEqualsSource` after `quiesce`); a boot with `CleanShutdown = 0` → `Unverified`; `MaterializeSource` never runs a behavior (a behavior that would throw is never called) and sees soft-deleted rows |
+| `test/Facet-ClickHouse-Compiler_tests.js` (C, 19143) | **goldens (no CH):** `test/goldens/Facet-ClickHouse-Goldens.json` — one statement per kind K1–K12, K14 (Column × DateBucket and Range axes), K17 (`Any`), K18, K19 (both `P(0)` branches), K20, the `#Total`, a Via chain of two links, Multi, Nice and Edges NumericHistogram, Ranges, Stats (integer, decimal, date), DistinctCount, Missing and the cube grain statement; parameter maps and types; the five §63.7 examples; every refusal reason of §63.2–§63.3 (`NotMirrored`, `LossyColumn`, `ScopeMissing`, `OperatorUnsupported`, `ValueType`, `DateLiteral` per dialect, `LikeCase`, `StringOrder`, `Transformed`); no value ever appears in SQL text (a scan over every golden). `FACET_UPDATE_GOLDENS=1` rewrites them. **CH-gated:** with `loadMirrors` on Bookstore, Bookstore-Tenant, ProjectTrack and LabTrack, every golden kind executes and its RawFacetResult equals Live's for the same Agg (the engine end to end, `PreferEngine`), the cube equals per-Variant (O5 on ClickHouse), dates before 1970 and at Nice decimal edges (8.4 / 0.2, 499.996) bucket identically, `''` vs NULL keys, cross-tenant FK references land in Missing on K8 |
+| `test/Facet-Rebuilder-Reconciler_tests.js` (D, 19144) | **unit (fake store):** backfill (Building → swap → Live), rebuild (dual-write window: a write after its page was read ends in the shadow at a higher version; a delete after its page is tombstoned in the shadow), `finishRebuild` only between flushes, cancel; Sweep compound keyset (more than `SweepCap` rows sharing one `UpdateDate`, a lower ID stamped later, the watermark only after a complete pass, overlap); Bisect bucket diff (an insert, a hard delete, one delete + one insert with equal counts caught by IDSum), the divergence ratio excluding pending / recent IDs, escalation to a rebuild ending `Unverified`; Scrub cursor, wrap, `Full`; `verify` → Live; timers unref'd and cleared by `stop()`. **CH-gated:** the same on a real store, with admin triggers through `storeAdmin` (busy → 429, unknown → 404) and the guarded admin routes (`Admin.Routes` off → not mounted; on without `authorize` → 403) |
+| `test/Facet-Persistence-Chaos_tests.js` (D, 19145) | **O10 subset (CH-gated), each ending with `quiesce` and `assertMirrorEqualsSource` for every mirrored entity:** duplicate events (the same notify ×5, a settle) → one row per ID, no extra flushes beyond the cycles; out-of-order events (Seqs delivered reversed through `ingest`); a crash between flush and ack (`afterFlushBeforeAck` hook → `crash()` → a new Materializer on the same database: `Unverified`, Exact requests go Live, Bounded / Fast may use the store, then `verify` → `Live` and the mirror equals the source); an INSERT 5xx (`When: 'Before'` and `'After'`) then retry (no loss, no duplicate part beyond dedup); ONE flush containing an update, a soft delete, a hard delete (raw SQL + notify), a tenant move and an owner move (`FINAL` counts per tenant and per owner equal the source); an FK move (Task.IDProject 5 → 9 through CRUD, and through raw SQL + notify without a before-image): K12 / K10 answers on ClickHouse equal Live for both projects; raw SQL without notify: a stamped update repaired by the Sweep, an unstamped in-place update by the Scrub, a raw insert and a raw hard delete by Bisect; a rebuild under a write stream of about 50 writes/s for its whole duration (a timer issuing CRUD writes) ending identical to the source; a volume wipe (`Store.dropDatabase` under a running materializer) → Live answers meanwhile → backfill → identical |
+| `test/Facet-Conformance-ClickHouse_tests.js` (wiring, 19146) | **O3 (CH-gated; PostgreSQL half when both gates are on):** for every request of `Bookstore-Conformance-Fixtures` (Bookstore and Bookstore-Tenant), the M2 motivating bodies (E1, E2, E3A, E3B) and the per-kind coverage facets of both domains, as every principal of the domain, after `quiesce`: `normalize(Store) == normalize(Live) == normalize(Reference)` (`compareStore`), **and** every facet the capability matrix supports reports `Store.Facets[k].Engine === 'ClickHouse'` (a suite that silently fell back everywhere fails); every unsupported case answers Live with its reason and the right numbers: Show-deleted (`DeletedRowsNotMirrored`), an Opaque hop (`OpaqueScope`), a non-mirrored entity / column (`NotMirrored`), a Lossy column (the Bookstore `''` counts, the non-canonical SaleDate texts on SQLite), a SQLite day-only `GT` date literal (`DateLiteral`); two-tenant isolation on the store (tenant-2 rows never count; cross-tenant references Missing) |
+| `test/Facet-Store-Routing_tests.js` (wiring, 19147) | Router + envelope (CH-gated): `Exact` → store only when caught up, else Live (a write not yet flushed: `NotExact`); `Bounded` within / beyond `MaxLagMS`; `Fast` while `Unverified` / `CatchingUp`; `Engine: 'Live'` → Live; read-your-writes upgrade sends the writer's next read Live; a store error (fault injector) → same-request Live answer with `FACET_STORE_FALLBACK` and a breaker that opens after 5 and half-opens; per-facet engines in one envelope (a store facet next to a Show-deleted one); `Store` block present only with a store, `ExposeReasons` off → classes only; store answers never cached and carry the digest Version (cache on); Records / Count / Keys never touch the store (a statement spy); feature-not-boot: a harness whose ClickHouse URL is dead boots, answers Live, Describe says `Available: false`, and starts using the store once it comes up (`RetryConnectMS` small) |
+| `test/Facet-M5-Review_tests.js` (review, 19148) | **CH-gated (PG halves with both gates):** a regression for every M5 review finding that needs the real store — the client round-trips backslashes / a trailing backslash / TAB / LF / CR / `\N` / quotes as `{p:String}` and `Array(String)`, and refuses an over-long parameter without sending; O3 for a column NOT IN over NULLs (nullable String, Int64, Float64; alone and in an OR group) on SQLite and PostgreSQL sources; SQLite `'true'` text in an integer column → `LossyColumn` (Live numbers) and cleared once corrected; backslash values under `=`, `!=`, IN, LIKE, NOT LIKE and a behavior-appended `!=` scope entry; an IN list over the field limit → `ParameterSize` (no statement, breaker untouched); deterministic store errors never open the breaker (another tenant keeps the store); `ExposeFreshness: false` (no LagMS / AsOf, `Freshness` reasons, Describe detail only for `Admin.authorize`); a hung store behind a TCP proxy (Live inside the deadline with `Fallback: Timeout`, `Unreachable` after two, O(1) refusals, a ping restores it, a bounded shutdown); the lease (a second process stays `NotLeader` until the first stops gracefully, then takes over and serves) and the owner marker (another InstanceID → `Misconfigured`); a keymap EXCHANGE that lands but errors → the swap resumes and completes; one dropped mirror table → only that entity rebuilt; a 50 writes/s stream → a handful of inserts and keymap reads; the paced Scrub (unknown and seeded totals); `capable()` + `entityFreshness()` O(1) with a 90k backlog; PostgreSQL timestamps read as the naive text under a non-UTC process TZ |
+| `debug/m5-smoke.js` (wiring, 19193) | a manual run: ProjectTrack + the store; E1 Live vs ClickHouse side by side; a write; `LagMS` until caught up; then equal again |
+| `debug/m5-keymap-bench.js` (review) | the keymap point read at scale: FINAL vs no FINAL, `index_granularity` 8192 vs 256, `KEYMAP_ROWS` (default 10M) / `KEYMAP_BATCH` (default 2000) |
+| demo (wiring, 19301–19305) | `DEMO_CLICKHOUSE=1`: §66.3 |
+
+### 66.3 Demo (wiring)
+
+`DEMO_CLICKHOUSE=1 npm start` (in `example_applications/faceting_demo`) ensures `rfs-test-clickhouse` through the docker helper and gives each domain `Stores.ClickHouse` (database `rfs_demo_<front port>_<pid>_<domain>` — review: two demo processes never share or drop each other's database, and the test container's leftover sweep drops a dead process's; `ExposeReasons: true`, `ExposeFreshness: true`) with every domain entity materialized; without the variable the demo is exactly M4. The inspector shows per facet `Engine`, `Exact`, `AsOf`, `LagMS` and the `Store` block (reasons); a toggle sends `Engine: 'Live'` (Live, Exact) or `Freshness: { Mode: 'Fast' }` (store whenever capable) and can show both answers side by side; after "Make a change" the store side shows `LagMS` until the flush lands, while an `Exact` request is still correct through the Live fallback. Demo checks run on 19301–19305; 19300 is the user's running demo, never touched.
+
+---
+
+## 67. File ownership and the shared-file protocol
+
+| Owner | Files (M5) |
+|---|---|
+| **A** | `source/store/Retold-Faceting-StoreBase.js`, `source/store/clickhouse/ClickHouse-Client.js`, `ClickHouse-TypeMap.js`, `ClickHouse-DDL.js`, `source/store/clickhouse/Retold-Faceting-StoreClickHouse.js`, `source/persistence/Retold-Faceting-MirrorSpec.js`, `source/persistence/Materialize-Schema.json`, `test/support/Facet-ClickHouse-Support.js`, `test/support/Facet-Docker-ClickHouse.js` (after the contracts pass), `test/Facet-Store-ClickHouse_tests.js`, `test/Facet-MirrorSpec_tests.js` |
+| **B** | `source/persistence/Retold-Faceting-Materializer.js`, `-WriterLoop.js`, `-WriterClock.js`, `-PendingSet.js`, `-FlushBuffer.js`, `MaterializeSource-InProcess.js`, `-Freshness.js`, `test/support/Facet-Store-Fake.js`, `test/Facet-Materializer_tests.js` |
+| **C** | `source/store/clickhouse/ClickHouse-FoldCompiler.js`, `source/engine/Retold-Faceting-EngineClickHouse.js`, the **added** `captureRelation` method of `source/engine/live/Retold-Faceting-ScopedRelationBuilder.js` (add-only), `test/goldens/Facet-ClickHouse-Goldens.json`, `test/Facet-ClickHouse-Compiler_tests.js` |
+| **D** | `source/persistence/Retold-Faceting-Rebuilder.js`, `-Reconciler.js`, `test/Facet-Rebuilder-Reconciler_tests.js`, `test/Facet-Persistence-Chaos_tests.js` |
+| **wiring** | `source/Retold-Faceting-Service.js` (`installStores`, `storeAdmin`, subscriptions, shutdown, status), `-Service-Options.js`, `-Util.js`, `-Installers.js`, `source/engine/Retold-Faceting-Router.js`, `source/routes/*` (admin routes), `source/contract/Facet-Contract-Request.js` (`Engine`), `source/contract/Facet-Contract-Envelope.js` (`Store`, `VOLATILE_FIELDS`), `source/security/Retold-Faceting-CacheKey.js` (`'Store'` reason only), `test/support/Facet-Test-Harness.js` (`Store` option), `README.md`, `docs/internal-contracts.md` after the builders, `test/Facet-Conformance-ClickHouse_tests.js`, `test/Facet-Store-Routing_tests.js`, `debug/m5-smoke.js`, `example_applications/faceting_demo/**` (the toggle) |
+| **shared** | `test/Facet-Smoke_tests.js` (anyone ADDS assertions), `source/contract/Facet-Contract-Errors.js` (add codes only — M5 adds none), `source/contract/Facet-Contract-Util.js` (add helpers only) |
+
+Protocol (M4 §50, unchanged): edit only your files; a contract change is made **here first** with a line in §68; shared files by string-replacement `Edit` only (re-read first, add rather than remove); fix (never weaken) an earlier assertion your contracted change breaks, and say so; `npm test` green after every change, `npm run test:ch` green before you report (and `npm run test:pg` when you touched anything PostgreSQL reaches); umbrella `node_modules` only (no `npm install`), Node 22 `fetch`, ephemeral ports, Retold style, Mocha TDD, never `git add` / `commit` / `push`, never modify files outside this module (Sluice is read-only prior art), docker only for `rfs-test-postgres` and `rfs-test-clickhouse`; a demo may be running on 19300 — leave it alone, use 19301–19305 and stop what you start. **Dependency order for gated tests:** A's client / DDL / TypeMap / store / `loadMirrors` → C's execution tests; B's WriterLoop → D's CH-gated suites; until then builders test against the skeletons and the fake store (unit), and the wiring pass re-runs everything.
+
+---
+
+## 68. Ambiguities resolved / M5 deviations from the design
+
+1. **The ClickHouse client lives inside this module** (`source/store/clickhouse/`) instead of a new `meadow-connection-clickhouse` (04 §5): it requires nothing outside `store/clickhouse/` so it can move unchanged; the README says it is slated to move.
+2. **Store and engine are two services** (§54.1): the write side and lifecycle on `RetoldFacetingStoreClickHouse`, the Router-facing `capable` / `freshness` / `execute` on `RetoldFacetingEngineClickHouse`. `capable` stays pure and static; capture-time refusals come back as `Execution.Refused` (03 §10's "re-check the actual captures").
+3. **No automatic closure**: `MirrorSpec.compile` never adds entities the declaration did not name (04 §4 rule 2 says it does; 04 §3.4 says never auto-enable infrastructure). Folds whose DepSet is not covered stay Live (`NotMirrored`), and `ClosureIncomplete` warnings list them.
+4. **No derived data in M5:** PathColumns (`Denormalize` / `Dictionary`), dictionaries, relation fields, rollups and append-only aggregates are accepted with `Unsupported:<Key>` warnings and ignored; to-one dimensions use the scoped `ANY LEFT JOIN` / `Subquery` forms (04 §5.3); so there is no DependencyIndex or fan-out, and an FK move is repaired by rewriting the child row alone. Labels are always the Live scoped read (never `dictGet`).
+5. **Sort keys:** `[Tenant, Owner, Identity]` with the owner column `Nullable` under `allow_nullable_key = 1` (verified on 24.8: NULL keys dedup and tombstone like any value), so an owner-less row of a Personal entity is still mirrored (TenantOnly hops see it, as Live does); only an unset **tenant** is quarantined.
+6. **Keymap = `ReplacingMergeTree` ordered by `(Identity, scope keys)`**, not EmbeddedRocksDB (04 §5.1 names it the fallback form): several live keys per ID may coexist, which is what makes the three-insert flush (intent → mirror → retire) keep "keymap ⊇ mirror" through any partial failure, so a moved row can never be left behind as a ghost.
+7. **No `_rfs_clock` table:** the clock floor is `max(_Version)` over the store's tables at `start` (`Store.maxVersion`), which already survives restarts, restores and skew.
+8. **Every non-key column is `Nullable`** and decimals are `Float64`: the test schemas and SQLite allow NULL anywhere, Live compares decimals as doubles on both dialects, and Stats sums are exact integer units — exactness over storage size (`LowCardinality` and native `Decimal` are later optimizations).
+9. **PendingSet overflow collapses to a whole-entity Resync** (04 §6.2 scopes it to the affected tenants and adds a Sweep and fan-out; M5 has no fan-out and re-reads everything).
+10. **Lossy columns** (§56.3) are new: values the mirror cannot reproduce exactly (SQLite text in typed columns, out-of-range dates, non-canonical date text compared as text) make exactly the folds that read them Live-only, instead of the design's silent type coercion.
+11. **Date literals and LIKE follow the source dialect** (§63.3): SQLite compares dates as text and LIKE case-insensitively without an escape character; the compiler binds only the literal forms both systems compare identically and maps LIKE to `ilike` with backslashes doubled on SQLite.
+12. **Store answers are never cached in M5** (`Bypass 'Store'`, digest Version): binding an `ApplyToken` into cache entries (05 §6.4) is a seam.
+13. **No `MinSeq` waiting:** a `MinSeq` (or a read-your-writes upgrade) is an `Exact` request, which the store answers only when fully applied, else Live (`MinSeqWaitMS` and flush nudging are seams).
+14. **Exact also requires change coverage** (`ChangeIntake.covers`, `NoChangeSource`): an entity whose writes no source sees can be stale in the mirror for a Scrub period, so only `Bounded` / `Fast` may use it.
+15. **`Freshness.DefaultMode` stays `'Exact'`**, so a default request uses the store only when it is caught up; the demo toggles `Fast`.
+16. **One process materializes and serves** (`Materializer.Enabled: 'Auto'`); a reader-only process (state polling, `StatePollMS`) is a seam, and with `Enabled: false` the store is not used.
+17. **Request `Engine: 'Live'`** is a new optional request field (not in 02): the authoritative engine on demand; it never changes a cache key because it can only produce a Live answer.
+18. **Admin routes are off by default and guarded by a host `authorize` hook**; in-process `storeAdmin` is the supported trigger (06 §5 platform principals are not modelled yet).
+19. **Reconcile cadence uses intervals** (`BisectIntervalMS`) instead of a cron string.
+20. **Test containers use tmpfs** (no docker volume); the volume-wipe scenario drops the database instead of deleting a volume.
+21. **Reader / writer users, settings constraints and the row-policy backstop** (04 §5.1, §5.7, INFERRED) are not built in M5; every statement runs as the configured user with the read settings of §57.3.
+
+### As built (builder A: client, TypeMap, DDL, StoreClickHouse, MirrorSpec, support)
+
+22. **ClickHouse 24.8 parses Float64 text inexactly** (verified on the container): JSONEachRow / CSV / TSV / Values input **and `{p:Float64}` query parameters** use a fast parser that lands one ulp off for values such as `5.94` and `7.56` (`precise_float_parsing` does not change them); only `toFloat64(<String>)` under `precise_float_parsing = 1` is exact. So: (a) `Store.writeBatch` inserts into any table with a Float64 column as `INSERT INTO t (…) SELECT …, toFloat64(f) … FROM input('… f Nullable(String) …') FORMAT JSONEachRow` with `precise_float_parsing = 1`, the value sent as its shortest round-trip text (dedup tokens work unchanged for `INSERT … SELECT … FROM input()`, verified); (b) `READ_SETTINGS` (§57.3) gains `precise_float_parsing = 1`; (c) **an engine statement must bind a Float64 value as `toFloat64({p:String})` (the value as `String(v)`), never `{p:Float64}`** — this applies to C's `Float64` shell numbers and Float64 filter values (§63.2) (an Int64 / UInt32 / DateTime64 / String parameter is exact as is).
+23. **DateTime values keep the source's milliseconds** (`'YYYY-MM-DD HH:mm:ss.SSS'` from a PostgreSQL `Date`, or the first three fraction digits of a text) instead of `'.000'` (§56.3): the mirror then compares exactly like PostgreSQL; bucketing and the `formatDateTime(…, '%Y-%m-%d %H:%i:%S')` bounds are unaffected; on SQLite a text with a fraction is not canonical, so it is `Compare`-lossy anyway.
+24. **Batch shapes of `writeBatch`** (§54.3, §58.6). `Rows`: flat store rows (`TypeMap.toStoreRow(…).Row` + `_Version`; `{ Row, Version }` also accepted). `Tombstones` / `KeyRetires`: `{ ID, Key: { <sort-key scope column>: v }, Version }` or a flat row carrying the identity, the sort-key columns and `_Version`. `KeyIntents`: `{ ID, Key, Tracked, UpdateDate, Version }` or a flat keymap row. The store sets `_IsDeleted` itself (0 / 1 / 0 / 1), restricts every row to the target table's actual columns (a retyped column of an old live table is written NULL) and refuses a malformed batch (no safe-integer identity, no version) before anything is sent. Result `{ Rows, Tombstones, KeyIntents, KeyRetires, Inserts }`; an error carries `.Phase` (`'K' | 'M' | 'R'`), `.Result` and `.Wipe` for codes 60 / 81; a write or key read of a shadow table that no longer exists (an aborted or finished rebuild) is `.ShadowMissing` with `Code: null`, never a wipe. `readKeys` / `readKeyRange` return only IDs with at least one live key; Key / Tracked / UpdateDate are store values, so `TypeMap.keyString(spec, key)` compares a keymap key with `TypeMap.keyOf(spec, row)`.
+25. **`ensureSchema` reports more per entity** than §54.3 lists: `KeymapSpecHash`, `ColumnTypes` / `KeymapColumnTypes` (`{ name: type }`), `SortKey` / `KeymapSortKey` (from `system.tables.sorting_key`), `KeymapColumns`, and `Shadows` (BuildIDs of leftover `<E>__shadow_<b>` tables); it refuses a database whose engine is not `Atomic`. `MirrorSpec.classifyChange(report, spec)` turns a report into `{ Kind: 'Absent' | 'Same' | 'Additive' | 'Rebuild', Added, KeymapAdded, Reason }` (§55.4; same columns under another SpecHash → `Rebuild 'SpecHash'`, never a silent resume).
+26. **State rows** (`readState` / `writeState`): DateTime fields read back as epoch milliseconds (`writeState` takes ms numbers, `Date`s or date text); JSON columns parsed; `CleanShutdown` 0 / 1; `Version` = the row's `_Version`. `writeState` merges the given fields over the last state this store read or wrote for the entity (a partial update keeps the rest) and uses `pState.Version` (the caller's WriterClock), else `max(now µs, highest version seen + 1)`. An older version never overrides a newer one (FINAL).
+27. **Client** (`ClickHouse-Client.js`): `Database: null` sends no `database=` (the store qualifies every name, so a statement never depends on a database that may not exist yet); keep-alive sockets (unref'd; a reused socket reset before any response is re-sent once for Ping / Query / Insert); `insert(…, { Token, Retries, Query, Settings })` re-sends a retryable failure with the **same** token up to `Retries` times (never without a token); error messages keep server detail only for codes that never echo a value (`DETAIL_SAFE_CODES`), inserts never; `.Name` (the exception name), `.NetworkCode` (node's code; `.Code` stays the ClickHouse number or null); a 5xx with a deterministic code (`DETERMINISTIC_CODES`, e.g. `BAD_QUERY_PARAMETER` 457, which ClickHouse answers with a 500) is not `Retryable`. The fault injector's `Attempt` is the statement's attempt (an insert's same-token retries count 1, 2, …) and `Sequence` counts every request since the injector was set.
+28. **MirrorSpec as built**: the spec also carries `SpecVersion`, `Mutability`, `UnsetValues` (the policy's, for the quarantine rule; not hashed) and per column `IsInteger` / `Scale`; `TenantColumn` / `OwnerColumn` name the policy columns even when one is the identity (`Customer.IDCustomer`: one sort-key column, still the tenant for the compiler's fail-closed check). Disabled entries are `{ Code: 'FACET_DEFINITION_INVALID', Kind: 'Materialize', Store, Entity, Reason, Column?, Pointer }` with `Reason` ∈ `REASONS`; an entity named in an unconfigured store is disabled there only. Added API: `specs(pStore)` (what `ensureSchema` takes), `stores()`, `declareAll(pStores)` (every facetable entity), `classifyChange`, static `validateSchema` (the built-in draft-07 subset over `Materialize-Schema.json`, cross-checked with ajv; the registry's validator is bound to its own schema). `covers()` skips `@…` pseudo-fields (as `FoldIR.depSet` does) and accepts `{ Entity: { column: true } }` too. Watermark `'Auto'` reads `Indexed` from the model column, the MeadowSchema entry, or a declared index whose first column is `UpdateDate`.
+29. **TypeMap helpers for the write side**: `isLive(spec, sourceRow)` (§56.4), `keyOf` / `trackedOf` / `keyString` / `keyColumnsOf`, `specColumn`, `isUnsetTenant`. `toStoreRow` returns `Quarantined: 'Identity'` (and `Row: null`) for an identity that is not a safe integer, `'TenantUnset'` for an unset tenant of a Tenant / Personal entity (the Row is still built, for counters). Integer text must be the canonical text of a safe integer (`'007'`, `'-0'`, `' 7'` are SQLite TEXT → NULL + `Value`).
+30. **StoreClickHouse extras**: `resolvedOptions()` (the resolved section without the password: what C reads `SourceStringOrder` / `ExposeReasons` / `QuerySettings` from), `close()` (shutdown: drops the keep-alive sockets), `stats()`, static `isWipeError` and `READ_SETTINGS`; `swapShadow` remembers a half-done swap so a retry only completes the keymap half (never swaps the mirror back); a first-enable `RENAME` onto an existing live table falls back to `EXCHANGE`. `StoreBase` keeps the design's query-side names as delegates to `fable.RetoldFacetingEngine<StoreName>` (`capable`, `freshness`, `execute`, `EngineName`).
+31. **`Facet-ClickHouse-Support` as built**: `loadMirrors(pHarness, { Database, Entities?, Materialize?, StoreOptions? })` compiles through the harness's own MirrorSpec service and configures the harness's own StoreClickHouse (so the engine sees both), writes every live, non-quarantined row with its keymap intent in one batch per entity, then a state row `{ State: 'Live', Epoch: 1, SpecHash, LossyColumns, Detail: { Quarantined, Loader: 'Static' } }`, and calls back `{ Database, Specs, Entities: { E: { Rows, Quarantined, Lossy, Source } }, Disabled, Warnings }` (C passes `Entities[E].Lossy` as `pInput.Lossy`). Also exported: `readSourceRows(pHarness, pSpec)` (trusted DAL reads, soft-deleted rows included), `expectedRows(pHarness, pSpec)` → `{ Rows: Map(ID → store row), Lossy, Quarantined, Source }`, `sourceDialect(pHarness, pEntity)`. `assertMirrorEqualsSource`'s `.Report` also has `Columns` (`{ ID: [ differing column names ] }`) and `KeymapMissing` / `KeymapExtra` / `KeymapDifferent`; on success it calls back `{ Rows, Quarantined, Lossy }`.
+32. **Rebuilder as built (D).** `backfill(S, E, { Reason? })` (Reason defaults to `'Backfill'`, `BACKFILL_REASON`) calls back `{ BuildID, Reason, Pages, Rows, ElapsedMS, State, CaughtUp, FirstEnable }` once the first enable is `Live` — the hints from before the `RENAME` are applied when the oldest pending `FirstSeen` is newer than the swap, so it converges under a steady write stream — or after `CATCH_UP_CALLBACK_MS` (30 s) with `CaughtUp: false` (the CatchingUp → Live watch goes on). `rebuild(S, E, { Reason })`: an unknown Reason is `400 FACET_REQUEST_INVALID { Field: 'Reason' }`; state `Absent` / `Building` or Reason `'Wipe'` takes the first-enable path; an entity the store does not materialize is `404 FACET_UNKNOWN_ENTITY`. A second backfill / rebuild joins the build in flight; Reason `'Wipe'` supersedes it instead (abortRebuild; the old callers get the new build's result). `status().Phase` adds `'CatchingUp'` (`PHASES`). `cancel` → `{ Cancelled, BuildID?, Reason: 'NotRunning' | 'Swapping' | 'Completed' }`; a cancelled or failed build restores the prior state (a first enable → `Absent`; a divergence-marked rebuild → `Unverified`), its error carries `.Cancelled` / `.Superseded` / `.Step`. Added: `lastCompleted(S, E)` → `{ BuildID, Reason, At, AtMS, SwappedAtMS, Pages, Rows, ElapsedMS, State }` (storeAdmin's `RebuildCooldownMS`), `stateFields(S, E)` → `{ LastRebuild }`, `stop()` (clears the catch-up timers; a build that only waits for its catch-up completes with `CaughtUp: false`), `stats()`.
+33. **Reconciler as built (D).** The state row has one writer (the Materializer): D's fields reach it by push (`Materializer.updateState(S, E, fields, cb)`) and pull (`Reconciler.stateFields(S, E)` → `{ SweepWatermark, ScrubCursor, ScrubbedThrough, LastBisect }`, `Rebuilder.stateFields` → `{ LastRebuild }`), never through `Store.writeState`; D also never calls `Store.readState` (it refreshes the store's merge cache, and a read racing a Materializer write could put an older row back under the next merged write): a record is seeded once from `Materializer.stateRow(S, E)` when present, else `entityInfo(S, E).StateRow`, else a plain `FINAL` read of `_rfs_entity_state` through `queryRows`; `stop()` forgets the records (the next start re-seeds). **Sweep:** window start `{ At: <W − OverlapMS as 'YYYY-MM-DD HH:mm:ss' UTC>, ID: null }` (`>=`), a pass with no watermark `{ At: null, ID: null }`, later pages from `Next`; IDs already pending are hinted again (a re-hint of an in-flight ID is what keeps a raw stamped write committed after that cycle's read from being acked away, §58.3); the watermark is stored as `'YYYY-MM-DD HH:mm:ss.SSS'`; `OverlapMS` adds 3 600 000 when the source dialect is not SQLite and the process time zone is not UTC. **Bisect:** options `{ Escalate: false, LeafRange }`; the result adds `LeafSample` (≤ 20 differing buckets) and `Busy` (more than 20 Sweep pages of recently stamped rows: it never escalates then); the pending exclusion uses `Materializer.isPending` (else the `pendingInfo` Pending + InFlight count is subtracted, so the ratio can only err low), read before the differing IDs are enqueued; a divergence rebuild is followed by a background `verify` unless the Bisect is a verify's own. **Scrub:** options `{ Full, Kind: 'Scrub' | 'Fill', Cap }`; `Absent` / `Building` → `{ Skipped: 'State:<S>' }`; a rotation resumed from a persisted cursor never sets `ScrubbedThrough`; the timer owes `Total × ScrubTickMS / ScrubPeriodMS` rows per tick (`Total` from the last wrap or Bisect; the `ScrubRowsPerSecond` ceiling until known) and issues a Range task once 256 rows (or the whole entity) are owed. **verify** → `{ Verified, State, Attempts, Bisect, Scrub, Reason? }`: Unverified → Live only when the entity is still in the same Unverified state (same `Since`); a divergence rebuild or a newer trigger restarts it (at most `VERIFY_MAX_ATTEMPTS` = 3 passes, then `Verified: false`); an entity that is not Unverified keeps its state. **Concurrency:** one run per (store, entity, level); the same intent joins, a different one (a full Scrub during a tick, a verify's own Bisect / Scrub) queues behind it; `isRunning(S, E, Level)` is storeAdmin's `Admin.InFlight` test; the timers skip `Absent` / `Building` / `Degraded` / `Rebuilding` and a level still running; `start()` honors `Reconcile.AutoStart` itself and is idempotent per entity. A waiter callback that throws is re-thrown on the next tick after every other waiter was called (never swallowed).
+34. **D's ClickHouse suites before the wiring.** `Facet-Persistence-Chaos` wires the store itself while `RetoldFacetingService.installStores` is absent (`configure` → intake subscribers `'Freshness'` then `'Materializer'` → `Materializer.start`) and uses the harness `Store` option once it exists; its Router checks (Exact / Fast admission answers, K12 / K10 ClickHouse == Live through `compareStore`, Live answers during the wipe) run only then (before, the same scenarios assert Freshness admission and the mirror invariant). `Facet-Rebuilder-Reconciler`'s CH half drives B's real WriterLoop / PendingSet / FlushBuffer / WriterClock over A's store and B's source through a minimal Materializer stand-in; its storeAdmin / admin-route half is skipped until `installStores` and `storeAdmin` exist.
+
+### As built (builder B: the materializer and Freshness)
+
+35. **Batch entries are flat, ready-to-insert rows** (incl. `_Version` / `_IsDeleted`), the form #24 accepts.
+36. **The state row has one writer, the Materializer**: `updateState(S, E, fields, cb)` (push) and the Rebuilder's / Reconciler's `stateFields()` (pull). `Detail.Spec` holds a snapshot of the live table's layout (names and types only), so an incompatible change found at boot can rebuild beside the old tables; without a snapshot the live tables are dropped and backfilled while Live answers.
+37. **A rebuild started while `Unverified` never serves Exact before its swap** (Freshness marks it like a divergence rebuild).
+38. **A hinted ID stays in flight until its flush acknowledges**: a re-hint waits for that flush, then gets a new cycle; later cycles see unflushed key changes (a row moved twice inside one flush window leaves no ghost).
+39. **The breaker's half-open check has no side effects** (`breakerOpen` is a pure read apart from noting half-open): the Router and the engine may both call it; requests go through until the next recorded success or failure.
+40. **A row is live only when its delete column is exactly 0** (the SQL `Deleted = 0` meaning). `TypeMap.isLive` also counts the text `'false'` as live; that only matters for text in an integer delete column (no fixture has one) and is left as is.
+41. **`stop()` sets every entity `Absent`** (nothing is served from mirrors no longer maintained); a range-task page flushes at once when nothing else is runnable; after 8 consecutive stream cycles a waiting range task gets a turn; the loop always calls back on a later tick.
+42. **API additions**: Materializer `store(S)`, `useStore()` (tests), `enabled()`, `started()`, `isPending(S, E, ID)`, `pendingInfo(S, E, { Light })` (+ `Buffered`, `Resolving`, `ResolvingSince`, `Tasks`, `Resync`), `entityInfo().LiveSpec`; WriterLoop `attach`, `setSpec(spec, { KeepLiveSpec })`, `specFor`, `setTargets`, `requestFlush`, `working`, `quiet`, `drain`, `halt`, `reset`; Freshness `setEpoch`, `appliedSeq`, `unregister`. `Freshness.freshness()` computes `AsOf` from the `pNow` it is given; the envelope substitutes the request clock when `LagMS` is 0 (#53).
+
+### As built (builder C: the compiler and the engine)
+
+43. **`REASON_CLASSES` gains `ShapeUnsupported`**: a multi-level correlation (`:Correlation`, no fixture uses one), a Terms / Pivot / Multi key on a DateTime column (`:DateTimeKey`), malformed FoldIR, a parameter collision.
+44. **Terms cut**: Live's exact cut (rank ≤ Top + 1 and row_number ≤ max(Top + 1, MaxTermsGroups), plus the selected keys, typed to the key column; no `OR` without selected keys) instead of the §63.7 K1 text, so raw results equal Live's.
+45. **Equivalent statement shapes**: TuplePivot = `SELECT DISTINCT` + `count()` (Live's composition, not `uniqExact(tuple)`); Via = `ANY LEFT JOIN` over each link's whole scoped relation, every column qualified; column predicates render as inline qualified fragments; ChildAgg = the restricted LEFT JOIN with `ca<i>` aliases.
+46. **Compiler interface additions**: `compileAgg` input `Variant: { PathPred }`, each statement's `MaxRows`; NumericHistogram runs in two phases (no `Geometry` → the bounds statement, with it → the bucket statement); `compileCube` expects `pCubePlan.Resolved = { CommonPathPred, Flags, Bounds }`; exports `collectRelations`, `collectCubeRelations`, `entrySignature`, `columnPredEntries`, `DATE_BUCKETS`.
+47. **Value rules stricter than §63.3**: a comparison against NULL renders `0`; `IS` with a non-null value is `OperatorUnsupported`; NULL inside an IN list, any number on a String column and `'true'` / `'false'` text on UInt8 are `ValueType`. `capable()` also refuses a Compare-lossy column named by the Variant's conjunct fields (the compiler checks the remaining predicates; `IS NULL` on such a column is still refused).
+48. **Opaque captures**: an untrusted one is the guard's `OpaqueUntrusted` 500 inside `ScopeCapture.capture`, exactly as for Live; only `Scope.TrustedOpaque` entities come back `Refused: 'OpaqueScope:<E>'` (Live then answers what it answers, e.g. its Staged path's own refusal of a non-leaf opaque hop). The `captureRelation` memo key excludes Project except for an entity with read-side PostOperation behaviors (reused only for the same projection); store captures count on `Counters.StoreRelations` (a same-request Live fallback is not charged twice).
+49. **Float64 values are bound as text** (the wiring applied #22 (c) to the compiler): `bind(…, 'Float64')` emits `toFloat64({name:String})` with the value's shortest round-trip text, and an IN list over a Float64 column is `has(arrayMap(rfsValue -> toFloat64(rfsValue), {name:Array(String)}), <column>)` (`inList()`; ClickHouse's `IN` needs a constant right side, and `has()` answers like `IN` wherever the compiler uses it: in a WHERE / HAVING and under the NULL-safe `NOT ifNull(…, 0)`); a raw `Array(Float64)` bind is refused. The compiler's `READ_SETTINGS` gain `precise_float_parsing = 1`. The goldens were regenerated; O3 proves it on values the 24.8 parser lands one ulp off (5.94, 7.56, 1.14, 4.69, 6.81, 5.56: `=`, IN, NOT IN, `>=` / `<`, Ranges and Edges).
+
+### As built (the wiring)
+
+50. **`installStores(fCallback)`** (§54.2) runs at attach after `installChangeCapture()` and after every model reload (then `Materializer.reload()`); never fails attach and never waits for ClickHouse (`Materializer.start` runs in the background; the harness `Store` option quiesces). `Materialize: 'All'` (tests, the demo) is re-declared from the catalog at every install (`MirrorSpec.declareAll`). Without a store section a previously registered engine is unregistered. `storeRegistered()` / `storeAvailability()` → `{ Configured, Available, Reason }` (the reason of the store, else of the materializer).
+51. **Router**: `register(pEngine, { Store: true })` puts a store engine first (idempotent; `unregister`, `storeEngine()`, `engineNames()`); the M4 whole-request rule never picks a store engine. The store Aggs run first, then ONE Live execution over the Live Aggs plus every fallback (in plan order), each engine seeing `pContext.Cubes` restricted to its own Aggs (`restrictCubes`: a cube keeps only its members on that engine, which marginalize independently). A whole-call store error counts one read failure per DepSet entity per request; capture-time refusals (`Refused`) re-run Live without a warning except `'StoreError'` ones (a per-statement failure), which also get `FACET_STORE_FALLBACK`. `Fallback.Reason` is `'Timeout'` for ClickHouse codes 159 / 160 (or a network time-out), else `'Error'`; `'Breaker'` is never a Fallback: an open breaker is the refusal `Breaker:<E>` (no statement sent, no warning). A store error whose cause carries `.Wipe` also starts `Materializer.recoverWipe(S)` (C's open question: a read may notice a wipe first). A non-store error of the store engine is returned as is.
+52. **Context and in-process options**: `pContext.Store` is set by `newContext` for every Query once a store is registered (`{ Name, Prefer, Decisions, Fallback, Statements }`; null with `ForceEngine`); `pInternalOptions.PreferEngine: 'ClickHouse' | 'Live'` (tests) — a store preference is also never looked up in or stored to the cache (`Bypass 'ForceEngine'`). `pMeta.Statements` now counts the store's statements too (`pMeta.Store.Statements` is their share); `pMeta.Store` adds `Prefer` and `Engines`.
+53. **Envelope**: each FacetResult's `Engine` / `Exact` / `AsOf` / `LagMS` from its engine (`engineFields`): a store answer's `AsOf` is the request clock when its `LagMS` is 0, and its `LagMS` is `null` when unbounded (an entity still building, only reachable with `PreferEngine`), which makes the envelope `LagMS` `null` too. With no per-Agg engines (M4, `ForceEngine`) the envelope is byte-for-byte the M4 one. The `Store` block is built after the envelope (never in a stored cache body); an answer served from the result cache or shared by a single-flight leader gets a `Store` block whose every facet is `{ Engine: 'Live', Reason: null }` (entries only hold Live answers).
+54. **Cache**: `'Store'` is also an `UNSHARED_REASON` (a single-flight joiner may ask Exact where the leader asked Fast). The background refresh of a Stale serve runs with `PreferEngine: 'Live'` (it exists to store an entry, and only Live answers are stored). The demo turns the result cache off when it runs the store (an entry is served before routing, so its Live answers would hide the store).
+55. **Admin**: `storeAdminRefusal(pAction, pStore, pEntity)` (400 / 404 / 503 / 429) is shared by `storeAdmin` and the routes; busy = this service's own in-flight set ∪ `Rebuilder.status` (Rebuild) ∪ `Reconciler.isRunning` (the levels); the cooldown counts only rebuilds — a first-enable build (the boot backfill, a wipe recovery) never blocks one. The admin routes run the action in the background and answer `202` at once.
+56. **Describe / status**: `Engines.ClickHouse` and `Entities[E].Store` as §62.5; a facet descriptor lists `[ 'Live', 'ClickHouse' ]` when its column is in the entity's spec (auto facets) or every entity of the declared facet is mirrored (entity-level). `status()` gains `Engines.ClickHouse` (= `storeAvailability()`), `Stores` (= `Materializer.status()`, so `Stores.Stores.ClickHouse`), `Freshness`, `StoreClickHouse`.
+57. **`StoreClickHouse.readState` never moves its merge cache backwards** (D's open issue #4): a read row replaces the cached state only when its `Version` is at least the cached one.
+58. **Harness**: the `Store` option as §62.6, plus `StoreOptions.Store` (extra section keys: a URL, `ExposeReasons`, …), `Quiesce: false`, `QuiesceTimeoutMS`, `Database` (a fixed name, kept by `stop()`) and `DropFirst` (the demo's `rfs_demo_<domain>`). An ephemeral harness now binds **127.0.0.1** (was: every interface): a wildcard bind could be handed the port number another process holds on 127.0.0.1 (a running demo's domain servers), and loopback requests then reached THAT server — the intermittent 404s builder A saw. `compareStore` also returns `StoreMeta` (full reasons) and `LiveMeta`.
+59. **Test adjustments (fixes, not weakenings)**: `Facet-Persistence-Chaos` runs with `Freshness.ReadYourWritesMS: 0` (its admission checks query as Lead, who writes in the earlier scenarios; read-your-writes correctly upgraded Lead's Fast reads to Exact — `Facet-Store-Routing` tests the upgrade itself); `Facet-ClickHouse-Compiler` expects the #49 Float64 forms; the normalized-request expectations of `Facet-Contract` / `Facet-FilterAST` gain `Engine: 'Auto'`; `Facet-CacheKey` expects `'Store'` in `UNCACHEABLE_REASONS`.
+60. **Test file name**: the routing / freshness obligations of §66.2 are in `test/Facet-Store-Routing_tests.js` (the contract's name; the wiring brief called it `Facet-Store-Freshness`).
+
+### Review fixes (after the M5 build; items continue the numbering; R<n> = finding n of the review, regressions in `test/Facet-M5-Review_tests.js` unless named)
+
+61. **Column NOT IN keeps three-valued logic (R1, critical)**: `(isNotNull(C) AND NOT (C IN …))`, Float64 lists too; anti-joins keep `NOT ifNull(…, 0)` (§63.3). Goldens and the compiler tests updated; O3 bodies with NIN over nullable String / Int64 / Float64 holding NULLs, alone and in an OR group, on SQLite and PostgreSQL sources.
+62. **Scalar parameters are escaped for the Escaped format (R12, critical)**: `formatParamText` (§57.2); array items are escaped once as literal items and once more as text. A SQLite LIKE pattern's doubled backslashes now survive transport. Round-trip tests against the server (backslashes, a trailing backslash, TAB / LF / CR, `\N`, quotes) and O3 for `=`, `!=`, IN, LIKE, NOT LIKE and a behavior-appended `!=` scope entry over backslash values.
+63. **SQLite boolean words are Value-lossy (R2)**: `TypeMap.booleanValue(pValue, pSourceDialect)`: on SQLite only the canonical integer texts map; `'true'` / `'false'` text is `{ Value: null, Lossy: 'Value' }` (Live neither matches `= 1` nor counts it as 1). Drivers that return real booleans keep them.
+64. **PostgreSQL timestamps are read as naive text (R3)**: `MaterializeSource._projection` selects `to_char(C, 'YYYY-MM-DD HH24:MI:SS.US')` for DateTime columns (a queryOverride), so the process time zone never shifts a mirrored value; non-SQLite text with a nonzero sub-millisecond part is `Compare`-lossy (the mirror keeps milliseconds).
+65. **Rebuild spec pins (R4)**: `setSpec(pSpec, { KeepLiveSpec, LiveChanged })`; `_reloadStore` keeps the live target's spec while a rebuild runs; `finishRebuild` pins the live target to the shadow's spec; `onSwapped` reports the spec that went live.
+66. **Divergence survives Degraded and CatchingUp (R5)**: Freshness keeps `PriorDivergence` through Degraded and treats a prior `CatchingUp` / `Unverified` (or a Degraded entity whose prior was one of them) as unproven, so a Rebuilding entity stays non-Exact until its swap; `Rebuilder._abort` maps such priors to `Unverified` and schedules a verify.
+67. **One materializer per store (R6)**: the lease (§58.10) and the owner marker (§56.1).
+68. **Swaps never destroy a half-done exchange (R7)**: §59.2 (UUID check, shadow kept, retry with back-off, entity non-Exact meanwhile).
+69. **Boot / backfill failures in proportion (R8)**: a `readState` error retries the boot (`_retryLater`), a wipe code goes to `recoverWipe`, live tables are never dropped on a read error; a failed backfill is retried with back-off (`_retryBackfill`).
+70. **Boot Bisect after downtime (R9)**: `Reconcile.BootBisectAfterMS` (300 s): a clean restart whose state row is older holds `CatchingUp` and Bisects before Live, watermark or not.
+71. **Leftover shadows dropped at boot (R10)**: `ensureSchema` reports `Shadows`; `_bootEntity` drops those of an entity with no build in flight (logged).
+72. **The flaky single-flight test (R11)** (`Facet-Invalidation-Review`): the leader is gated on a hook instead of timing; the baseline is green again.
+73. **Breaker counts store faults only (R13)**: §61.4 (`isHealthFailure`; deterministic / limit / busy / ParameterSize errors never count; a request's failure charged once, to the pivot); the compiler refuses a parameter over 90 % of `MAX_PARAM_TEXT` (`ParameterSize`, Live with no round trip). A per-tenant failure budget is not added: with only health failures counted a tenant can no longer open the breaker by request shape.
+74. **Freshness exposure gated (R14)**: `ExposeFreshness` (§53.4): off on policy hosts by default — a store answer carries only a coarse `Exact` (`LagMS` / `AsOf` null when not exact), freshness refusal reasons become `Freshness`, Describe's per-entity State / LagMS / Exact and the infrastructure reason go only to `Admin.authorize` principals. Per-tenant pending tracking (admission and lag per requesting tenant) is deferred (§70).
+75. **Database naming and ownership (R15)**: §56.1 (explicit `Database` or a non-default InstanceID required; injective derived names; the `_rfs_owner` marker; `Owner: 'Adopt'`).
+76. **Lossy flags clear (R16)**: per-ID tracking per column (`LOSSY_ID_CAP` IDs; beyond it, or seeded at boot, the flag is sticky until a full Scrub rotation passes); a corrected or tombstoned row clears its ID, the last one clears the flag. Describe's per-entity Reason is the class (`LossyColumn`) unless detailed and `ExposeReasons`. Refusing only the Aggs whose scope holds lossy rows is not done (it needs a per-tenant lossy index; the column-wide refusal is correct, only conservative).
+77. **Least privilege for reads (R17, R18)**: `readonly = 2` forced on every request read; `ReaderUser` (§53.4); separate reader / writer clients and socket pools; `MaxConcurrentReads` (`StoreBusy`); `ReadLimits`.
+78. **Wipe recovery confirmed and scoped (R19)**: §59.3 (`tablesExist`, only the lost entities, `suspectWipe` rate-limited).
+79. **Transport security (R20)**: a warning for `http://` to a non-loopback host unless `AllowInsecure`; `CA` / `Cert` / `Key` / `RejectUnauthorized`; README notes that parameter values travel in the request URI.
+80. **A hung store (R21, critical; R22)**: client-side deadlines per statement from the request budget (§57.2, §62.1); a failed cube statement fails its members as `StoreError` (fallback, not a store re-run); the store-wide `Unreachable` flag with a background ping; a single half-open probe per breaker; rate-limited warnings. Tested behind a byte-swallowing TCP proxy.
+81. **Bounded graceful stop (R23)**: shutdown state rows in one multi-row INSERT with the remaining drain time as `TimeoutMS` and no retries; at the hard deadline the clients are closed (sockets destroyed) and `stop` completes (CleanShutdown stays 0: the safe outcome).
+82. **Batched stream cycles (R24)**: §58.5 (`StreamDelayMS`).
+83. **Keymap reads (R25)**: no FINAL (`_liveKeyEntries`), keymap `index_granularity = 256`; `debug/m5-keymap-bench.js` (10M rows, 2000-ID batches: no-FINAL 50 ms vs FINAL 69 ms at granularity 8192; 86 vs 97 ms at 256, reading 11× fewer rows; 40M rows: 50-ID batches 11.6 ms at 256 vs 12.7 ms at 8192 reading 30× fewer rows, 2000-ID batches 175 vs 125 ms — a hot-cache, single-node measurement; the 85M cold-cache benchmark decides the final granularity).
+84. **State writes coalesced (R26)**: §58.1 (`StateWriteIntervalMS`, lifecycle changes immediate); the Scrub cursor rides the periodic write; `PartsBackoffAbove` stretches the flush interval ×4 while merges lag.
+85. **Scrub pacing after a restart (R27)**: `Reconciler._seedTotal` seeds the row count from `Store.approximateRows` (system.parts); `ScrubUnknownTotalRowsPerTick` until known; Scrub / Fill pages wait for the flush interval (`PromptRangeKinds`).
+86. **Build concurrency and memory (R28)**: `MaxConcurrentBuilds` (2) queues backfills, rebuilds and boot verifies per store; `RebuildPageSize` 25000. Skipping the key overlay for shadow-only RebuildPages is not done (the page size bounds it).
+87. **Sweep volume (R29)**: a build records the source's `maxStamp` before its first page as the Sweep watermark; Sweep pages are pre-filtered against the keymap's `UpdateDate` (only missing or newer IDs are re-hinted); the Sweep waits for room in the PendingSet.
+88. **Reconcile schedule (R30)**: jittered phases and periods (`JitterRatio`); Bisects run one entity at a time per store (a queue); bucket checksums `GROUP BY` the identity with `optimize_aggregation_in_order`. Reporting missing `UpdateDate` indexes in Describe is not done.
+89. **`capable()` is O(1) (R31)**: `Materializer.storeAvailable(S)`; no `status()` on the request path (measured < 250 µs per `capable()` + `entityFreshness()` with a 90k backlog).
+90. **Live runs alongside the store (R32)**: §62.1.
+91. **Demo databases per process (R33)**: `rfs_demo_<port>_<pid>_<domain>` (§66.3, §69.3), swept when the process is gone.
+92. **Ops tests (R34)**: `test/Facet-M5-Review_tests.js` (hung store, bounded shutdown, insert / keymap-read rates, Scrub pacing, `capable()` cost, lease, owner marker, swap retry, single-table wipe).
+93. **Found while fixing**: `Materializer.quiesce` also waits for an armed notify settle re-delivery (`ChangeIntake.settling(E)`) — with coalesced state writes quiesce became fast enough to return before a raw notify's settle re-hint, which then made the next Exact read Live (`Facet-Store-Routing`, intermittent); the harness's `stop()` abandons the materializer of a test database (`crash()` + `close()`) and gracefully shuts down a fixed one, so lease heartbeats and state timers never outlive a harness.
+
+---
+
+## 69. Containers, ports and scripts
+
+### 69.1 The container (`test/support/Facet-Docker-ClickHouse.js`)
+
+| | |
+|---|---|
+| name | `rfs-test-clickhouse` — the only ClickHouse container this module creates, starts, stops or removes |
+| image | `clickhouse/clickhouse-server:24.8` (24.8.14.39 at the contracts pass; pulled if absent) |
+| port | `127.0.0.1:18123 → 8123` (HTTP only) |
+| user | `rfs_test`; password `RFS_TEST_CLICKHOUSE_PASSWORD`, else the throwaway `'rfs-ch-throwaway-test-only'`; `CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1` |
+| data | `--tmpfs /var/lib/clickhouse:rw` (no volume), `--ulimit nofile=262144:262144` |
+| exact `docker run` | `docker run -d --name rfs-test-clickhouse --label com.retold.faceting.test=1 -e CLICKHOUSE_USER -e CLICKHOUSE_PASSWORD -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 -p 127.0.0.1:18123:8123 --ulimit nofile=262144:262144 --tmpfs /var/lib/clickhouse:rw clickhouse/clickhouse-server:24.8` (the two credentials passed through the environment, never on the command line; `node test/support/Facet-Docker-ClickHouse.js args` prints it) |
+| `ensure(pOptions, cb)` | `ps -a --filter name=^/rfs-test-clickhouse$`: absent → run (a name conflict reuses that container), stopped → start, paused → unpause; then poll `GET /ping` and an authenticated `SELECT 1` (≤ 90 s; an authentication failure stops at once with a hint); then drop leftover `rfs_<pid>_<n>` databases whose process is gone (never on a URL server) |
+| guard | `assertOwnContainer`: `ps` must filter on the name, `run` must name it, `start` / `stop` / `unpause` / `rm -v` only the name; no `exec`, `inspect`, `pull` or anything else (the image is pulled by hand or by `docker run`) |
+| `stop(cb)` | `docker stop` + `docker rm -v rfs-test-clickhouse` (a no-op against `RFS_TEST_CLICKHOUSE_URL`) |
+| CLI | `node test/support/Facet-Docker-ClickHouse.js ensure \| stop \| status \| ping \| args` |
+
+Never another container, image, volume or network (in particular never a Sluice ClickHouse); never `docker system prune`. Test runs reuse a running container and leave it running; `npm run test:ch:down` removes it.
+
+### 69.2 Ports
+
+| Port | File |
+|---|---|
+| 19140 | `test/Facet-MirrorSpec_tests.js` (A; only if it boots a server) |
+| 19141 | `test/Facet-Store-ClickHouse_tests.js` (A) |
+| 19142 | `test/Facet-Materializer_tests.js` (B) |
+| 19143 | `test/Facet-ClickHouse-Compiler_tests.js` (C) |
+| 19144 | `test/Facet-Rebuilder-Reconciler_tests.js` (D) |
+| 19145 | `test/Facet-Persistence-Chaos_tests.js` (D) |
+| 19146 | `test/Facet-Conformance-ClickHouse_tests.js` (wiring) |
+| 19147 | `test/Facet-Store-Routing_tests.js` (wiring) |
+| 19148 | `test/Facet-M5-Review_tests.js` (review) |
+| 19193 | `debug/m5-smoke.js` (pinned) |
+| 19301–19305 | the demo's checks; 19300 is the user's demo server, never used by a builder |
+| 18123 | `rfs-test-clickhouse` (host side) |
+
+### 69.3 Databases and scripts
+
+- Test databases `rfs_<pid>_<n>` (`Facet-ClickHouse-Support.freshDatabase`), dropped on release, leftovers of dead processes swept by `ensure`; the demo uses `rfs_demo_<front port>_<pid>_<domain>` (review: per process, so two demos never share one; kept on a graceful stop, swept by the next `ensure` once the process is gone — `DEMO_DATABASE_PATTERN`); production `Stores.ClickHouse.Database` or `rfs_<InstanceKey>[_<hash>]` (§56.1). Databases named `rfs_demo_<domain>` from before the review are never swept: drop them by hand. `debug/m5-keymap-bench.js` uses `rfs_<pid>_9999` (dropped at its end, swept if it dies).
+- `package.json`:
+
+```json
+"test:ch": "RFS_TEST_CLICKHOUSE=1 TZ=UTC npx mocha --timeout 30000",
+"test:ch:up": "node test/support/Facet-Docker-ClickHouse.js ensure",
+"test:ch:down": "node test/support/Facet-Docker-ClickHouse.js stop"
+```
+
+`test:ch` runs the **whole** spec set with the ClickHouse gate on (so no ClickHouse suite can be left out); the support module ensures the container itself, so `test:ch:up` is optional. `RFS_TEST_POSTGRES=1 RFS_TEST_CLICKHOUSE=1 TZ=UTC npx mocha --timeout 30000` runs every gated half at once.
+
+---
+
+## 70. Seams for M6
+
+| Seam | M5 behavior |
+|---|---|
+| `ApplyToken` in cache entries (store answers cacheable, 05 §6.4) | store answers never cached (`Bypass 'Store'`) |
+| `MinSeqWaitMS` + flush nudging for `MinSeq` / read-your-writes | Exact → Live when not applied |
+| Reader-only processes polling `_rfs_entity_state` (`StatePollMS`), multi-node / Hybrid materialization, the Agent `Materialize` routes, `MaterializeSource-Agent` | one Embedded process materializes and serves; the lease (§58.10) keeps every other process off the store (they answer Live) |
+| Settings constraints on the reader user; the row-policy backstop (`custom_rfs_tenant`) | an optional `ReaderUser` for request reads, `readonly = 2` on every request read (§57.3) |
+| Per-tenant freshness (pending work and lag per tenant: Exact admission and `LagMS` for the requesting tenant only) and per-tenant Lossy refusal | global per (store, entity); gated by `ExposeFreshness` (§68 #74, #76) |
+| PathColumns (`Denormalize`, `Dictionary` + `dictGetOrNull`), DependencyIndex fan-out, store-internal audits, rollups (`ru_*`) and their scheduler, append-only aggregates (`agg_*` + MVs), parity canary, Advice | rows only; Subquery / ANY LEFT JOIN forms |
+| Partitioned mirrors (`intDiv(ID, 10 M)`, `do_not_merge_across_partitions_select_final`, cold `OPTIMIZE … FINAL`), `LowCardinality`, native `Decimal`, EmbeddedRocksDB keymaps, the 85 M-row benchmark | unpartitioned, Nullable, Float64, ReplacingMergeTree keymap |
+| `uniqCombined64` above `ExactDistinctMaxRows` (`Exact: false`) | `uniqExact` always |
+| Store-only folds (cost model: `503 FACET_ENGINE_UNAVAILABLE` / stale serve when the store is down) | every fold is live-eligible; Live always answers |
+| Solr / OpenSearch stores | not present |
+| Tenant-scoped overflow remediation (Scrub of affected tenants, Sweep, fan-out of old keys) | whole-entity Resync |
+| A durable change log / Bus with `AppliedCursor` resume | in-memory PendingSet; Unverified + reconcile after a crash |

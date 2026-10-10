@@ -242,6 +242,9 @@ const SORT_DIRECTIONS = Object.freeze([ 'ASC', 'DESC' ]);
 // Facet Keys starting with this are reserved for the service ('#Total').
 const RESERVED_KEY_PREFIX = '#';
 
+// M5 (internal-contracts §62.2): the request Engine values ('Live' never routes to a store).
+const REQUEST_ENGINES = Object.freeze([ 'Auto', 'Live' ]);
+
 // M4 (internal-contracts §44.2): the Freshness modes (02 §3.3), their defaults, and the local change
 // sequence grammar a MinSeq must match ('<NodeEpoch>:<n>', NodeEpoch 'e:' + 8 lowercase hex,
 // internal-contracts §39.1; Retold-Faceting-Util re-exports this pattern so there is one grammar).
@@ -1261,6 +1264,18 @@ const normalizeRequest = (pEntity, pBody, pSettings) =>
 	}
 	// M4 (internal-contracts §44.2): every mode shape-checks Freshness; only a Query reads it.
 	let tmpFreshness = normalizeFreshness(tmpBody.Freshness, tmpSettings.Freshness);
+	// M5 (internal-contracts §62.2): 'Auto' (a store may answer) | 'Live' (the authoritative engine);
+	// every mode shape-checks it, only a Query routes by it.  Never key material: it can only make an
+	// answer a Live answer.
+	let tmpEngine = 'Auto';
+	if (!isAbsent(tmpBody.Engine))
+	{
+		if (REQUEST_ENGINES.indexOf(tmpBody.Engine) < 0)
+		{
+			throw invalid(`Engine must be one of ${REQUEST_ENGINES.join(', ')}.`, { Field: 'Engine' });
+		}
+		tmpEngine = tmpBody.Engine;
+	}
 
 	return (
 		{
@@ -1277,6 +1292,8 @@ const normalizeRequest = (pEntity, pBody, pSettings) =>
 			TimeoutMS: tmpTimeoutMS,
 			// M4: { Mode, MaxLagMS, MinSeq } (the service's Freshness stage turns it into the effective mode).
 			Freshness: tmpFreshness,
+			// M5 (internal-contracts §62.2)
+			Engine: tmpEngine,
 			Warnings: tmpWarnings
 		});
 };
@@ -1314,6 +1331,7 @@ module.exports = (
 		RESERVED_KEY_PREFIX: RESERVED_KEY_PREFIX,
 		FRESHNESS_MODES: FRESHNESS_MODES,
 		FRESHNESS_DEFAULTS: FRESHNESS_DEFAULTS,
+		REQUEST_ENGINES: REQUEST_ENGINES,
 		SEQ_PATTERN: SEQ_PATTERN,
 		resolveFreshnessSettings: resolveFreshnessSettings,
 		normalizeFreshness: normalizeFreshness,

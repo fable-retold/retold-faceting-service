@@ -26,6 +26,15 @@
  * every write reaches the intake and runs in this one process: the only writes are the "Make a change" calls
  * through the stock CRUD routes, whose behavior dispatcher and DAL writes the interim intake wraps.
  *
+ * M5: with DEMO_CLICKHOUSE=1 (Store 'ClickHouse') every domain also materializes every entity into the ClickHouse
+ * store (the throwaway rfs-test-clickhouse container, started if needed; database rfs_demo_<port>_<pid>_<domain>, dropped and
+ * backfilled at every boot; ExposeReasons on, so the inspector shows why a facet stayed Live).  The renumbering
+ * is a raw SQL write the intake cannot see, so it is reported like any raw writer's (notify with no IDs: a
+ * whole-entity re-read) and the domain is ready once the store has applied it.  With the store the result cache
+ * is off: a cache entry only ever holds a Live answer (store answers are never cached, internal-contracts §62.4),
+ * and a Bounded / Fast request takes an entry before it is routed, so the cache would hide the store the demo is
+ * showing.  Without the variable the demo is exactly M4.
+ *
  * Demo-only switches (a showcase on one loopback machine, never a multi-tenant deployment): Cache.ExposeStatus
  * (the X-Retold-Facet-Cache / -Freshness headers the inspector shows), Freshness.SeqHeader and SSE.IncludeSeq
  * (the Seq the MinSeq / read-your-writes flow shows).  Their defaults keep all three away from clients on a policy
@@ -345,6 +354,56 @@ const effectiveRenumber = (pDomain, pHarness) =>
 };
 
 /**
+ * M5: the renumbering (raw SQL) reported to the faceting service like any raw writer's: one notify per entity
+ * naming no IDs (a whole-entity re-read in the store; every cached answer of the entity goes), with every tenant
+ * the renumbering touched.  Then wait until the store applied it (Materializer.quiesce).
+ *
+ * @param {Record<string, any>} pHarness
+ * @param {Record<string, any>|null} pRenumber
+ * @param {(pError?: Error) => void} fCallback
+ */
+const reportRenumber = (pHarness, pRenumber, fCallback) =>
+{
+	if (!pHarness.store || !pRenumber)
+	{
+		return fCallback();
+	}
+	let tmpTenants = [];
+	Object.keys(pRenumber.Tenants || {}).forEach((pOld) => { tmpTenants.push(parseInt(pOld, 10), pRenumber.Tenants[pOld]); });
+	let tmpTables = (pHarness.model && pHarness.model.Tables) ? Object.keys(pHarness.model.Tables) : [];
+	tmpTables.forEach((pEntity) => { pHarness.faceting.notify(pEntity, { Operation: 'Update', IDs: [], Tenants: tmpTenants }); });
+	return pHarness.quiesce((pError) => { return fCallback(pError || null); }, 120000);
+};
+
+/**
+ * M5: the store view of a domain for GET /api/Demo/Status (no tenant data): availability and, per mirrored
+ * entity, its state, lag and whether it is exact.
+ *
+ * @param {Record<string, any>} pHarness
+ * @return {Record<string, any>|null}
+ */
+const describeStore = (pHarness) =>
+{
+	if (!pHarness || !pHarness.store || !pHarness.faceting)
+	{
+		return null;
+	}
+	let tmpAvailability = pHarness.faceting.storeAvailability();
+	let tmpFreshness = pHarness.fable.RetoldFacetingFreshness;
+	let tmpMaterializer = pHarness.fable.RetoldFacetingMaterializer;
+	let tmpStatus = tmpMaterializer ? tmpMaterializer.status() : { Stores: {} };
+	let tmpStore = (tmpStatus.Stores && tmpStatus.Stores.ClickHouse) ? tmpStatus.Stores.ClickHouse : { Entities: {} };
+	let tmpEntities = {};
+	Object.keys(tmpStore.Entities || {}).sort().forEach(
+		(pEntity) =>
+		{
+			let tmpEntity = tmpFreshness ? tmpFreshness.entityFreshness('ClickHouse', pEntity, Date.now()) : { State: 'Absent', LagMS: null, Exact: false };
+			tmpEntities[pEntity] = { State: tmpEntity.State, LagMS: Number.isFinite(tmpEntity.LagMS) ? tmpEntity.LagMS : null, Exact: (tmpEntity.Exact === true), Rows: tmpStore.Entities[pEntity].Rows };
+		});
+	return { Name: 'ClickHouse', Configured: tmpAvailability.Configured, Available: tmpAvailability.Available, Reason: tmpAvailability.Reason, Database: pHarness.storeDatabase || null, Entities: tmpEntities };
+};
+
+/**
  * Is a socket remote address loopback?
  *
  * @param {string|undefined|null} pAddress
@@ -466,6 +525,8 @@ const describeDomain = (pDomain, pHarness) =>
 			// Seed ID -> demo ID (DEMO-SPEC §2.3), and any seed IDs moved out of the way first.
 			Renumbered: pHarness.DemoRenumberMap ? { Tenants: Object.assign({}, pHarness.DemoRenumberMap.Tenants || {}), Users: Object.assign({}, pHarness.DemoRenumberMap.Users || {}), Relocated: (pHarness.DemoRenumber && pHarness.DemoRenumber.Relocated) ? pHarness.DemoRenumber.Relocated : {} } : null,
 			LoopbackGuard: !!(pHarness.DemoLoopbackGuard && pHarness.DemoLoopbackGuard.Installed),
+			// M5: the ClickHouse store (null without DEMO_CLICKHOUSE).
+			Store: describeStore(pHarness),
 			LoopbackOnly: isBoundToLoopback(pHarness),
 			// M4: the write guards and the live statistics.
 			WriteGuard: pHarness.DemoWriteGuard ? { Installed: !!pHarness.DemoWriteGuard.Installed, Entities: pHarness.DemoWriteGuard.Entities.length, Refused: pHarness.DemoWriteGuard.Refused } : null,
@@ -475,10 +536,26 @@ const describeDomain = (pDomain, pHarness) =>
 };
 
 /**
- * Boot one domain: harness start (bound to 127.0.0.1, loopback guard installed before listen) -> renumber.
+ * The ClickHouse database of a domain: rfs_demo_<front port>_<pid>_<domain> — two demo processes (the
+ * user's 19300 and a check on 19301-19305) never share (or drop) each other's databases, and the test
+ * container's ensure() drops the ones whose process is gone.
+ *
+ * @param {number} pFrontPort
+ * @param {string} pDomain
+ * @return {string}
+ */
+const demoDatabase = (pFrontPort, pDomain) =>
+{
+	let tmpPort = (Number.isInteger(pFrontPort) && (pFrontPort > 0)) ? pFrontPort : 0;
+	return `rfs_demo_${tmpPort}_${process.pid}_${String(pDomain).toLowerCase()}`;
+};
+
+/**
+ * Boot one domain: harness start (bound to 127.0.0.1, loopback guard installed before listen) -> renumber
+ * (M5, with a store: reported, then applied by the store before the domain is ready).
  *
  * @param {Record<string, any>} pDomain - a DOMAINS row
- * @param {{ Provider?: string, Scale?: string, LogLevel?: string }} pOptions
+ * @param {{ Provider?: string, Scale?: string, LogLevel?: string, Store?: string|null }} pOptions
  * @param {(pError?: Error, pHarness?: Record<string, any>) => void} fCallback - the harness is returned on error too (so it can be stopped)
  */
 const startDomain = (pDomain, pOptions, fCallback) =>
@@ -498,7 +575,17 @@ const startDomain = (pDomain, pOptions, fCallback) =>
 				// Loopback only, and the guard is in restify's pre chain before the first connection.
 				Host: BIND_HOST,
 				BeforeListen: installLoopbackGuard,
-				Faceting: JSON.parse(JSON.stringify(FACETING_OPTIONS))
+				// M5: the result cache off with the store (it would serve its Live entries before any routing).
+				Faceting: (pOptions.Store === 'ClickHouse') ? Object.assign(JSON.parse(JSON.stringify(FACETING_OPTIONS)), { Cache: { Enabled: false, ExposeStatus: true } }) : JSON.parse(JSON.stringify(FACETING_OPTIONS)),
+				// M5 (DEMO_CLICKHOUSE=1): every entity materialized into rfs_demo_<port>_<pid>_<domain> (fresh at every boot).
+				Store: (pOptions.Store === 'ClickHouse') ? 'ClickHouse' : null,
+				// The database carries the front port: a smoke or browser check on 19301-19305 never drops (or
+				// materializes into) the databases of a ClickHouse-mode demo on 19300 (one materializer each).
+				// ExposeFreshness: the inspector shows LagMS / AsOf and the freshness reasons (the demo hosts have
+				// a scope policy, where 'Auto' hides them).
+				StoreOptions: (pOptions.Store === 'ClickHouse')
+					? { Materialize: 'All', Database: demoDatabase(pOptions.FrontPort, pDomain.Domain), DropFirst: true, Store: { ExposeReasons: true, ExposeFreshness: true }, QuiesceTimeoutMS: 120000 }
+					: {}
 			},
 			(pStartError) =>
 			{
@@ -532,8 +619,16 @@ const startDomain = (pDomain, pOptions, fCallback) =>
 						{
 							return fCallback(pGuardError, tmpHarness);
 						}
-						tmpHarness.DemoBootMS = Date.now() - tmpStarted;
-						return fCallback(null, tmpHarness);
+						reportRenumber(tmpHarness, tmpRenumber,
+							(pReportError) =>
+							{
+								if (pReportError)
+								{
+									return fCallback(new Error(`${pDomain.Domain}: the ClickHouse store did not apply the renumbering: ${pReportError.message}`), tmpHarness);
+								}
+								tmpHarness.DemoBootMS = Date.now() - tmpStarted;
+								return fCallback(null, tmpHarness);
+							});
 					});
 			});
 	}
@@ -574,7 +669,7 @@ const stop = (pDomains, fCallback) =>
  * Boot every domain, in order.  On any failure the domains already started are stopped before the
  * callback.
  *
- * @param {{ Provider?: string, Scale?: string, LogLevel?: string, onDomain?: (pDomain: string, pHarness: Record<string, any>) => void }} pOptions
+ * @param {{ Provider?: string, Scale?: string, LogLevel?: string, Store?: string|null, onDomain?: (pDomain: string, pHarness: Record<string, any>) => void }} pOptions
  * @param {(pError?: Error, pDomains?: Record<string, Record<string, any>>) => void} fCallback - { ProjectTrack: harness, … }
  */
 const start = (pOptions, fCallback) =>
@@ -624,6 +719,9 @@ module.exports = (
 		installLoopbackGuard: installLoopbackGuard,
 		isBoundToLoopback: isBoundToLoopback,
 		describeDomain: describeDomain,
+		describeStore: describeStore,
+		demoDatabase: demoDatabase,
+		reportRenumber: reportRenumber,
 		startDomain: startDomain,
 		start: start,
 		stop: stop,

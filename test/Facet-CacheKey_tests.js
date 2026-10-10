@@ -278,7 +278,7 @@ suite
 				Expect(tmpCacheKey.version('ck:a', 'g:c')).to.not.equal(tmpCacheKey.version('ck:a', 'g:b'));
 				Expect(tmpCacheKey.version('ck:b', 'g:b')).to.not.equal(tmpCacheKey.version('ck:a', 'g:b'));
 				Expect(libCacheKey.KEY_VERSION).to.equal(1);
-				Expect(libCacheKey.UNCACHEABLE_REASONS).to.deep.equal([ 'Mode', 'ForceEngine', 'PlanErrors', 'NoChangeSource', 'ModelReload', 'TooManyEntities', 'ProbeError', 'Opaque', 'RecordsPostOperation', 'NotCacheable', 'Errors', 'Staged', 'ScopeChanged', 'TooLarge' ]);
+				Expect(libCacheKey.UNCACHEABLE_REASONS).to.deep.equal([ 'Mode', 'ForceEngine', 'PlanErrors', 'NoChangeSource', 'ModelReload', 'TooManyEntities', 'ProbeError', 'Opaque', 'RecordsPostOperation', 'NotCacheable', 'Errors', 'Staged', 'ScopeChanged', 'TooLarge', 'Store' ]);
 			});
 
 		test('without a Generations service, dependencies fall back to the keys every write moves',

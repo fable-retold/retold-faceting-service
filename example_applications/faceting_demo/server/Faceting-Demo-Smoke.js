@@ -41,8 +41,17 @@
  *   + the demo host's own errors (unknown domain / route, method, body size, Host header, dot segments)
  *   + a stopped domain answers 502 DEMO_UPSTREAM_UNAVAILABLE (last: it stops the Bookstore domain)
  *
+ *   16. (M5, DEMO_CLICKHOUSE=1 only) the ClickHouse store: Status (Store, every entity Live, no upstream address);
+ *       every group as user42 with the browser's body answered by the store and equal to Engine 'Live' (Requested);
+ *       a write as user42 seen by user43: Fast right away is the store (its lag says how current), Exact is the
+ *       current answer (Live while the store lags), Fast polled until the store caught up (Exact, LagMS 0, the new
+ *       numbers); undo
+ *
  * Exit 0 when every check passes, 1 with the failed checks listed otherwise; the domains are always stopped.
  * `TZ=UTC DEMO_PG=1 npm test` runs the same checks with every domain on PostgreSQL (rfs-test-postgres).
+ * `DEMO_CLICKHOUSE=1 npm test` (M5) adds the ClickHouse store (rfs-test-clickhouse) to every domain and section 16;
+ * sections 14 and 15 assert the result cache's behavior for Live answers (store answers are never cached), so they
+ * run without the store only.
  *
  * @license MIT
  *
@@ -1693,6 +1702,114 @@ const checkUpstreamDown = async () =>
 	checkEqual('the other domains keep answering', tmpOther.Status, 200);
 };
 
+const checkClickHouse = async () =>
+{
+	section('16. (M5) the ClickHouse store: every page on the store and equal to Live; a write the store catches up with');
+	let tmpStatus = await call('GET', '/api/Demo/Status');
+	let tmpBody = tmpStatus.Body || {};
+	checkEqual('Status: Store ClickHouse, Milestone M5', [ tmpBody.Store, tmpBody.Milestone ], [ 'ClickHouse', 'retold-faceting-service M5' ]);
+	Object.keys(tmpBody.Domains || {}).forEach(
+		(pDomain) =>
+		{
+			let tmpStore = tmpBody.Domains[pDomain].Store || {};
+			let tmpEntities = Object.keys(tmpStore.Entities || {});
+			check(`${pDomain}: the store is available and every entity is materialized and Live`, (tmpStore.Available === true) && (tmpEntities.length === tmpBody.Domains[pDomain].Entities.length) && tmpEntities.every((pEntity) => { return [ 'Live', 'Lagging' ].indexOf(tmpStore.Entities[pEntity].State) >= 0; }), tmpStore);
+			checkEqual(`${pDomain}: the store database (per front port: another demo's databases are never touched)`, tmpStore.Database, `rfs_demo_${SMOKE_PORT}_${process.pid}_${pDomain.toLowerCase()}`);
+		});
+
+	// Every group as user42: the browser's body (Bounded) — then the same with Engine 'Live'.
+	let tmpOnStore = 0;
+	let tmpFacets = 0;
+	let tmpGroups = Object.keys(libPages.Groups);
+	for (let i = 0; i < tmpGroups.length; i++)
+	{
+		let tmpState = groupState(tmpGroups[i]);
+		if (!Array.isArray(tmpState.Facets) || (tmpState.Facets.length < 1))
+		{
+			continue;
+		}
+		let tmpStore = await query(tmpState, 'user42');
+		let tmpLive = await call('POST', browserPath(tmpState, libSelection.KIND_QUERY), Object.assign(libSelection.buildQueryBody(tmpState, { Freshness: libSelection.DEFAULT_FRESHNESS }), { Engine: 'Live' }), { Persona: 'user42' });
+		if (!checkEqual(`${tmpGroups[i]}: 200 from both engines`, [ tmpStore.Status, tmpLive.Status ], [ 200, 200 ]))
+		{
+			continue;
+		}
+		let tmpBlock = tmpStore.Body.Store || { Facets: {} };
+		let tmpKeys = Object.keys(tmpStore.Body.Facets || {});
+		tmpKeys.forEach(
+			(pKey) =>
+			{
+				tmpFacets++;
+				let tmpDecision = tmpBlock.Facets[pKey] || {};
+				if (tmpDecision.Engine === 'ClickHouse')
+				{
+					tmpOnStore++;
+				}
+				else
+				{
+					check(`${tmpGroups[i]}.${pKey} answered Live says why`, (typeof(tmpDecision.Reason) === 'string') && (tmpDecision.Reason.length > 0), tmpDecision);
+				}
+			});
+		let fCounts = (pEnvelope) =>
+		{
+			let tmpCounts = { Total: pEnvelope.Total };
+			Object.keys(pEnvelope.Facets || {}).forEach((pKey) => { tmpCounts[pKey] = [ pEnvelope.Facets[pKey].Total, (pEnvelope.Facets[pKey].Buckets || []).map((pBucket) => { return [ pBucket.Key, pBucket.Count ]; }) ]; });
+			return tmpCounts;
+		};
+		checkEqual(`${tmpGroups[i]}: the store's numbers equal Live's`, fCounts(tmpStore.Body), fCounts(tmpLive.Body));
+		check(`${tmpGroups[i]}: Engine 'Live' → every facet Live (Requested)`, Object.keys(tmpLive.Body.Store.Facets).every((pKey) => { return (tmpLive.Body.Store.Facets[pKey].Engine === 'Live') && (tmpLive.Body.Store.Facets[pKey].Reason === 'Requested'); }), tmpLive.Body.Store);
+	}
+	check(`most facets of the pages are answered by ClickHouse (${tmpOnStore} of ${tmpFacets})`, (tmpFacets > 10) && (tmpOnStore >= Math.ceil(tmpFacets * 0.6)), [ tmpOnStore, tmpFacets ]);
+
+	// A write as user42, read by user43 (no read-your-writes upgrade): Fast vs Exact while the store catches up.
+	let tmpBefore = await query(groupState('Documents'), 'user43');
+	let tmpProjectID = ((tmpBefore.Body.Records || [])[0] || {}).IDProject;
+	let tmpBodyFast = Object.assign(libSelection.buildQueryBody(groupState('Documents'), null), { Freshness: { Mode: 'Fast' } });
+	let tmpBodyExact = Object.assign(libSelection.buildQueryBody(groupState('Documents'), null), { Freshness: { Mode: 'Exact' } });
+	let tmpPath = browserPath(groupState('Documents'), libSelection.KIND_QUERY);
+	let tmpAdd = await call('POST', '/api/ProjectTrack/1.0/Document', { Title: 'Store lag probe', Status: 'Draft', DocumentDate: '2026-03-15 00:00:00', IDFormType: 4, IDProject: tmpProjectID }, { Persona: 'user42' });
+	let tmpDocumentID = tmpAdd.Body ? tmpAdd.Body.IDDocument : null;
+	checkEqual('a Document added as user42 (2xx)', [ tmpAdd.Status, typeof(tmpDocumentID) ], [ 200, 'number' ]);
+	let tmpFast = await call('POST', tmpPath, tmpBodyFast, { Persona: 'user43' });
+	let tmpExact = await call('POST', tmpPath, tmpBodyExact, { Persona: 'user43' });
+	let tmpFastTotal = tmpFast.Body ? tmpFast.Body.Total : null;
+	check('user43 Fast right after the write: the store, and its numbers match its own freshness (old while not Exact, new once Exact)',
+		!!tmpFast.Body && (tmpFast.Body.Engine === 'ClickHouse') && (tmpFast.Body.Exact ? (tmpFastTotal === tmpBefore.Body.Total + 1) : ((tmpFastTotal === tmpBefore.Body.Total) && (tmpFast.Body.LagMS >= 0))),
+		tmpFast.Body ? { Engine: tmpFast.Body.Engine, Exact: tmpFast.Body.Exact, LagMS: tmpFast.Body.LagMS, Total: tmpFastTotal, Before: tmpBefore.Body.Total } : tmpFast.Status);
+	check('user43 Exact right after the write: the current answer (Live while the store lags)',
+		!!tmpExact.Body && (tmpExact.Body.Total === tmpBefore.Body.Total + 1) && (tmpExact.Body.Exact === true) && ((tmpExact.Body.Engine === 'ClickHouse') || (tmpExact.Body.Store.Facets.ByMonth.Reason === 'NotExact:Document')),
+		tmpExact.Body ? { Engine: tmpExact.Body.Engine, Total: tmpExact.Body.Total, Store: tmpExact.Body.Store } : tmpExact.Status);
+	let tmpCaught = null;
+	let tmpLags = [];
+	for (let i = 0; (i < 60) && !tmpCaught; i++)
+	{
+		let tmpPoll = await call('POST', tmpPath, tmpBodyFast, { Persona: 'user43' });
+		tmpLags.push(tmpPoll.Body ? tmpPoll.Body.LagMS : null);
+		if (tmpPoll.Body && (tmpPoll.Body.Exact === true))
+		{
+			tmpCaught = tmpPoll;
+			break;
+		}
+		await sleep(100);
+	}
+	check('user43 Fast polled: the store caught up (Exact, LagMS 0, the new Total)', !!tmpCaught && (tmpCaught.Body.Engine === 'ClickHouse') && (tmpCaught.Body.LagMS === 0) && (tmpCaught.Body.Total === tmpBefore.Body.Total + 1), { Lags: tmpLags, Caught: tmpCaught ? { Engine: tmpCaught.Body.Engine, Total: tmpCaught.Body.Total } : null });
+	let tmpDelete = await call('DELETE', `/api/ProjectTrack/1.0/Document/${tmpDocumentID}`, null, { Persona: 'user42' });
+	checkEqual('undo: the probe document deleted', [ tmpDelete.Status, tmpDelete.Body ? tmpDelete.Body.Count : null ], [ 200, 1 ]);
+	let tmpUndone = null;
+	for (let i = 0; (i < 60) && !tmpUndone; i++)
+	{
+		let tmpPoll = await call('POST', tmpPath, tmpBodyFast, { Persona: 'user43' });
+		if (tmpPoll.Body && (tmpPoll.Body.Exact === true) && (tmpPoll.Body.Total === tmpBefore.Body.Total))
+		{
+			tmpUndone = tmpPoll;
+			break;
+		}
+		await sleep(100);
+	}
+	check('undo: the store is back to the original Total', !!tmpUndone && (tmpUndone.Body.Engine === 'ClickHouse'), tmpUndone ? tmpUndone.Body.Total : null);
+	console.log(`    ${tmpOnStore} of ${tmpFacets} page facets on ClickHouse; after a write the store's LagMS went ${tmpLags.join(' → ')}`);
+};
+
 // ------------------------------------------------------------------------------------------------ run
 
 /**
@@ -1720,8 +1837,10 @@ const run = () =>
 	let tmpStarted = Date.now();
 	// DEMO_PG=1 runs the same checks on PostgreSQL (rfs-test-postgres; needs TZ=UTC): the answers are identical.
 	_Provider = (process.env.DEMO_PG === '1') ? 'PostgreSQL' : 'SQLite';
-	console.log(`Faceting-Demo-Smoke: booting the demo on 127.0.0.1:${SMOKE_PORT} (${_Provider}, Small) ...`);
-	libServer.startDemo({ Port: SMOKE_PORT, Host: '127.0.0.1', Scale: 'Small', Provider: _Provider, LogLevel: 'fatal' },
+	// DEMO_CLICKHOUSE=1 (M5) adds the ClickHouse store to every domain, and section 16.
+	let tmpStore = (process.env.DEMO_CLICKHOUSE === '1') ? 'ClickHouse' : null;
+	console.log(`Faceting-Demo-Smoke: booting the demo on 127.0.0.1:${SMOKE_PORT} (${_Provider}, Small${tmpStore ? ', ClickHouse store' : ''}) ...`);
+	libServer.startDemo({ Port: SMOKE_PORT, Host: '127.0.0.1', Scale: 'Small', Provider: _Provider, LogLevel: 'fatal', Store: tmpStore },
 		(pError, pDemo) =>
 		{
 			if (pError)
@@ -1747,8 +1866,17 @@ const run = () =>
 				await checkClientLogic();
 				await checkChangesContract();
 				await checkWriteGuards(tmpUser42);
-				await checkLiveChanges();
-				await checkProviderLive();
+				if (tmpStore)
+				{
+					// The result cache keeps Live answers only: 14 / 15 assert its Hit / Stale behavior on them.
+					_Skipped.push('sections 14 and 15 (the result cache on Live answers): DEMO_CLICKHOUSE=1 routes the pages to the store');
+					await checkClickHouse();
+				}
+				else
+				{
+					await checkLiveChanges();
+					await checkProviderLive();
+				}
 				await checkHostErrors();
 				await checkUpstreamDown();
 			})().then(

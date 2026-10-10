@@ -37,7 +37,9 @@ const libFacetUtil = require('./Facet-Contract-Util.js');
 const NUMERIC_KEY_TYPES = libFacetBuckets.NUMERIC_KEY_TYPES;
 
 // Fields removed by normalizeForComparison (they legitimately differ between engines/calls).
-const VOLATILE_FIELDS = Object.freeze([ 'Version', 'AsOf', 'ElapsedMS', 'Engine', 'Cached', 'LagMS', 'Stale' ]);
+// M5 (internal-contracts §53.2, §62.3): + 'Store' (the envelope's store routing block: which engine
+// answered each facet and why is not part of the answer).
+const VOLATILE_FIELDS = Object.freeze([ 'Version', 'AsOf', 'ElapsedMS', 'Engine', 'Cached', 'LagMS', 'Stale', 'Store' ]);
 
 // Folds with no buckets.
 const SCALAR_FOLDS = Object.freeze([ 'Stats', 'DistinctCount', 'Missing', 'Count' ]);

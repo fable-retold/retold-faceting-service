@@ -15,6 +15,10 @@
  *   GET  /1.0/Facet/Describe/:Entity     (design form, 02 §2.1)
  *   GET  /1.0/Facet/:Entity/Describe     (M1 brief form; same handler)
  *   GET  /1.0/Facet/Changes              (M4: the SSE change stream, mounted through RetoldFacetingSSE)
+ *   POST /1.0/Facet/Admin/Rebuild/:Store/:Entity      (M5, platform / test only: mounted only with
+ *   POST /1.0/Facet/Admin/Reconcile/:Store/:Entity    Admin.Routes; every request needs the principal and
+ *                                        Admin.authorize(pRequest, pPrincipal) === true, else 403;
+ *                                        202 { Started, Action, Store, Entity }; internal-contracts §60.5)
  *
  * The Records routes are POST only: pict-section-recordset posts { Clauses, Experience } to
  * `${FilterEndpointOverride}/${Offset}/${PageSize}` and `…/Count` (internal-contracts §36.1).
@@ -100,6 +104,16 @@ class RetoldFacetingRoutes extends libFableServiceProviderBase
 		if (this.fable.RetoldFacetingSSE && this.options.SSE && (this.options.SSE.Enabled !== false))
 		{
 			this.fable.RetoldFacetingSSE.connect(pServiceServer);
+		}
+		// M5 (internal-contracts §60.5): the admin routes only when Admin.Routes is exactly true.
+		if (this.options.Admin && (this.options.Admin.Routes === true))
+		{
+			pServiceServer.post(`${tmpPrefix}/Admin/Rebuild/:Store/:Entity`,
+				this.bodyParser(pServiceServer),
+				(pRequest, pResponse, fNext) => { return this.handleAdmin('Rebuild', pRequest, pResponse, fNext); });
+			pServiceServer.post(`${tmpPrefix}/Admin/Reconcile/:Store/:Entity`,
+				this.bodyParser(pServiceServer),
+				(pRequest, pResponse, fNext) => { return this.handleAdmin('Reconcile', pRequest, pResponse, fNext); });
 		}
 
 		this._Connected = true;
@@ -603,6 +617,37 @@ class RetoldFacetingRoutes extends libFableServiceProviderBase
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * POST /1.0/Facet/Admin/Rebuild/:Store/:Entity and /Admin/Reconcile/:Store/:Entity { Level }
+	 * (internal-contracts §60.5; mounted only with Admin.Routes): 202 { Started, Action, Store, Entity },
+	 * or the facet error (401, 403 FACET_FORBIDDEN, 404, 429, 503).
+	 *
+	 * @param {string} pRoute - 'Rebuild' | 'Reconcile'
+	 * @param {any} pRequest
+	 * @param {any} pResponse
+	 * @param {Function} fNext
+	 */
+	handleAdmin(pRoute, pRequest, pResponse, fNext)
+	{
+		let tmpService = this.fable.RetoldFacetingService;
+		if (!tmpService || (typeof(tmpService.adminRequest) !== 'function'))
+		{
+			this.sendError(pResponse, libFacetErrors.create('FACET_INTERNAL'), fNext);
+			return;
+		}
+		tmpService.adminRequest(pRoute, pRequest,
+			(pError, pResult) =>
+			{
+				if (pError)
+				{
+					return this.sendError(pResponse, pError, fNext);
+				}
+				this.setStandardHeaders(pResponse);
+				pResponse.send(202, pResult);
+				return fNext();
+			});
 	}
 
 	/**

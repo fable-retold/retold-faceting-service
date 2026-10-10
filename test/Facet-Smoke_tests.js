@@ -56,13 +56,27 @@ const SERVICE_CLASSES = (
 		[ 'cache/Retold-Faceting-ResultCache.js', 'RetoldFacetingResultCache' ],
 		[ 'change/Retold-Faceting-ChangeIntake.js', 'RetoldFacetingChangeIntake' ],
 		[ 'change/Retold-Faceting-ReadYourWrites.js', 'RetoldFacetingReadYourWrites' ],
-		[ 'routes/Retold-Faceting-SSE.js', 'RetoldFacetingSSE' ]
+		[ 'routes/Retold-Faceting-SSE.js', 'RetoldFacetingSSE' ],
+		// Milestone 5 (internal-contracts §53.3)
+		[ 'store/Retold-Faceting-StoreBase.js', 'RetoldFacetingStoreBase' ],
+		[ 'store/clickhouse/Retold-Faceting-StoreClickHouse.js', 'RetoldFacetingStoreClickHouse' ],
+		[ 'persistence/Retold-Faceting-MirrorSpec.js', 'RetoldFacetingMirrorSpec' ],
+		[ 'persistence/Retold-Faceting-Materializer.js', 'RetoldFacetingMaterializer' ],
+		[ 'persistence/Retold-Faceting-WriterLoop.js', 'RetoldFacetingWriterLoop' ],
+		[ 'persistence/Retold-Faceting-WriterClock.js', 'RetoldFacetingWriterClock' ],
+		[ 'persistence/Retold-Faceting-PendingSet.js', 'RetoldFacetingPendingSet' ],
+		[ 'persistence/Retold-Faceting-FlushBuffer.js', 'RetoldFacetingFlushBuffer' ],
+		[ 'persistence/MaterializeSource-InProcess.js', 'RetoldFacetingMaterializeSourceInProcess' ],
+		[ 'persistence/Retold-Faceting-Freshness.js', 'RetoldFacetingFreshness' ],
+		[ 'persistence/Retold-Faceting-Rebuilder.js', 'RetoldFacetingRebuilder' ],
+		[ 'persistence/Retold-Faceting-Reconciler.js', 'RetoldFacetingReconciler' ],
+		[ 'engine/Retold-Faceting-EngineClickHouse.js', 'RetoldFacetingEngineClickHouse' ]
 	]);
 
 // [ relative path, required export names ] for every pure / function module
 const PURE_MODULES = (
 	[
-		[ 'Retold-Faceting-Service-Options.js', [ 'DEFAULTS', 'ROUTE_RESERVED_NAMES', 'NEVER_FACETABLE', 'resolve', 'deepMerge', 'hasScopePolicy' ] ],
+		[ 'Retold-Faceting-Service-Options.js', [ 'DEFAULTS', 'ROUTE_RESERVED_NAMES', 'NEVER_FACETABLE', 'resolve', 'deepMerge', 'hasScopePolicy', 'STORE_DEFAULTS' ] ],
 		[ 'Retold-Faceting-Installers.js', [ 'installOnRetoldDataService' ] ],
 		[ 'contract/Facet-Contract-Request.js', [ 'CONTRACT_VERSION', 'FOLDS', 'SELECTABLE_FOLDS', 'INTERVALS', 'ORDERS', 'NUMERIC_MODES', 'EXCLUDE_POLICIES', 'DEFAULT_EXCLUDE', 'FOLD_CLAUSE_TYPE', 'M1_CLAUSE_TYPES', 'FILTER_INSTRUCTIONS', 'FILTER_STRIPPED_INSTRUCTIONS', 'FILTER_OPERATOR_MAP', 'PRED_OPS', 'IDENTIFIER_PATTERN', 'parseFacetID', 'defaultExcludeFor', 'clauseTypeFor', 'clampPositiveInteger' ] ],
 		[ 'contract/Facet-Contract-Envelope.js', [ 'CONTRACT_VERSION', 'NUMERIC_KEY_TYPES', 'VOLATILE_FIELDS', 'normalizeKey', 'emptyFacetResult', 'buildFacetResult', 'buildEnvelope', 'normalizeForComparison' ] ],
@@ -80,7 +94,11 @@ const PURE_MODULES = (
 		[ 'engine/live/Shell-Templates-SQLite.js', [ 'Dialect', 'Templates', 'Expressions' ] ],
 		[ 'engine/live/Shell-Templates-PostgreSQL.js', [ 'Dialect', 'Templates', 'Expressions' ] ],
 		[ 'engine/live/Shell-Templates-MySQL.js', [ 'Dialect', 'Templates', 'Expressions' ] ],
-		[ 'engine/live/Shell-Templates-MSSQL.js', [ 'Dialect', 'Templates', 'Expressions' ] ]
+		[ 'engine/live/Shell-Templates-MSSQL.js', [ 'Dialect', 'Templates', 'Expressions' ] ],
+		// Milestone 5 (internal-contracts §53.3): the pure ClickHouse modules
+		[ 'store/clickhouse/ClickHouse-TypeMap.js', [ 'TYPE_MAP_VERSION', 'DATETIME_MIN', 'DATETIME_MAX', 'mirrorType', 'baseType', 'paramType', 'isNullableType', 'toStoreValue', 'toStoreRow', 'fromStoreValue', 'canonicalDateLiteral' ] ],
+		[ 'store/clickhouse/ClickHouse-DDL.js', [ 'DDL_VERSION', 'IDENTIFIER_PATTERN', 'META_COLUMNS', 'STATE_TABLE', 'KEYMAP_PREFIX', 'SHADOW_INFIX', 'sanitizeInstanceKey', 'databaseName', 'quoteIdentifier', 'qualified', 'mirrorTableName', 'keymapTableName', 'createDatabaseDDL', 'mirrorDDL', 'keymapDDL', 'entityStateDDL', 'addColumnsDDL', 'exchangeDDL', 'renameDDL', 'dropTableDDL', 'specComment', 'parseSpecComment' ] ],
+		[ 'store/clickhouse/ClickHouse-FoldCompiler.js', [ 'COMPILER_VERSION', 'OPERATOR_MAP', 'READ_SETTINGS', 'REASON_CLASSES', 'paramName', 'compileFilter', 'compileRelation', 'compileFoldPred', 'dimensionExpression', 'compileAgg', 'compileCube' ] ]
 	]);
 
 const newFable = () => { return libBuilders.newFable('RetoldFacetingSmoke'); };
@@ -430,6 +448,122 @@ suite
 						Expect(new TinyHost(newFable(), {}).entityScopeColumns('Project').Kind).to.equal('Unscoped');
 					});
 
+				test('contracts (M5): the ClickHouse client, the store names, the writer clock, the M5 options and the module boundaries (internal-contracts §53–§58, §69)',
+					() =>
+					{
+						let libFS = require('fs');
+						let libPath = require('path');
+						// The pure store modules and the client require nothing outside contract/ and store/clickhouse/ (they move to
+						// meadow-connection-clickhouse unchanged, §53.3).
+						[ 'store/clickhouse/ClickHouse-Client.js', 'store/clickhouse/ClickHouse-TypeMap.js', 'store/clickhouse/ClickHouse-DDL.js', 'store/clickhouse/ClickHouse-FoldCompiler.js' ].forEach(
+							(pFile) =>
+							{
+								let tmpSource = libFS.readFileSync(libPath.join(__dirname, SOURCE, pFile), 'utf8');
+								(tmpSource.match(/require\(\s*['"`][^'"`]+['"`]\s*\)/g) || []).forEach(
+									(pRequire) =>
+									{
+										let tmpTarget = /require\(\s*['"`]([^'"`]+)['"`]\s*\)/.exec(pRequire)[1];
+										let tmpAllowed = [ 'http', 'https', 'crypto' ].indexOf(tmpTarget) >= 0
+											|| /^\.\/ClickHouse-[A-Za-z]+\.js$/.test(tmpTarget)
+											|| /^\.\.\/\.\.\/contract\/Facet-Contract-[A-Za-z]+\.js$/.test(tmpTarget);
+										Expect(tmpAllowed, `${pFile}: ${pRequire}`).to.equal(true);
+									});
+							});
+
+						// The client: a plain class; parameters render as ClickHouse literals, never into SQL text.
+						let libClient = require(SOURCE + 'store/clickhouse/ClickHouse-Client.js');
+						let tmpClient = new libClient({ URL: 'http://127.0.0.1:18123', User: 'rfs_test', Password: 'secret' });
+						Expect(tmpClient.formatParam(null)).to.equal('\\N');
+						Expect(tmpClient.formatParam(7)).to.equal('7');
+						Expect(tmpClient.formatParam(true)).to.equal('1');
+						Expect(tmpClient.formatParam("it's")).to.equal("it's");
+						Expect(tmpClient.formatParam([ 1, 2 ])).to.equal('[1,2]');
+						Expect(tmpClient.formatParam([ "a'b", 'c\\d', null ])).to.equal("['a\\'b','c\\\\d',NULL]");
+						Expect(() => { return new libClient({ URL: 'http://user:pw@127.0.0.1:18123' }); }).to.throw(/credentials/);
+						Expect(libClient.redact('bad secret here', 'secret')).to.equal('bad <redacted> here');
+						Expect(libClient.normalizeRows([ { N: '42', B: '18446744073709551615', S: '7' } ], [ { name: 'N', type: 'UInt64' }, { name: 'B', type: 'UInt64' }, { name: 'S', type: 'String' } ]))
+							.to.deep.equal([ { N: 42, B: '18446744073709551615', S: '7' } ]);
+
+						// Names (§56.1).
+						let libDDL = require(SOURCE + 'store/clickhouse/ClickHouse-DDL.js');
+						Expect(libDDL.sanitizeInstanceKey('sluice-juicebox')).to.equal('sluice_juicebox');
+						Expect(libDDL.databaseName('main')).to.equal('rfs_main');
+						Expect(libDDL.databaseName('main', 'rfs_123_4')).to.equal('rfs_123_4');
+						Expect(() => { return libDDL.databaseName('main', 'bad-name'); }).to.throw();
+						Expect(libDDL.qualified('rfs_main', 'LabForm')).to.equal('`rfs_main`.`LabForm`');
+						Expect(libDDL.mirrorTableName('LabForm', '0a1b2c3d')).to.equal('LabForm__shadow_0a1b2c3d');
+						Expect(libDDL.keymapTableName('LabForm')).to.equal('_rfs_keys_LabForm');
+						Expect(libDDL.keymapTableName('LabForm', '0a1b2c3d')).to.equal('_rfs_keys_LabForm__shadow_0a1b2c3d');
+						Expect(() => { return libDDL.mirrorTableName('_rfs_entity_state'); }).to.throw();
+						Expect(libDDL.createDatabaseDDL('rfs_main')).to.equal('CREATE DATABASE IF NOT EXISTS `rfs_main` ENGINE = Atomic');
+
+						// Targets, the writer clock (§54.3, §58.4).
+						let libStoreBase = require(SOURCE + 'store/Retold-Faceting-StoreBase.js');
+						Expect(libStoreBase.TARGET_LIVE).to.equal('Live');
+						Expect(libStoreBase.shadowTarget('0a1b2c3d')).to.equal('Shadow:0a1b2c3d');
+						Expect(libStoreBase.isShadowTarget('Shadow:0a1b2c3d')).to.equal('0a1b2c3d');
+						Expect(libStoreBase.isShadowTarget('Live')).to.equal(null);
+						let libClock = require(SOURCE + 'persistence/Retold-Faceting-WriterClock.js');
+						let tmpClock = new libClock(newFable());
+						let tmpFirst = tmpClock.next();
+						Expect(tmpClock.next()).to.be.above(tmpFirst);
+						Expect(tmpClock.seed(tmpFirst + 1e12)).to.equal(tmpFirst + 1e12);
+						Expect(tmpClock.next()).to.equal(tmpFirst + 1e12 + 1);
+						Expect(tmpClock.seed(5)).to.equal(tmpFirst + 1e12 + 1);
+						Expect(libClient).to.be.a('function');
+						Expect(require(SOURCE + 'store/clickhouse/ClickHouse-TypeMap.js').paramType('Nullable(Int64)')).to.equal('Int64');
+
+						// Options (§53.4): stores off by default, the M5 keys present.
+						let libOptions = require(SOURCE + 'Retold-Faceting-Service-Options.js');
+						let tmpOptions = libOptions.resolve({});
+						Expect(tmpOptions.Stores.ClickHouse).to.equal(false);
+						Expect(tmpOptions.Materializer.Enabled).to.equal('Auto');
+						Expect(tmpOptions.Reconcile.LeafRange).to.equal(2000);
+						Expect(tmpOptions.Freshness.DefaultMode).to.equal('Exact');
+						Expect(tmpOptions.Admin.Routes).to.equal(false);
+						Expect(libOptions.STORE_DEFAULTS.ClickHouse.ExposeReasons).to.equal(false);
+						Expect(require(SOURCE + 'persistence/Retold-Faceting-MirrorSpec.js').MATERIALIZE_SCHEMA.title).to.equal('RetoldFaceting.Materialize');
+						Expect(require(SOURCE + 'engine/Retold-Faceting-EngineClickHouse.js').ENGINE_NAME).to.equal('ClickHouse');
+						// Builder C (§63, §64): the engine's dry-run compile and the static-mirror seam, the capture
+						// entry point, the compiler's relation collector; every reason class (ShapeUnsupported added).
+						let libEngineClickHouse = require(SOURCE + 'engine/Retold-Faceting-EngineClickHouse.js');
+						[ 'capable', 'freshness', 'execute', 'compile', 'useStaticMirrors' ].forEach((pMethod) => { Expect(libEngineClickHouse.prototype[pMethod], pMethod).to.be.a('function'); });
+						Expect(require(SOURCE + 'engine/live/Retold-Faceting-ScopedRelationBuilder.js').prototype.captureRelation).to.be.a('function');
+						let libFoldCompilerSmoke = require(SOURCE + 'store/clickhouse/ClickHouse-FoldCompiler.js');
+						Expect(libFoldCompilerSmoke.collectRelations).to.be.a('function');
+						Expect(libFoldCompilerSmoke.REASON_CLASSES).to.include.members([ 'NotMirrored', 'LossyColumn', 'ScopeMissing', 'OpaqueScope', 'StoreError', 'ShapeUnsupported' ]);
+						Expect(libFoldCompilerSmoke.compileFilter({ Entity: 'Smoke', Identity: 'IDSmoke', Columns: [ { Column: 'IDSmoke', Mirror: 'Int64' } ] }, [ { Column: 'IDSmoke', Operator: '=', Value: 7, Connector: 'AND' } ], { SourceDialect: 'SQLite' }))
+							.to.deep.equal({ SQL: '`IDSmoke` = {w_0:Int64}', Params: { w_0: 7 }, Types: { w_0: 'Int64' } });
+
+						// The test container helper only ever targets its own container (§69.1).
+						let libDocker = require('./support/Facet-Docker-ClickHouse.js');
+						Expect(libDocker.CONTAINER_NAME).to.equal('rfs-test-clickhouse');
+						Expect(libDocker.IMAGE).to.equal('clickhouse/clickhouse-server:24.8');
+						Expect(() => { return libDocker.assertOwnContainer([ 'stop', 'rfs-test-postgres' ]); }).to.throw();
+						Expect(() => { return libDocker.assertOwnContainer([ 'exec', 'rfs-test-clickhouse', 'sh' ]); }).to.throw();
+						Expect(() => { return libDocker.assertOwnContainer(libDocker.runArguments()); }).to.not.throw();
+						Expect(libDocker.runArguments()).to.include('127.0.0.1:18123:8123');
+					});
+
+				test('builder D (M5): the Rebuilder and the Reconciler surface (internal-contracts §59.4, §60, §68 #32–#33)',
+					() =>
+					{
+						let libRebuilder = require(SOURCE + 'persistence/Retold-Faceting-Rebuilder.js');
+						let libReconciler = require(SOURCE + 'persistence/Retold-Faceting-Reconciler.js');
+						Expect(libRebuilder.REBUILD_REASONS).to.deep.equal([ 'Admin', 'SpecChange', 'Divergence', 'Wipe' ]);
+						Expect(libRebuilder.PHASES).to.deep.equal([ 'Pages', 'Swapping', 'CatchingUp' ]);
+						Expect(libReconciler.LEVELS).to.deep.equal([ 'Sweep', 'Bisect', 'Scrub', 'Verify' ]);
+						[ 'backfill', 'rebuild', 'status', 'cancel', 'lastCompleted', 'stateFields', 'stop', 'stats' ].forEach((pName) => { Expect(libRebuilder.prototype[pName], pName).to.be.a('function'); });
+						[ 'start', 'stop', 'sweep', 'bisect', 'scrub', 'verify', 'status', 'isRunning', 'stateFields', 'stats' ].forEach((pName) => { Expect(libReconciler.prototype[pName], pName).to.be.a('function'); });
+						// Constructing them starts nothing (no timer, no run) until start() / a call.
+						let tmpReconciler = new libReconciler(newFable());
+						Expect(tmpReconciler.stats().Timers).to.equal(0);
+						Expect(tmpReconciler.status('ClickHouse', 'Nope')).to.deep.include({ Watermark: null, Running: [] });
+						Expect(new libRebuilder(newFable()).status('ClickHouse', 'Nope')).to.equal(null);
+						// A BuildID is a shadow-target BuildID.
+						Expect(libRebuilder.newBuildID()).to.match(/^[0-9a-f]{8}$/);
+					});
+
 				test('wiring (M2): the Records / Count / Keys pipeline, the Bind stage, the route handlers and the request modes (internal-contracts §22.6, §28)',
 					() =>
 					{
@@ -446,6 +580,43 @@ suite
 						Expect(libRequest.LIMIT_DEFAULTS).to.include({ MaxRecordsPage: 500, MaxRecordsOffset: 10000, MaxKeys: 50000 });
 						let libPlanner = require(SOURCE + 'plan/Retold-Faceting-Planner.js');
 						Expect(libPlanner.prototype.checkRequestParams).to.be.a('function');
+					});
+
+				test('wiring (M5): installStores / storeAdmin / the admin routes, the Router\'s store engines, Engine on the request, Store in the envelope and the cache (internal-contracts §54.2, §60.5, §62)',
+					() =>
+					{
+						let libService = require(SOURCE + 'Retold-Faceting-Service.js');
+						[ 'installStores', 'storeRegistered', 'storeAvailability', 'storeAdmin', 'storeAdminRefusal', 'adminRequest', 'shutdownM4',
+							'engineFields', 'envelopeEngineFields', 'storeBlock', 'cachedStoreBlock', 'storeMeta', 'storeAnswered', 'describeStoreEngine', 'describeEntityStore' ].forEach((pName) => { Expect(libService.prototype[pName], pName).to.be.a('function'); });
+						let libRoutes = require(SOURCE + 'routes/Retold-Faceting-Routes.js');
+						Expect(libRoutes.prototype.handleAdmin).to.be.a('function');
+						let libRequest = require(SOURCE + 'contract/Facet-Contract-Request.js');
+						Expect(libRequest.REQUEST_ENGINES).to.deep.equal([ 'Auto', 'Live' ]);
+						Expect(libRequest.normalizeRequest('E', { Facets: [ { Facet: 'E.A' } ] }).Engine).to.equal('Auto');
+						Expect(require(SOURCE + 'contract/Facet-Contract-Envelope.js').VOLATILE_FIELDS).to.include('Store');
+						Expect(require(SOURCE + 'security/Retold-Faceting-CacheKey.js').UNCACHEABLE_REASONS).to.include('Store');
+						// A store engine registers BEFORE Live, idempotently; the M4 whole-request rule never picks it.
+						let tmpFable = newFable();
+						let libRouter = require(SOURCE + 'engine/Retold-Faceting-Router.js');
+						let tmpRouter = new libRouter(tmpFable);
+						let tmpLive = { EngineName: 'Live', execute: () => {}, capable: () => { return { Capable: true }; } };
+						let tmpStore = { EngineName: 'ClickHouse', execute: () => {}, capable: () => { return { Capable: true }; } };
+						tmpRouter.register(tmpLive);
+						Expect(tmpRouter.storeEngine()).to.equal(null);
+						tmpRouter.register(tmpStore, { Store: true });
+						tmpRouter.register(tmpStore, { Store: true });
+						Expect(tmpRouter.engineNames()).to.deep.equal([ 'ClickHouse', 'Live' ]);
+						Expect(tmpRouter.storeEngine()).to.equal(tmpStore);
+						Expect(tmpRouter.restrictCubes([ { CubeId: 'c', Members: [ { AggKey: 'A' }, { AggKey: 'B' } ] }, { CubeId: 'd', Members: [ { AggKey: 'C' } ] } ], [ { Key: 'B' } ])).to.deep.equal([ { CubeId: 'c', Members: [ { AggKey: 'B' } ] } ]);
+						Expect(tmpRouter.unregister(tmpStore)).to.equal(true);
+						Expect(tmpRouter.engineNames()).to.deep.equal([ 'Live' ]);
+						// A service without Stores.ClickHouse: nothing registered, Describe says Configured false.
+						let tmpService = new libService(newFable(), {});
+						Expect(tmpService.installStores()).to.deep.equal({ Configured: false, Available: false, Reason: null });
+						Expect(tmpService.storeRegistered()).to.equal(false);
+						Expect(tmpService.storeAvailability()).to.deep.equal({ Configured: false, Available: false, Reason: null });
+						Expect(tmpService.storeAdminRefusal('Rebuild', 'ClickHouse', 'Task').Code).to.equal('FACET_UNKNOWN_ENTITY');
+						Expect(tmpService.storeAdminRefusal('Explode', 'ClickHouse', 'Task').Code).to.equal('FACET_REQUEST_INVALID');
 					});
 			}
 		);

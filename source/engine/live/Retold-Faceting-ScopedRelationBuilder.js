@@ -393,6 +393,206 @@ class RetoldFacetingScopedRelationBuilder extends libFableServiceProviderBase
 		let tmpWhere = ((pRel.Where === null) || (typeof(pRel.Where) === 'undefined')) ? '' : libFacetClauses.canonicalJSON(pRel.Where);
 		return `${pRel.Entity}|${tmpClientIds}|${tmpWhere}|${pRel.Scope || 'Inherit'}|${pRel.SoftDelete}|${tmpProject}`;
 	}
+
+	// ================================================================== M5 (store engines)
+
+	/**
+	 * Capture a relation's FINAL scope without building it (internal-contracts §64.2, M5, builder C):
+	 * §26.1 steps 1–4 exactly as buildRelation runs them — a fresh DAL.query, the client fence, the
+	 * Where fence, the explicit soft delete, ScopeCapture (the entity's own behaviors on the
+	 * route-bound controller, the TenantOnly relaxation, ScopeGuard and its Repair) — then a deep copy
+	 * of the resulting FoxHound filter instead of a projection / build / harvest.  A store engine
+	 * compiles that filter into its own dialect, so a store relation is scoped exactly as Live scopes
+	 * the same relation.
+	 *
+	 * An Opaque (or non-Portable) capture is NOT an error here: it comes back with Opaque: true and the
+	 * store refuses the Agg (OpaqueScope), so Live runs it (and refuses or stages it as Live does).  A
+	 * capture error that Live would raise (a behavior 401, a Strict guard 500, a budget) is returned
+	 * exactly as buildRelation returns it.
+	 *
+	 * Memoized per request in pContext.Memo.StoreCaptures by the relation key (alias excluded); store
+	 * captures count against Limits.MaxRelationsPerRequest on their own counter
+	 * (Counters.StoreRelations), so a same-request Live fallback is never charged twice; behavior runs
+	 * share ScopeCapture's memo and its MaxBehaviorRunsPerRequest budget, like Live.
+	 *
+	 * @param {Record<string, any>} pContext - internal-contracts §2.2
+	 * @param {Record<string, any>} pRel - as buildRelation (Project: the columns the store will read)
+	 * @param {(pError?: Error, pCaptured?: { Entity: string, Alias: string, Filter: Array<Record<string, any>>, Capture: Record<string, any>, Opaque: boolean, Dialect: string }) => void} fCallback
+	 */
+	captureRelation(pContext, pRel, fCallback)
+	{
+		let tmpContext = pContext || {};
+		let tmpOptions = tmpContext.Options || this.options;
+		if (!tmpContext.Memo)
+		{
+			tmpContext.Memo = { Relations: {}, Captures: {}, VariantRows: {} };
+		}
+		if (!tmpContext.Memo.StoreCaptures)
+		{
+			tmpContext.Memo.StoreCaptures = {};
+		}
+		if (!tmpContext.Counters)
+		{
+			tmpContext.Counters = { Relations: 0, BehaviorRuns: 0, Statements: 0 };
+		}
+
+		if (!pRel || (typeof(pRel.Entity) !== 'string') || !IDENTIFIER_PATTERN.test(pRel.Entity))
+		{
+			return fCallback(libFacetErrors.create('FACET_INTERNAL', 'Invalid relation entity.'));
+		}
+		if ((typeof(pRel.As) !== 'string') || !ALIAS_PATTERN.test(pRel.As))
+		{
+			return fCallback(libFacetErrors.create('FACET_INTERNAL', 'Invalid relation alias.'));
+		}
+		if (!Array.isArray(pRel.Project) || (pRel.Project.length < 1))
+		{
+			return fCallback(libFacetErrors.create('FACET_INTERNAL', 'A relation needs a projection.'));
+		}
+		let tmpWhere = ((pRel.Where === null) || (typeof(pRel.Where) === 'undefined')) ? null : pRel.Where;
+		if ((tmpWhere !== null) && !isColumnPred(tmpWhere))
+		{
+			return fCallback(libFacetErrors.create('FACET_INTERNAL', 'A relation Where must be a column-only predicate.'));
+		}
+		let tmpScopeMode = pRel.Scope || 'Inherit';
+		if (SCOPE_MODES.indexOf(tmpScopeMode) < 0)
+		{
+			return fCallback(libFacetErrors.create('FACET_FOLD_UNSUPPORTED', 'This scope mode is not supported.', { Feature: `ScopeMode:${tmpScopeMode}`, Milestone: 2 }));
+		}
+		if ((tmpScopeMode === 'TenantOnly') && ((typeof(pRel.ScopeReason) !== 'string') || (pRel.ScopeReason.length < 1)))
+		{
+			return fCallback(libFacetErrors.create('FACET_INTERNAL', 'A TenantOnly relation needs its ScopeReason.'));
+		}
+
+		// The memo key is the relation key minus Project (§64.2): the filter does not depend on the
+		// projection.  Only the read-side behavior audit does (06 §3.5, PostOperationSafeColumns), so a
+		// capture whose entity has such behaviors is reused for the same projection only.
+		let tmpProjectKey = pRel.Project.slice().sort().join(',');
+		let tmpKey = this.relationKey(Object.assign({}, pRel, { Project: [] }));
+		let tmpMemo = hasOwn(tmpContext.Memo.StoreCaptures, tmpKey) ? tmpContext.Memo.StoreCaptures[tmpKey] : null;
+		if (tmpMemo && tmpMemo.Capture && tmpMemo.Capture.PostOperation && (tmpMemo.ProjectKey !== tmpProjectKey))
+		{
+			tmpKey = `${tmpKey}#${tmpProjectKey}`;
+			tmpMemo = hasOwn(tmpContext.Memo.StoreCaptures, tmpKey) ? tmpContext.Memo.StoreCaptures[tmpKey] : null;
+		}
+		if (tmpMemo)
+		{
+			return fCallback(null, Object.assign({}, tmpMemo, { Alias: pRel.As }));
+		}
+		let tmpMaxRelations = (tmpOptions.Limits && (typeof(tmpOptions.Limits.MaxRelationsPerRequest) === 'number')) ? tmpOptions.Limits.MaxRelationsPerRequest : 32;
+		if (((tmpContext.Counters.StoreRelations || 0) + 1) > tmpMaxRelations)
+		{
+			return fCallback(libFacetErrors.create('FACET_TOO_LARGE', 'The request needs too many relations.', { Limit: 'MaxRelationsPerRequest' }));
+		}
+
+		let tmpHost = tmpContext.Host;
+		let tmpDAL = (tmpHost && (typeof(tmpHost.getExecutionDAL) === 'function')) ? tmpHost.getExecutionDAL(pRel.Entity) : null;
+		if (!tmpDAL)
+		{
+			return fCallback(libFacetErrors.create('FACET_INTERNAL', 'The entity has no DAL.'));
+		}
+		let tmpDialects = this.fable.RetoldFacetingDialects;
+		let tmpScopeCapture = this.fable.RetoldFacetingScopeCapture;
+		if (!tmpDialects || !tmpScopeCapture)
+		{
+			return fCallback(libFacetErrors.create('FACET_INTERNAL', 'The live engine services are not registered.'));
+		}
+		let tmpDialectName = this.dialectFor(tmpContext, pRel.Entity);
+		if (!tmpDialectName || !tmpDialects.forName(tmpDialectName))
+		{
+			return fCallback(libFacetErrors.create('FACET_INTERNAL', 'Unknown SQL dialect.'));
+		}
+
+		tmpContext.Counters.StoreRelations = (tmpContext.Counters.StoreRelations || 0) + 1;
+
+		// §26.1 steps 1–3, entry for entry as buildRelation renders them (the capture memo key is the
+		// pre-behavior filter, so a Live build of the same relation replays this very capture).
+		let tmpQuery = tmpDAL.query;
+		try
+		{
+			let tmpSchema = Array.isArray(tmpQuery.query.schema) ? tmpQuery.query.schema : [];
+			let tmpColumns = {};
+			for (let i = 0; i < tmpSchema.length; i++)
+			{
+				tmpColumns[tmpSchema[i].Column] = true;
+			}
+			for (let i = 0; i < pRel.Project.length; i++)
+			{
+				if (!hasOwn(tmpColumns, pRel.Project[i]))
+				{
+					throw libFacetErrors.create('FACET_INTERNAL', 'A projected column is not in the entity schema.');
+				}
+			}
+			let tmpFilterAST = this.fable.RetoldFacetingFilterAST;
+			let tmpClient = Array.isArray(pRel.Client) ? pRel.Client : [];
+			if (tmpClient.length > 0)
+			{
+				if (!tmpFilterAST || (typeof(tmpFilterAST.applyToQuery) !== 'function'))
+				{
+					throw libFacetErrors.create('FACET_INTERNAL', 'The FilterAST service is not registered.');
+				}
+				tmpQuery.addFilter('', '', '(', 'AND', 'FacetFenceOpen');
+				tmpFilterAST.applyToQuery(tmpClient, tmpQuery, { Dialect: tmpDialectName, ParameterPrefix: 'c' });
+				tmpQuery.addFilter('', '', ')', 'AND', 'FacetFenceClose');
+			}
+			if (tmpWhere !== null)
+			{
+				if (!tmpFilterAST || (typeof(tmpFilterAST.applyToQuery) !== 'function'))
+				{
+					throw libFacetErrors.create('FACET_INTERNAL', 'The FilterAST service is not registered.');
+				}
+				tmpQuery.addFilter('', '', '(', 'AND', 'FacetWhereOpen');
+				tmpFilterAST.applyToQuery([ { Id: 'w', Pred: tmpWhere, Shape: 'Column' } ], tmpQuery, { Dialect: tmpDialectName, ParameterPrefix: 'w' });
+				tmpQuery.addFilter('', '', ')', 'AND', 'FacetWhereClose');
+			}
+			let tmpClientNamesDeleted = tmpClient.some((pConjunct) => { return pConjunct && (pConjunct.NamesDeleted === true); });
+			if ((pRel.SoftDelete !== 'ClientControlled') && !tmpClientNamesDeleted
+				&& (typeof(tmpHost.hasDeleteColumn) === 'function') && tmpHost.hasDeleteColumn(pRel.Entity))
+			{
+				tmpQuery.addFilter(tmpHost.getDeleteColumn(pRel.Entity), 0, '=', 'AND', 'FacetSoftDelete');
+			}
+		}
+		catch (pPrepareError)
+		{
+			return fCallback(libFacetErrors.isFacetError(pPrepareError) ? pPrepareError : libFacetErrors.create('FACET_INTERNAL'));
+		}
+
+		// Step 4: the entity's own scope (behaviors, relaxation, guard and repair act on tmpQuery).
+		tmpScopeCapture.capture(tmpContext, pRel.Entity, tmpQuery, tmpScopeMode, { Columns: pRel.Project },
+			(pCaptureError, pCapture) =>
+			{
+				if (pCaptureError)
+				{
+					return fCallback(pCaptureError);
+				}
+				if (!pCapture)
+				{
+					return fCallback(libFacetErrors.create('FACET_INTERNAL', 'The scope capture returned nothing.'));
+				}
+				let tmpFilter = (Array.isArray(tmpQuery.parameters.filter) ? tmpQuery.parameters.filter : []).map(
+					(pEntry) =>
+					{
+						let tmpCopy = Object.assign({}, pEntry);
+						if (Array.isArray(pEntry.Value))
+						{
+							tmpCopy.Value = pEntry.Value.slice();
+						}
+						return tmpCopy;
+					});
+				let tmpCaptured = (
+					{
+						Entity: pRel.Entity,
+						Alias: pRel.As,
+						Filter: tmpFilter,
+						Capture: pCapture,
+						Opaque: (pCapture.Opaque === true) || (pCapture.Portable === false),
+						Dialect: tmpDialectName
+					});
+				// (not enumerable: the projection the read-side audit ran with, for the memo rule above)
+				Object.defineProperty(tmpCaptured, 'ProjectKey', { value: tmpProjectKey, enumerable: false, writable: false });
+				tmpContext.Memo.StoreCaptures[tmpKey] = tmpCaptured;
+				return fCallback(null, Object.assign({}, tmpCaptured));
+			});
+	}
 }
 
 module.exports = RetoldFacetingScopedRelationBuilder;

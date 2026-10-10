@@ -33,6 +33,13 @@
  * ("Live update: Project @ e:…:15") and the domain's stream status (Live / Reconnecting / Off); the Seq with
  * "Show internals".
  *
+ * M5 (DEMO_CLICKHOUSE=1, internal-contracts §66.3): the filters line gains the engine toggle — Auto (the server
+ * routes each facet: the ClickHouse store when it is fresh enough for the page's Bounded freshness, else Live) |
+ * Live (Engine 'Live') | Store (Fast) (Freshness Fast: the store whenever it can answer) — and "Live vs Store" (the
+ * page's first group answered by both, side by side, the verdict in the head and both answers in the inspector).
+ * The strip shows which engines answered (ClickHouse n · Live m), the store's lag (LagMS) when the answer is not
+ * exact, and a store fallback.  Without a store none of this renders (the M4 head, byte for byte).
+ *
  * @license MIT
  *
  * @author Steven Velozo <steven@velozo.com>
@@ -130,6 +137,7 @@ const _ViewConfiguration =
 			.fd-reset:focus-visible, .fd-toggle:focus-visible { outline: 2px solid var(--fd-accent, #3b5bdb); outline-offset: 1px; }
 			.fd-toggle { color: var(--fd-text-muted, #5d6878); }
 			.fd-toggle[aria-pressed="true"] { color: var(--fd-accent, #3b5bdb); font-weight: 600; }
+			.fd-engine { display: inline-flex; align-items: center; gap: 2px; padding-left: 8px; margin-left: 4px; border-left: 1px solid var(--fd-border, #dfe3e9); }
 			.fd-try { margin: 8px 0 0; font-size: 12px; line-height: 1.45; color: var(--fd-text-muted, #5d6878); }
 			.fd-try strong { color: var(--fd-text, #1b2230); font-weight: 600; margin-right: 4px; }
 			.fd-summary { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
@@ -221,6 +229,7 @@ const _ViewConfiguration =
 		{~TS:FacetDemo-Page-No-Filter-Template:Record.NoFilterSlot~}
 		<span class="fd-filters-spacer"></span>
 		<button type="button" class="fd-reset" title="Back to this page's initial request" onclick="{~P~}.views['FacetDemo-Page'].resetPage()">{~I:Refresh~} Reset filters</button>
+		{~TS:FacetDemo-Page-Engine-Template:Record.EngineSlot~}
 		<button type="button" class="fd-toggle" aria-pressed="{~D:Record.InternalsPressed~}" title="Show the contract vocabulary on the cards (Fold, CountMode, Relaxed, Disjunctive): the inspector always has it" onclick="{~P~}.PictApplication.toggleInternals()">{~I:Code~} Show internals</button>
 	</div>
 	{~TS:FacetDemo-Page-Try-Template:Record.TrySlot~}
@@ -242,6 +251,10 @@ const _ViewConfiguration =
 				{
 					Hash: 'FacetDemo-Page-No-Filter-Template',
 					Template: /*html*/`<span class="fd-filter-none">{~D:Record.Text~}</span>`
+				},
+				{
+					Hash: 'FacetDemo-Page-Engine-Template',
+					Template: /*html*/`<span class="fd-engine" role="group" aria-label="Engine"><span class="fd-filters-label">Engine</span><button type="button" class="fd-toggle" aria-pressed="{~D:Record.AutoPressed~}" title="The server routes each facet: the ClickHouse store when it is current enough for this page's freshness (Bounded, 5 s), else Live" onclick="{~P~}.PictApplication.setEngineMode('Auto')">Auto</button><button type="button" class="fd-toggle" aria-pressed="{~D:Record.LivePressed~}" title="Engine: 'Live' — every facet computed from the database for this request" onclick="{~P~}.PictApplication.setEngineMode('Live')">Live</button><button type="button" class="fd-toggle" aria-pressed="{~D:Record.FastPressed~}" title="Freshness Fast — the ClickHouse store whenever it can answer, even while it is catching up (the strip shows its lag)" onclick="{~P~}.PictApplication.setEngineMode('Fast')">Store (Fast)</button><button type="button" class="fd-reset" title="Ask this page's question twice — Engine 'Live' and Freshness Fast — and compare the answers facet by facet" onclick="{~P~}.PictApplication.compareEngines()">{~I:Code~} Live vs Store</button></span>`
 				},
 				{
 					Hash: 'FacetDemo-Page-Try-Template',
@@ -707,6 +720,11 @@ class PictViewFacetDemoPage extends libPictView
 		{
 			tmpNotes.push(`Not drawn: ${tmpState.DescribedSkipped.map((pSkipped) => { return `${pSkipped.Title} (${pSkipped.Reason})`; }).join(', ')}.`);
 		}
+		let tmpCompare = this._compareNote(tmpPage);
+		if (tmpCompare)
+		{
+			tmpNotes.push(tmpCompare);
+		}
 		let tmpFilters = this._activeFilters(tmpState);
 		let tmpHead =
 			{
@@ -718,6 +736,8 @@ class PictViewFacetDemoPage extends libPictView
 				Filters: tmpFilters,
 				NoFilterSlot: (tmpFilters.length < 1) ? [ { Text: (tmpState && (tmpState.Hash === 'LabFormsB')) ? 'None: variant B has no list clause to filter with' : 'None: every row this user may see' } ] : [],
 				InternalsPressed: tmpProvider.showInternals() ? 'true' : 'false',
+				// M5: the engine toggle, only when the demo runs a store (DEMO_CLICKHOUSE=1).
+				EngineSlot: this._storeOn() ? [ this._engineToggle() ] : [],
 				LoadingClass: (tmpState && (tmpState.Status === 'Loading')) ? 'fd-loading-on' : '',
 				StripSlot: [],
 				PendingSlot: [],
@@ -751,6 +771,58 @@ class PictViewFacetDemoPage extends libPictView
 	}
 
 	/**
+	 * M5: does the demo run a store (GET /api/Demo/Status Store: 'ClickHouse')?
+	 *
+	 * @return {boolean}
+	 */
+	_storeOn()
+	{
+		let tmpStatus = this.pict.AppData.FacetDemo ? this.pict.AppData.FacetDemo.Status : null;
+		return !!(tmpStatus && (tmpStatus.Store === 'ClickHouse'));
+	}
+
+	/**
+	 * M5: the engine toggle's pressed states.
+	 *
+	 * @return {Record<string, string>}
+	 */
+	_engineToggle()
+	{
+		let tmpMode = this.pict.providers.Facet.engineMode();
+		return { AutoPressed: (tmpMode === 'Auto') ? 'true' : 'false', LivePressed: (tmpMode === 'Live') ? 'true' : 'false', FastPressed: (tmpMode === 'Fast') ? 'true' : 'false' };
+	}
+
+	/**
+	 * M5: the verdict of "Live vs Store" for this page, as a head note (null when there is none).
+	 *
+	 * @param {Record<string, any>} pPage
+	 * @return {string|null}
+	 */
+	_compareNote(pPage)
+	{
+		let tmpCompare = this.pict.AppData.FacetDemo ? this.pict.AppData.FacetDemo.EngineCompare : null;
+		if (!tmpCompare || !pPage || (tmpCompare.Page !== pPage.Hash))
+		{
+			return null;
+		}
+		if (tmpCompare.Pending)
+		{
+			return 'Live vs Store: asking both engines…';
+		}
+		if (tmpCompare.Error || !tmpCompare.Result)
+		{
+			return `Live vs Store: ${tmpCompare.Error || 'no answer'}.`;
+		}
+		let tmpResult = tmpCompare.Result;
+		let tmpStoreFacets = tmpResult.Facets.filter((pFacet) => { return pFacet.Engine && (pFacet.Engine !== 'Live'); });
+		let tmpDifferent = tmpResult.Facets.filter((pFacet) => { return !pFacet.Same; }).map((pFacet) => { return pFacet.Key; });
+		let tmpLag = tmpResult.Facets.reduce((pMax, pFacet) => { return ((typeof(pFacet.LagMS) === 'number') && (pFacet.LagMS > pMax)) ? pFacet.LagMS : pMax; }, 0);
+		let tmpTotals = `Total ${libFacetDisplay.count(tmpResult.Live.Total)} (Live) vs ${libFacetDisplay.count(tmpResult.Store.Total)} (${tmpResult.Store.Engine || 'store'})`;
+		let tmpVerdict = tmpResult.Same ? 'the same numbers' : `different: ${tmpDifferent.join(', ') || 'Total'}${(tmpLag > 0) ? ` (the store is ${tmpLag} ms behind)` : ''}`;
+		return `Live vs Store: ${tmpTotals}; ${tmpStoreFacets.length} of ${tmpResult.Facets.length} facets on ClickHouse; ${tmpVerdict}.`;
+	}
+
+	/**
 	 * The summary strip: Total + noun, then Engine, Exact, timings, ETag, 304, POST count (+ the contract
 	 * vocabulary with "Show internals").
 	 *
@@ -775,9 +847,26 @@ class PictViewFacetDemoPage extends libPictView
 		{
 			tmpChips.push({ Text: libFacetDisplay.text(`Engine: ${tmpEnvelope.Engine}`), Tone: 'accent', Tip: 'The engine that answered (Live: computed from the database for this request).', CheckSlot: [] });
 		}
+		// M5: which engines answered the facets, and a store answer's lag / a fallback (only with a store).
+		if (tmpEnvelope.Store && tmpEnvelope.Store.Facets)
+		{
+			let tmpEngines = {};
+			Object.keys(tmpEnvelope.Store.Facets).forEach((pKey) => { let tmpEngine = tmpEnvelope.Store.Facets[pKey].Engine || 'Live'; tmpEngines[tmpEngine] = (tmpEngines[tmpEngine] || 0) + 1; });
+			let tmpReasons = Object.keys(tmpEnvelope.Store.Facets).filter((pKey) => { return !!tmpEnvelope.Store.Facets[pKey].Reason; }).map((pKey) => { return `${pKey}: ${tmpEnvelope.Store.Facets[pKey].Reason}`; });
+			tmpChips.push({ Text: libFacetDisplay.text(Object.keys(tmpEngines).sort().map((pEngine) => { return `${pEngine} ${tmpEngines[pEngine]}`; }).join(' · ')), Tone: 'info', Tip: libFacetDisplay.text(`The engine of each facet (and the Total): ClickHouse = the materialized store; Live = computed from the database for this request.${(tmpReasons.length > 0) ? ` Live because ${tmpReasons.join('; ')}.` : ''}`), CheckSlot: [] });
+			if (tmpEnvelope.Store.Fallback)
+			{
+				tmpChips.push({ Text: libFacetDisplay.text(`Store fallback: ${tmpEnvelope.Store.Fallback.Reason}`), Tone: 'warn', Tip: 'The store failed for this request; every facet it was to answer was answered Live in the same request (FACET_STORE_FALLBACK).', CheckSlot: [] });
+			}
+		}
 		if (tmpAnswer.Stale === true)
 		{
 			tmpChips.push({ Text: libFacetDisplay.text(`Stale · ${(Math.round((tmpAnswer.LagMS || 0) / 100) / 10).toFixed(1)} s old`), Tone: 'warn', Tip: 'Freshness Bounded: a cached answer computed before the latest change (never older than MaxLagMS). The server refreshes it in the background and the page asks again in a moment.', CheckSlot: [] });
+		}
+		else if (tmpEnvelope.Store && (tmpEnvelope.Exact === false))
+		{
+			let tmpLag = (typeof(tmpEnvelope.LagMS) === 'number') ? `${(Math.round(tmpEnvelope.LagMS / 100) / 10).toFixed(1)} s behind` : 'behind';
+			tmpChips.push({ Text: libFacetDisplay.text(`Store ${tmpLag}`), Tone: 'warn', Tip: libFacetDisplay.text(`The ClickHouse store answered before it applied every change (LagMS ${tmpEnvelope.LagMS}; AsOf ${tmpEnvelope.AsOf}): Fast / Bounded freshness allows it. An Exact request would have been answered Live.`), CheckSlot: [] });
 		}
 		else if (tmpEnvelope.Exact === true)
 		{

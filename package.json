@@ -8,6 +8,9 @@
 		"test:pg": "RFS_TEST_POSTGRES=1 TZ=UTC npx mocha --timeout 20000",
 		"test:pg:up": "node test/support/Facet-Docker-Postgres.js ensure",
 		"test:pg:down": "node test/support/Facet-Docker-Postgres.js stop",
+		"test:ch": "RFS_TEST_CLICKHOUSE=1 TZ=UTC npx mocha --timeout 30000",
+		"test:ch:up": "node test/support/Facet-Docker-ClickHouse.js ensure",
+		"test:ch:down": "node test/support/Facet-Docker-ClickHouse.js stop",
 		"coverage": "npx nyc npx mocha",
 		"example": "npx quack examples"
 	},

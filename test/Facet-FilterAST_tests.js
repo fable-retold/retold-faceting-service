@@ -1416,6 +1416,8 @@ suite
 								TimeoutMS: 10000,
 								// M4 (internal-contracts §44.2): the normalized Freshness.
 								Freshness: { Mode: 'Exact', MaxLagMS: 5000, MinSeq: null },
+								// M5 (internal-contracts §62.2): the request Engine.
+								Engine: 'Auto',
 								Warnings: []
 							});
 					});

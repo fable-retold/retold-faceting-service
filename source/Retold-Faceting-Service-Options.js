@@ -38,6 +38,64 @@ const ROUTE_RESERVED_NAMES = [ 'Facet', 'Describe', 'Agent', 'Admin', 'Changes',
 // Entities that can never be facetable (06 §5.1).
 const NEVER_FACETABLE = [ 'Account', 'ApiKey', 'LoginChallenge', 'RetoldFacetChangeLog' ];
 
+// M5 (internal-contracts §53.4): the defaults of a store section's object form (a host that sets
+// Stores.ClickHouse to an object gets these under its own keys; secrets only by value or by env-var name).
+const STORE_DEFAULTS = Object.freeze(
+	{
+		ClickHouse: Object.freeze(
+			{
+				URL: null,
+				URLEnv: null,
+				User: 'default',
+				UserEnv: null,
+				Password: '',
+				PasswordEnv: null,
+				Database: null,
+				TimeoutMS: 20000,
+				PingTimeoutMS: 3000,
+				RetryConnectMS: 60000,
+				InsertRetries: 2,
+				QuerySettings: Object.freeze({}),
+				SourceStringOrder: 'Auto',
+				ExposeReasons: false,
+				// M5 review: per-facet freshness (LagMS, AsOf, Exact), freshness refusal reasons and Describe's
+				// per-entity State / LagMS — a cross-tenant write-activity signal on a multi-tenant host.
+				// 'Auto' = exposed only on a host without a scope policy; Admin.authorize principals always
+				// see Describe's per-entity view.
+				ExposeFreshness: 'Auto',
+				// A separate least-privilege credential for request-path reads (SELECT on the database only);
+				// unset → the writer's.  Every request read runs with readonly = 2 either way.
+				ReaderUser: null,
+				ReaderUserEnv: null,
+				ReaderPassword: '',
+				ReaderPasswordEnv: null,
+				// Request reads in flight at once (their own socket pool; beyond it a facet answers Live,
+				// 'StoreBusy'); the materializer has its own pool (WriterMaxSockets).
+				MaxConcurrentReads: 32,
+				WriterMaxSockets: 16,
+				// Per request-read limits (0 = the server's own): memory, rows read, bytes read.
+				ReadLimits: Object.freeze({ MaxMemoryBytes: 4294967296, MaxRowsToRead: 0, MaxBytesToRead: 0 }),
+				// A store time-out counts toward the read breaker / unreachable detection only when the
+				// statement had at least this long (a client asking a tiny TimeoutMS is not a store fault).
+				HealthMinTimeoutMS: 1000,
+				// Network failures / time-outs within BreakerWindowMS that mark the whole store unreachable
+				// (every facet answers Live at once; a background ping every UnreachablePingMS restores it).
+				UnreachableAfterFailures: 2,
+				UnreachablePingMS: 2000,
+				// Plain http:// to a host that is not loopback sends credentials and parameter values in clear
+				// text: logged as a warning unless AllowInsecure is true.  TLS: CA / Cert / Key (PEM text),
+				// RejectUnauthorized (default true).
+				AllowInsecure: false,
+				CA: null,
+				Cert: null,
+				Key: null,
+				RejectUnauthorized: true,
+				// The database's owner marker (InstanceID + the source fingerprint): 'Check' refuses a database
+				// another deployment created ('Misconfigured'); 'Adopt' takes it over (rewrites the marker).
+				Owner: 'Check'
+			})
+	});
+
 const DEFAULTS = (
 	{
 		Role: 'Embedded',
@@ -201,7 +259,11 @@ const DEFAULTS = (
 				ReadYourWritesMaxPrincipals: 10000,
 				// true | false | 'Auto' (only on a host without a scope policy: the Seq is the node-wide
 				// change counter, which on a multi-tenant host reveals other tenants' write volume)
-				SeqHeader: 'Auto'
+				SeqHeader: 'Auto',
+				// M5 (internal-contracts §61.4): the circuit breaker per (engine, entity)
+				BreakerFailures: 5,
+				BreakerWindowMS: 30000,
+				BreakerOpenMS: 30000
 			},
 
 		// M4 (internal-contracts §40.1): 'Auto' = the upstream MeadowChangeBus when fable has one, else
@@ -211,10 +273,70 @@ const DEFAULTS = (
 		// RequireNotifyTenants: refuse a notify of a tenant-scoped entity that names no tenant.
 		// MaxEventIDs / MaxEventOwners: beyond them an event's ids / owners become "unknown".
 		ChangeCapture: { Intake: 'Auto', NotifySettleMS: 1000, NotifyManaged: [], RequireNotifyTenants: false, MaxEventIDs: 10000, MaxEventOwners: 1000 },
-		Reconcile: {},
+		// M5 (internal-contracts §53.4, §60): reconcile cadence and limits per mirrored entity.
+		Reconcile:
+			{
+				AutoStart: true,
+				// 'Auto' = 600000 with an intake and the entity not in RawWriterEntities, else 60000
+				SweepIntervalMS: 'Auto',
+				RawWriterEntities: [],
+				MaxTxnMS: 60000,
+				SweepCap: 5000,
+				LeafRange: 2000,
+				BisectIntervalMS: 86400000,
+				HardDeleteBisectIntervalMS: 3600000,
+				RebuildDivergenceRatio: 0.01,
+				ScrubPeriodMS: 86400000,
+				ScrubRowsPerSecond: 2000,
+				ScrubTickMS: 1000,
+				// Rows per tick while the entity's row count is unknown (before the first wrap / Bisect and no
+				// seed from the store): a conservative pace instead of the ScrubRowsPerSecond ceiling.
+				ScrubUnknownTotalRowsPerTick: 256,
+				// After a clean restart that followed more downtime than this, a Bisect (inserts and hard
+				// deletes made meanwhile) runs before the entity serves Exact requests.
+				BootBisectAfterMS: 300000,
+				// Each entity's timers start at a random phase and run with a random period of ± this share.
+				JitterRatio: 0.15
+			},
+		// M5 (internal-contracts §53.4, §54.2): false = on-the-fly only; an object registers the store.  The
+		// object form's defaults are STORE_DEFAULTS.ClickHouse (merged by RetoldFacetingStoreClickHouse.configure).
 		Stores: { ClickHouse: false, Solr: false, OpenSearch: false },
+		// M5 (internal-contracts §55.1): { Entity: { Store: [ 'ClickHouse' ], Columns, IncludeColumns, … } }
 		Materialize: {},
-		Materializer: { Enabled: false },
+		// M5 (internal-contracts §53.4, §58): 'Auto' = on when a store is registered (one process materializes, D-28).
+		Materializer:
+			{
+				Enabled: 'Auto',
+				BatchIDs: 2000,
+				ReadChunkIDs: 1000,
+				FlushIntervalMS: 1000,
+				FlushRows: 50000,
+				RebuildPageSize: 25000,
+				OverflowIDs: 100000,
+				MaxBackoffMS: 30000,
+				DrainOnStopMS: 5000,
+				IdleTickMS: 50,
+				// How long a stream hint waits for company before its read cycle: 'Auto' = FlushIntervalMS
+				// (about one source read, one keymap read and one insert set per interval per entity); 0 = a
+				// cycle per arrival (buffered until the flush interval).
+				StreamDelayMS: 'Auto',
+				// Range pages that flush as soon as nothing else is runnable; Scrub / Fill pages wait for the
+				// flush interval (they are background work: no prompt insert per tick).
+				PromptRangeKinds: [ 'Resync', 'RebuildPage' ],
+				// Backfills / rebuilds / verifies running at once across the entities of a store (the rest queue).
+				MaxConcurrentBuilds: 2,
+				// The state row of an entity is written at most this often for AppliedSeq / cursor-only
+				// changes (lifecycle transitions, Lossy and Filling changes are written at once), in one
+				// multi-row INSERT for every entity of the store.
+				StateWriteIntervalMS: 5000,
+				// Above this many active parts in any table of the store the flush interval is stretched
+				// (×4) until merges catch up (design 04 §6.1 step 7).
+				PartsBackoffAbove: 150,
+				HealthCheckMS: 30000,
+				// One process materializes a store: the lease row (_rfs_lease) names it.  A process that does
+				// not hold an unexpired lease never writes and leaves the store unused (Reason 'NotLeader').
+				Lease: { Enabled: true, TTLMS: 30000, HeartbeatMS: 10000, SettleMS: 250 }
+			},
 		Agent: { PrivateListener: false },
 		Upstream: { URL: false },
 		Edge: { Role: 'Gateway' },
@@ -236,7 +358,9 @@ const DEFAULTS = (
 				RetryMS: 3000,
 				IncludeSeq: 'Auto'
 			},
-		Admin: { RebuildCooldownMS: 600000 },
+		// M5 (internal-contracts §60.5): the admin routes mount only with Routes: true, and every request must pass
+		// authorize(pRequest, pPrincipal) === true (a host function); in-process storeAdmin() is the supported trigger.
+		Admin: { RebuildCooldownMS: 600000, Routes: false, authorize: null },
 		Privacy: { MinBucketCount: 0 },
 		Compat: { SluiceAggregate: false }
 	});
@@ -333,6 +457,7 @@ module.exports = (
 		LIMITS_NOT_ENFORCED: LIMITS_NOT_ENFORCED,
 		ROUTE_RESERVED_NAMES: ROUTE_RESERVED_NAMES,
 		NEVER_FACETABLE: NEVER_FACETABLE,
+		STORE_DEFAULTS: STORE_DEFAULTS,
 		resolve: resolve,
 		deepMerge: deepMerge,
 		hasScopePolicy: hasScopePolicy

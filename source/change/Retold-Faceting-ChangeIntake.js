@@ -1658,6 +1658,25 @@ class RetoldFacetingChangeIntake extends libFableServiceProviderBase
 	// ---------------------------------------------------------------- lifecycle and stats
 
 	/**
+	 * Is a notify settle re-delivery of this entity still armed (a change already reported that will be
+	 * delivered once more under a new Seq)?  Materializer.quiesce waits for it.  O(operations).
+	 *
+	 * @param {string} pEntity
+	 * @return {boolean}
+	 */
+	settling(pEntity)
+	{
+		for (let tmpPending of this._SettlePending.values())
+		{
+			if (tmpPending && tmpPending.First && (tmpPending.First.Entity === pEntity))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * Clear the notify settle timers (service shutdown).  Wrappers stay installed (harmless); later
 	 * notify() calls still deliver but arm no settle timer.
 	 */

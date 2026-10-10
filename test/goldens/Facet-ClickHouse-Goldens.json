@@ -1,0 +1,3248 @@
+{
+	"COMPILER_VERSION": 1,
+	"Statements": {
+		"ProjectTrack/E1 per Variant/#Total/0": {
+			"Purpose": "Count",
+			"SQL": "SELECT count() AS Total FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser` FROM (SELECT `IDProject`, `IDClient`, `OwnerIDUser` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} AND ( `StartDate` >= {p_1:DateTime64(3, 'UTC')} AND `StartDate` < {p_2:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_3:UInt8} AND `IDCustomer` = {p_4:Int64})) AS p WHERE (ifNull(p.`IDClient` IN (SELECT h1.`IDClient` FROM (SELECT `IDClient` FROM `rfs_main`.`Client` FINAL WHERE `_IsDeleted` = 0 AND (( `IDClient` IN {h1_0:Array(Int64)} ) AND `Deleted` = {h1_1:UInt8} AND `IDCustomer` = {h1_2:Int64})) AS h1), 0) AND (ifNull(p.`IDProject` IN (SELECT h2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {h2_0:Int64} AND `Role` IN {h2_1:Array(String)} AND `Active` = {h2_2:UInt8} ) ) AND `Deleted` = {h2_3:UInt8} AND `IDCustomer` = {h2_4:Int64})) AS h2), 0) OR (p.`OwnerIDUser` = {q1_0:Int64})) AND ifNull(p.`IDProject` IN (SELECT h3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {h3_0:Int64} AND `DueDate` < {h3_1:DateTime64(3, 'UTC')} AND `Status` != {h3_2:String} ) ) AND `Deleted` = {h3_3:UInt8} AND `IDCustomer` = {h3_4:Int64})) AS h3), 0) AND NOT ifNull(p.`IDProject` IN (SELECT h4.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( ( `Severity` = {h4_0:String} AND `State` = {h4_1:String} ) ) AND `Deleted` = {h4_2:UInt8} AND `IDCustomer` = {h4_3:Int64})) AS h4), 0))) AS p",
+			"Params": {
+				"p_0": [
+					"Active",
+					"AtRisk"
+				],
+				"p_1": "2024-06-01 00:00:00",
+				"p_2": "2027-01-01 00:00:00",
+				"p_3": 0,
+				"p_4": 1,
+				"h1_0": [
+					1,
+					2,
+					3,
+					8,
+					101
+				],
+				"h1_1": 0,
+				"h1_2": 1,
+				"h2_0": 1,
+				"h2_1": [
+					"Owner",
+					"Lead"
+				],
+				"h2_2": 1,
+				"h2_3": 0,
+				"h2_4": 1,
+				"q1_0": 1,
+				"h3_0": 1,
+				"h3_1": "2026-10-08 12:00:00",
+				"h3_2": "Done",
+				"h3_3": 0,
+				"h3_4": 1,
+				"h4_0": "Blocker",
+				"h4_1": "Open",
+				"h4_2": 0,
+				"h4_3": 1
+			},
+			"Types": {
+				"p_0": "Array(String)",
+				"p_1": "DateTime64(3, 'UTC')",
+				"p_2": "DateTime64(3, 'UTC')",
+				"p_3": "UInt8",
+				"p_4": "Int64",
+				"h1_0": "Array(Int64)",
+				"h1_1": "UInt8",
+				"h1_2": "Int64",
+				"h2_0": "Int64",
+				"h2_1": "Array(String)",
+				"h2_2": "UInt8",
+				"h2_3": "UInt8",
+				"h2_4": "Int64",
+				"q1_0": "Int64",
+				"h3_0": "Int64",
+				"h3_1": "DateTime64(3, 'UTC')",
+				"h3_2": "String",
+				"h3_3": "UInt8",
+				"h3_4": "Int64",
+				"h4_0": "String",
+				"h4_1": "String",
+				"h4_2": "UInt8",
+				"h4_3": "Int64"
+			},
+			"MaxRows": 1
+		},
+		"ProjectTrack/E1 per Variant/Client/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`IDClient` AS Key, count() AS Count FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser` FROM (SELECT `IDProject`, `IDClient`, `OwnerIDUser` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} AND ( `StartDate` >= {p_1:DateTime64(3, 'UTC')} AND `StartDate` < {p_2:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_3:UInt8} AND `IDCustomer` = {p_4:Int64})) AS p WHERE ((ifNull(p.`IDProject` IN (SELECT h2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {h2_0:Int64} AND `Role` IN {h2_1:Array(String)} AND `Active` = {h2_2:UInt8} ) ) AND `Deleted` = {h2_3:UInt8} AND `IDCustomer` = {h2_4:Int64})) AS h2), 0) OR (p.`OwnerIDUser` = {q1_0:Int64})) AND ifNull(p.`IDProject` IN (SELECT h3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {h3_0:Int64} AND `DueDate` < {h3_1:DateTime64(3, 'UTC')} AND `Status` != {h3_2:String} ) ) AND `Deleted` = {h3_3:UInt8} AND `IDCustomer` = {h3_4:Int64})) AS h3), 0) AND NOT ifNull(p.`IDProject` IN (SELECT h4.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( ( `Severity` = {h4_0:String} AND `State` = {h4_1:String} ) ) AND `Deleted` = {h4_2:UInt8} AND `IDCustomer` = {h4_3:Int64})) AS h4), 0))) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) OR Key IN {fSelected:Array(Int64)} ORDER BY FacetRow",
+			"Params": {
+				"p_0": [
+					"Active",
+					"AtRisk"
+				],
+				"p_1": "2024-06-01 00:00:00",
+				"p_2": "2027-01-01 00:00:00",
+				"p_3": 0,
+				"p_4": 1,
+				"h2_0": 1,
+				"h2_1": [
+					"Owner",
+					"Lead"
+				],
+				"h2_2": 1,
+				"h2_3": 0,
+				"h2_4": 1,
+				"q1_0": 1,
+				"h3_0": 1,
+				"h3_1": "2026-10-08 12:00:00",
+				"h3_2": "Done",
+				"h3_3": 0,
+				"h3_4": 1,
+				"h4_0": "Blocker",
+				"h4_1": "Open",
+				"h4_2": 0,
+				"h4_3": 1,
+				"fTopPlusOne": 21,
+				"fMaxGroups": 10000,
+				"fSelected": [
+					1,
+					2,
+					3,
+					8,
+					101
+				]
+			},
+			"Types": {
+				"p_0": "Array(String)",
+				"p_1": "DateTime64(3, 'UTC')",
+				"p_2": "DateTime64(3, 'UTC')",
+				"p_3": "UInt8",
+				"p_4": "Int64",
+				"h2_0": "Int64",
+				"h2_1": "Array(String)",
+				"h2_2": "UInt8",
+				"h2_3": "UInt8",
+				"h2_4": "Int64",
+				"q1_0": "Int64",
+				"h3_0": "Int64",
+				"h3_1": "DateTime64(3, 'UTC')",
+				"h3_2": "String",
+				"h3_3": "UInt8",
+				"h3_4": "Int64",
+				"h4_0": "String",
+				"h4_1": "String",
+				"h4_2": "UInt8",
+				"h4_3": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32",
+				"fSelected": "Array(Int64)"
+			},
+			"MaxRows": 10005
+		},
+		"ProjectTrack/E1 per Variant/MyOverdue/0": {
+			"Purpose": "KeyGroups",
+			"SQL": "SELECT Key, count() AS Count FROM (SELECT multiIf(p.`FacetC0` < {fE0:Int64}, 0, p.`FacetC0` < {fE1:Int64}, 1, p.`FacetC0` < {fE2:Int64}, 2, 3) AS Key FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser`, ifNull(ca0.`N`, 0) AS `FacetC0` FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser` FROM (SELECT `IDProject`, `IDClient`, `OwnerIDUser` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} AND ( `StartDate` >= {p_1:DateTime64(3, 'UTC')} AND `StartDate` < {p_2:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_3:UInt8} AND `IDCustomer` = {p_4:Int64})) AS p WHERE (ifNull(p.`IDClient` IN (SELECT h1.`IDClient` FROM (SELECT `IDClient` FROM `rfs_main`.`Client` FINAL WHERE `_IsDeleted` = 0 AND (( `IDClient` IN {h1_0:Array(Int64)} ) AND `Deleted` = {h1_1:UInt8} AND `IDCustomer` = {h1_2:Int64})) AS h1), 0) AND (ifNull(p.`IDProject` IN (SELECT h2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {h2_0:Int64} AND `Role` IN {h2_1:Array(String)} AND `Active` = {h2_2:UInt8} ) ) AND `Deleted` = {h2_3:UInt8} AND `IDCustomer` = {h2_4:Int64})) AS h2), 0) OR (p.`OwnerIDUser` = {q1_0:Int64})) AND ifNull(p.`IDProject` IN (SELECT h3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {h3_0:Int64} AND `DueDate` < {h3_1:DateTime64(3, 'UTC')} AND `Status` != {h3_2:String} ) ) AND `Deleted` = {h3_3:UInt8} AND `IDCustomer` = {h3_4:Int64})) AS h3), 0) AND NOT ifNull(p.`IDProject` IN (SELECT h4.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( ( `Severity` = {h4_0:String} AND `State` = {h4_1:String} ) ) AND `Deleted` = {h4_2:UInt8} AND `IDCustomer` = {h4_3:Int64})) AS h4), 0))) AS p LEFT JOIN (SELECT x1.`IDProject` AS `K0`, count() AS `N` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {x1_0:Int64} AND `DueDate` < {x1_1:DateTime64(3, 'UTC')} AND `Status` != {x1_2:String} ) ) AND `Deleted` = {x1_3:UInt8} AND `IDCustomer` = {x1_4:Int64})) AS x1 WHERE x1.`IDProject` IN (SELECT p2.`IDProject` FROM (SELECT `IDProject` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} AND ( `StartDate` >= {p_1:DateTime64(3, 'UTC')} AND `StartDate` < {p_2:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_3:UInt8} AND `IDCustomer` = {p_4:Int64})) AS p2) GROUP BY `K0`) AS ca0 ON ca0.`K0` = p.`IDProject`) AS p) GROUP BY Key",
+			"Params": {
+				"p_0": [
+					"Active",
+					"AtRisk"
+				],
+				"p_1": "2024-06-01 00:00:00",
+				"p_2": "2027-01-01 00:00:00",
+				"p_3": 0,
+				"p_4": 1,
+				"h1_0": [
+					1,
+					2,
+					3,
+					8,
+					101
+				],
+				"h1_1": 0,
+				"h1_2": 1,
+				"h2_0": 1,
+				"h2_1": [
+					"Owner",
+					"Lead"
+				],
+				"h2_2": 1,
+				"h2_3": 0,
+				"h2_4": 1,
+				"q1_0": 1,
+				"h3_0": 1,
+				"h3_1": "2026-10-08 12:00:00",
+				"h3_2": "Done",
+				"h3_3": 0,
+				"h3_4": 1,
+				"h4_0": "Blocker",
+				"h4_1": "Open",
+				"h4_2": 0,
+				"h4_3": 1,
+				"x1_0": 1,
+				"x1_1": "2026-10-08 12:00:00",
+				"x1_2": "Done",
+				"x1_3": 0,
+				"x1_4": 1,
+				"fE0": 1,
+				"fE1": 3,
+				"fE2": 10
+			},
+			"Types": {
+				"p_0": "Array(String)",
+				"p_1": "DateTime64(3, 'UTC')",
+				"p_2": "DateTime64(3, 'UTC')",
+				"p_3": "UInt8",
+				"p_4": "Int64",
+				"h1_0": "Array(Int64)",
+				"h1_1": "UInt8",
+				"h1_2": "Int64",
+				"h2_0": "Int64",
+				"h2_1": "Array(String)",
+				"h2_2": "UInt8",
+				"h2_3": "UInt8",
+				"h2_4": "Int64",
+				"q1_0": "Int64",
+				"h3_0": "Int64",
+				"h3_1": "DateTime64(3, 'UTC')",
+				"h3_2": "String",
+				"h3_3": "UInt8",
+				"h3_4": "Int64",
+				"h4_0": "String",
+				"h4_1": "String",
+				"h4_2": "UInt8",
+				"h4_3": "Int64",
+				"x1_0": "Int64",
+				"x1_1": "DateTime64(3, 'UTC')",
+				"x1_2": "String",
+				"x1_3": "UInt8",
+				"x1_4": "Int64",
+				"fE0": "Int64",
+				"fE1": "Int64",
+				"fE2": "Int64"
+			},
+			"MaxRows": 4
+		},
+		"ProjectTrack/E1 per Variant/Started/0": {
+			"Purpose": "DateHistogram",
+			"SQL": "SELECT formatDateTime(B, '%Y-%m-%d 00:00:00') AS Key, Count, formatDateTime(LoV, '%Y-%m-%d %H:%i:%S') AS Lo, formatDateTime(HiV, '%Y-%m-%d %H:%i:%S') AS Hi FROM (SELECT toStartOfMonth(p.`StartDate`) AS B, count() AS Count, min(p.`StartDate`) AS LoV, max(p.`StartDate`) AS HiV FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser`, p.`StartDate` AS `StartDate` FROM (SELECT `IDProject`, `IDClient`, `OwnerIDUser`, `StartDate` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} ) AND `Deleted` = {p_1:UInt8} AND `IDCustomer` = {p_2:Int64})) AS p WHERE (ifNull(p.`IDClient` IN (SELECT h1.`IDClient` FROM (SELECT `IDClient` FROM `rfs_main`.`Client` FINAL WHERE `_IsDeleted` = 0 AND (( `IDClient` IN {h1_0:Array(Int64)} ) AND `Deleted` = {h1_1:UInt8} AND `IDCustomer` = {h1_2:Int64})) AS h1), 0) AND (ifNull(p.`IDProject` IN (SELECT h2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {h2_0:Int64} AND `Role` IN {h2_1:Array(String)} AND `Active` = {h2_2:UInt8} ) ) AND `Deleted` = {h2_3:UInt8} AND `IDCustomer` = {h2_4:Int64})) AS h2), 0) OR (p.`OwnerIDUser` = {q1_0:Int64})) AND ifNull(p.`IDProject` IN (SELECT h3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {h3_0:Int64} AND `DueDate` < {h3_1:DateTime64(3, 'UTC')} AND `Status` != {h3_2:String} ) ) AND `Deleted` = {h3_3:UInt8} AND `IDCustomer` = {h3_4:Int64})) AS h3), 0) AND NOT ifNull(p.`IDProject` IN (SELECT h4.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( ( `Severity` = {h4_0:String} AND `State` = {h4_1:String} ) ) AND `Deleted` = {h4_2:UInt8} AND `IDCustomer` = {h4_3:Int64})) AS h4), 0))) AS p GROUP BY B) ORDER BY isNull(B), B LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": [
+					"Active",
+					"AtRisk"
+				],
+				"p_1": 0,
+				"p_2": 1,
+				"h1_0": [
+					1,
+					2,
+					3,
+					8,
+					101
+				],
+				"h1_1": 0,
+				"h1_2": 1,
+				"h2_0": 1,
+				"h2_1": [
+					"Owner",
+					"Lead"
+				],
+				"h2_2": 1,
+				"h2_3": 0,
+				"h2_4": 1,
+				"q1_0": 1,
+				"h3_0": 1,
+				"h3_1": "2026-10-08 12:00:00",
+				"h3_2": "Done",
+				"h3_3": 0,
+				"h3_4": 1,
+				"h4_0": "Blocker",
+				"h4_1": "Open",
+				"h4_2": 0,
+				"h4_3": 1,
+				"fMaxGroups": 402
+			},
+			"Types": {
+				"p_0": "Array(String)",
+				"p_1": "UInt8",
+				"p_2": "Int64",
+				"h1_0": "Array(Int64)",
+				"h1_1": "UInt8",
+				"h1_2": "Int64",
+				"h2_0": "Int64",
+				"h2_1": "Array(String)",
+				"h2_2": "UInt8",
+				"h2_3": "UInt8",
+				"h2_4": "Int64",
+				"q1_0": "Int64",
+				"h3_0": "Int64",
+				"h3_1": "DateTime64(3, 'UTC')",
+				"h3_2": "String",
+				"h3_3": "UInt8",
+				"h3_4": "Int64",
+				"h4_0": "String",
+				"h4_1": "String",
+				"h4_2": "UInt8",
+				"h4_3": "Int64",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 402
+		},
+		"ProjectTrack/E1 per Variant/Status/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`Status` AS Key, count() AS Count FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser`, p.`Status` AS `Status` FROM (SELECT `IDProject`, `IDClient`, `OwnerIDUser`, `Status` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( ( `StartDate` >= {p_0:DateTime64(3, 'UTC')} AND `StartDate` < {p_1:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_2:UInt8} AND `IDCustomer` = {p_3:Int64})) AS p WHERE (ifNull(p.`IDClient` IN (SELECT h1.`IDClient` FROM (SELECT `IDClient` FROM `rfs_main`.`Client` FINAL WHERE `_IsDeleted` = 0 AND (( `IDClient` IN {h1_0:Array(Int64)} ) AND `Deleted` = {h1_1:UInt8} AND `IDCustomer` = {h1_2:Int64})) AS h1), 0) AND (ifNull(p.`IDProject` IN (SELECT h2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {h2_0:Int64} AND `Role` IN {h2_1:Array(String)} AND `Active` = {h2_2:UInt8} ) ) AND `Deleted` = {h2_3:UInt8} AND `IDCustomer` = {h2_4:Int64})) AS h2), 0) OR (p.`OwnerIDUser` = {q1_0:Int64})) AND ifNull(p.`IDProject` IN (SELECT h3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {h3_0:Int64} AND `DueDate` < {h3_1:DateTime64(3, 'UTC')} AND `Status` != {h3_2:String} ) ) AND `Deleted` = {h3_3:UInt8} AND `IDCustomer` = {h3_4:Int64})) AS h3), 0) AND NOT ifNull(p.`IDProject` IN (SELECT h4.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( ( `Severity` = {h4_0:String} AND `State` = {h4_1:String} ) ) AND `Deleted` = {h4_2:UInt8} AND `IDCustomer` = {h4_3:Int64})) AS h4), 0))) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) OR Key IN {fSelected:Array(String)} ORDER BY FacetRow",
+			"Params": {
+				"p_0": "2024-06-01 00:00:00",
+				"p_1": "2027-01-01 00:00:00",
+				"p_2": 0,
+				"p_3": 1,
+				"h1_0": [
+					1,
+					2,
+					3,
+					8,
+					101
+				],
+				"h1_1": 0,
+				"h1_2": 1,
+				"h2_0": 1,
+				"h2_1": [
+					"Owner",
+					"Lead"
+				],
+				"h2_2": 1,
+				"h2_3": 0,
+				"h2_4": 1,
+				"q1_0": 1,
+				"h3_0": 1,
+				"h3_1": "2026-10-08 12:00:00",
+				"h3_2": "Done",
+				"h3_3": 0,
+				"h3_4": 1,
+				"h4_0": "Blocker",
+				"h4_1": "Open",
+				"h4_2": 0,
+				"h4_3": 1,
+				"fTopPlusOne": 11,
+				"fMaxGroups": 10000,
+				"fSelected": [
+					"Active",
+					"AtRisk"
+				]
+			},
+			"Types": {
+				"p_0": "DateTime64(3, 'UTC')",
+				"p_1": "DateTime64(3, 'UTC')",
+				"p_2": "UInt8",
+				"p_3": "Int64",
+				"h1_0": "Array(Int64)",
+				"h1_1": "UInt8",
+				"h1_2": "Int64",
+				"h2_0": "Int64",
+				"h2_1": "Array(String)",
+				"h2_2": "UInt8",
+				"h2_3": "UInt8",
+				"h2_4": "Int64",
+				"q1_0": "Int64",
+				"h3_0": "Int64",
+				"h3_1": "DateTime64(3, 'UTC')",
+				"h3_2": "String",
+				"h3_3": "UInt8",
+				"h3_4": "Int64",
+				"h4_0": "String",
+				"h4_1": "String",
+				"h4_2": "UInt8",
+				"h4_3": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32",
+				"fSelected": "Array(String)"
+			},
+			"MaxRows": 10002
+		},
+		"ProjectTrack/E1 per Variant/StatusByClient/0": {
+			"Purpose": "Pivot",
+			"SQL": "SELECT K1, K2, count() AS Count FROM (SELECT p.`Status` AS K1, p.`IDClient` AS K2 FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser`, p.`Status` AS `Status` FROM (SELECT `IDProject`, `IDClient`, `OwnerIDUser`, `Status` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} AND ( `StartDate` >= {p_1:DateTime64(3, 'UTC')} AND `StartDate` < {p_2:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_3:UInt8} AND `IDCustomer` = {p_4:Int64})) AS p WHERE (ifNull(p.`IDClient` IN (SELECT h1.`IDClient` FROM (SELECT `IDClient` FROM `rfs_main`.`Client` FINAL WHERE `_IsDeleted` = 0 AND (( `IDClient` IN {h1_0:Array(Int64)} ) AND `Deleted` = {h1_1:UInt8} AND `IDCustomer` = {h1_2:Int64})) AS h1), 0) AND (ifNull(p.`IDProject` IN (SELECT h2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {h2_0:Int64} AND `Role` IN {h2_1:Array(String)} AND `Active` = {h2_2:UInt8} ) ) AND `Deleted` = {h2_3:UInt8} AND `IDCustomer` = {h2_4:Int64})) AS h2), 0) OR (p.`OwnerIDUser` = {q1_0:Int64})) AND ifNull(p.`IDProject` IN (SELECT h3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {h3_0:Int64} AND `DueDate` < {h3_1:DateTime64(3, 'UTC')} AND `Status` != {h3_2:String} ) ) AND `Deleted` = {h3_3:UInt8} AND `IDCustomer` = {h3_4:Int64})) AS h3), 0) AND NOT ifNull(p.`IDProject` IN (SELECT h4.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( ( `Severity` = {h4_0:String} AND `State` = {h4_1:String} ) ) AND `Deleted` = {h4_2:UInt8} AND `IDCustomer` = {h4_3:Int64})) AS h4), 0))) AS p) GROUP BY K1, K2 LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": [
+					"Active",
+					"AtRisk"
+				],
+				"p_1": "2024-06-01 00:00:00",
+				"p_2": "2027-01-01 00:00:00",
+				"p_3": 0,
+				"p_4": 1,
+				"h1_0": [
+					1,
+					2,
+					3,
+					8,
+					101
+				],
+				"h1_1": 0,
+				"h1_2": 1,
+				"h2_0": 1,
+				"h2_1": [
+					"Owner",
+					"Lead"
+				],
+				"h2_2": 1,
+				"h2_3": 0,
+				"h2_4": 1,
+				"q1_0": 1,
+				"h3_0": 1,
+				"h3_1": "2026-10-08 12:00:00",
+				"h3_2": "Done",
+				"h3_3": 0,
+				"h3_4": 1,
+				"h4_0": "Blocker",
+				"h4_1": "Open",
+				"h4_2": 0,
+				"h4_3": 1,
+				"fMaxGroups": 100001
+			},
+			"Types": {
+				"p_0": "Array(String)",
+				"p_1": "DateTime64(3, 'UTC')",
+				"p_2": "DateTime64(3, 'UTC')",
+				"p_3": "UInt8",
+				"p_4": "Int64",
+				"h1_0": "Array(Int64)",
+				"h1_1": "UInt8",
+				"h1_2": "Int64",
+				"h2_0": "Int64",
+				"h2_1": "Array(String)",
+				"h2_2": "UInt8",
+				"h2_3": "UInt8",
+				"h2_4": "Int64",
+				"q1_0": "Int64",
+				"h3_0": "Int64",
+				"h3_1": "DateTime64(3, 'UTC')",
+				"h3_2": "String",
+				"h3_3": "UInt8",
+				"h3_4": "Int64",
+				"h4_0": "String",
+				"h4_1": "String",
+				"h4_2": "UInt8",
+				"h4_3": "Int64",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 100001
+		},
+		"ProjectTrack/E1 cube/#Total/0": {
+			"Purpose": "Count",
+			"SQL": "SELECT count() AS Total FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser` FROM (SELECT `IDProject`, `IDClient`, `OwnerIDUser` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} AND ( `StartDate` >= {p_1:DateTime64(3, 'UTC')} AND `StartDate` < {p_2:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_3:UInt8} AND `IDCustomer` = {p_4:Int64})) AS p WHERE (ifNull(p.`IDClient` IN (SELECT h1.`IDClient` FROM (SELECT `IDClient` FROM `rfs_main`.`Client` FINAL WHERE `_IsDeleted` = 0 AND (( `IDClient` IN {h1_0:Array(Int64)} ) AND `Deleted` = {h1_1:UInt8} AND `IDCustomer` = {h1_2:Int64})) AS h1), 0) AND (ifNull(p.`IDProject` IN (SELECT h2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {h2_0:Int64} AND `Role` IN {h2_1:Array(String)} AND `Active` = {h2_2:UInt8} ) ) AND `Deleted` = {h2_3:UInt8} AND `IDCustomer` = {h2_4:Int64})) AS h2), 0) OR (p.`OwnerIDUser` = {q1_0:Int64})) AND ifNull(p.`IDProject` IN (SELECT h3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {h3_0:Int64} AND `DueDate` < {h3_1:DateTime64(3, 'UTC')} AND `Status` != {h3_2:String} ) ) AND `Deleted` = {h3_3:UInt8} AND `IDCustomer` = {h3_4:Int64})) AS h3), 0) AND NOT ifNull(p.`IDProject` IN (SELECT h4.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( ( `Severity` = {h4_0:String} AND `State` = {h4_1:String} ) ) AND `Deleted` = {h4_2:UInt8} AND `IDCustomer` = {h4_3:Int64})) AS h4), 0))) AS p",
+			"Params": {
+				"p_0": [
+					"Active",
+					"AtRisk"
+				],
+				"p_1": "2024-06-01 00:00:00",
+				"p_2": "2027-01-01 00:00:00",
+				"p_3": 0,
+				"p_4": 1,
+				"h1_0": [
+					1,
+					2,
+					3,
+					8,
+					101
+				],
+				"h1_1": 0,
+				"h1_2": 1,
+				"h2_0": 1,
+				"h2_1": [
+					"Owner",
+					"Lead"
+				],
+				"h2_2": 1,
+				"h2_3": 0,
+				"h2_4": 1,
+				"q1_0": 1,
+				"h3_0": 1,
+				"h3_1": "2026-10-08 12:00:00",
+				"h3_2": "Done",
+				"h3_3": 0,
+				"h3_4": 1,
+				"h4_0": "Blocker",
+				"h4_1": "Open",
+				"h4_2": 0,
+				"h4_3": 1
+			},
+			"Types": {
+				"p_0": "Array(String)",
+				"p_1": "DateTime64(3, 'UTC')",
+				"p_2": "DateTime64(3, 'UTC')",
+				"p_3": "UInt8",
+				"p_4": "Int64",
+				"h1_0": "Array(Int64)",
+				"h1_1": "UInt8",
+				"h1_2": "Int64",
+				"h2_0": "Int64",
+				"h2_1": "Array(String)",
+				"h2_2": "UInt8",
+				"h2_3": "UInt8",
+				"h2_4": "Int64",
+				"q1_0": "Int64",
+				"h3_0": "Int64",
+				"h3_1": "DateTime64(3, 'UTC')",
+				"h3_2": "String",
+				"h3_3": "UInt8",
+				"h3_4": "Int64",
+				"h4_0": "String",
+				"h4_1": "String",
+				"h4_2": "UInt8",
+				"h4_3": "Int64"
+			},
+			"MaxRows": 1
+		},
+		"ProjectTrack/E1 cube/Client/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`IDClient` AS Key, count() AS Count FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser` FROM (SELECT `IDProject`, `IDClient`, `OwnerIDUser` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} AND ( `StartDate` >= {p_1:DateTime64(3, 'UTC')} AND `StartDate` < {p_2:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_3:UInt8} AND `IDCustomer` = {p_4:Int64})) AS p WHERE ((ifNull(p.`IDProject` IN (SELECT h2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {h2_0:Int64} AND `Role` IN {h2_1:Array(String)} AND `Active` = {h2_2:UInt8} ) ) AND `Deleted` = {h2_3:UInt8} AND `IDCustomer` = {h2_4:Int64})) AS h2), 0) OR (p.`OwnerIDUser` = {q1_0:Int64})) AND ifNull(p.`IDProject` IN (SELECT h3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {h3_0:Int64} AND `DueDate` < {h3_1:DateTime64(3, 'UTC')} AND `Status` != {h3_2:String} ) ) AND `Deleted` = {h3_3:UInt8} AND `IDCustomer` = {h3_4:Int64})) AS h3), 0) AND NOT ifNull(p.`IDProject` IN (SELECT h4.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( ( `Severity` = {h4_0:String} AND `State` = {h4_1:String} ) ) AND `Deleted` = {h4_2:UInt8} AND `IDCustomer` = {h4_3:Int64})) AS h4), 0))) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) OR Key IN {fSelected:Array(Int64)} ORDER BY FacetRow",
+			"Params": {
+				"p_0": [
+					"Active",
+					"AtRisk"
+				],
+				"p_1": "2024-06-01 00:00:00",
+				"p_2": "2027-01-01 00:00:00",
+				"p_3": 0,
+				"p_4": 1,
+				"h2_0": 1,
+				"h2_1": [
+					"Owner",
+					"Lead"
+				],
+				"h2_2": 1,
+				"h2_3": 0,
+				"h2_4": 1,
+				"q1_0": 1,
+				"h3_0": 1,
+				"h3_1": "2026-10-08 12:00:00",
+				"h3_2": "Done",
+				"h3_3": 0,
+				"h3_4": 1,
+				"h4_0": "Blocker",
+				"h4_1": "Open",
+				"h4_2": 0,
+				"h4_3": 1,
+				"fTopPlusOne": 21,
+				"fMaxGroups": 10000,
+				"fSelected": [
+					1,
+					2,
+					3,
+					8,
+					101
+				]
+			},
+			"Types": {
+				"p_0": "Array(String)",
+				"p_1": "DateTime64(3, 'UTC')",
+				"p_2": "DateTime64(3, 'UTC')",
+				"p_3": "UInt8",
+				"p_4": "Int64",
+				"h2_0": "Int64",
+				"h2_1": "Array(String)",
+				"h2_2": "UInt8",
+				"h2_3": "UInt8",
+				"h2_4": "Int64",
+				"q1_0": "Int64",
+				"h3_0": "Int64",
+				"h3_1": "DateTime64(3, 'UTC')",
+				"h3_2": "String",
+				"h3_3": "UInt8",
+				"h3_4": "Int64",
+				"h4_0": "String",
+				"h4_1": "String",
+				"h4_2": "UInt8",
+				"h4_3": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32",
+				"fSelected": "Array(Int64)"
+			},
+			"MaxRows": 10005
+		},
+		"ProjectTrack/E1 cube/MyOverdue/0": {
+			"Purpose": "KeyGroups",
+			"SQL": "SELECT Key, count() AS Count FROM (SELECT multiIf(p.`FacetC0` < {fE0:Int64}, 0, p.`FacetC0` < {fE1:Int64}, 1, p.`FacetC0` < {fE2:Int64}, 2, 3) AS Key FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser`, ifNull(ca0.`N`, 0) AS `FacetC0` FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser` FROM (SELECT `IDProject`, `IDClient`, `OwnerIDUser` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} AND ( `StartDate` >= {p_1:DateTime64(3, 'UTC')} AND `StartDate` < {p_2:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_3:UInt8} AND `IDCustomer` = {p_4:Int64})) AS p WHERE (ifNull(p.`IDClient` IN (SELECT h1.`IDClient` FROM (SELECT `IDClient` FROM `rfs_main`.`Client` FINAL WHERE `_IsDeleted` = 0 AND (( `IDClient` IN {h1_0:Array(Int64)} ) AND `Deleted` = {h1_1:UInt8} AND `IDCustomer` = {h1_2:Int64})) AS h1), 0) AND (ifNull(p.`IDProject` IN (SELECT h2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {h2_0:Int64} AND `Role` IN {h2_1:Array(String)} AND `Active` = {h2_2:UInt8} ) ) AND `Deleted` = {h2_3:UInt8} AND `IDCustomer` = {h2_4:Int64})) AS h2), 0) OR (p.`OwnerIDUser` = {q1_0:Int64})) AND ifNull(p.`IDProject` IN (SELECT h3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {h3_0:Int64} AND `DueDate` < {h3_1:DateTime64(3, 'UTC')} AND `Status` != {h3_2:String} ) ) AND `Deleted` = {h3_3:UInt8} AND `IDCustomer` = {h3_4:Int64})) AS h3), 0) AND NOT ifNull(p.`IDProject` IN (SELECT h4.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( ( `Severity` = {h4_0:String} AND `State` = {h4_1:String} ) ) AND `Deleted` = {h4_2:UInt8} AND `IDCustomer` = {h4_3:Int64})) AS h4), 0))) AS p LEFT JOIN (SELECT x1.`IDProject` AS `K0`, count() AS `N` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {x1_0:Int64} AND `DueDate` < {x1_1:DateTime64(3, 'UTC')} AND `Status` != {x1_2:String} ) ) AND `Deleted` = {x1_3:UInt8} AND `IDCustomer` = {x1_4:Int64})) AS x1 WHERE x1.`IDProject` IN (SELECT p2.`IDProject` FROM (SELECT `IDProject` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} AND ( `StartDate` >= {p_1:DateTime64(3, 'UTC')} AND `StartDate` < {p_2:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_3:UInt8} AND `IDCustomer` = {p_4:Int64})) AS p2) GROUP BY `K0`) AS ca0 ON ca0.`K0` = p.`IDProject`) AS p) GROUP BY Key",
+			"Params": {
+				"p_0": [
+					"Active",
+					"AtRisk"
+				],
+				"p_1": "2024-06-01 00:00:00",
+				"p_2": "2027-01-01 00:00:00",
+				"p_3": 0,
+				"p_4": 1,
+				"h1_0": [
+					1,
+					2,
+					3,
+					8,
+					101
+				],
+				"h1_1": 0,
+				"h1_2": 1,
+				"h2_0": 1,
+				"h2_1": [
+					"Owner",
+					"Lead"
+				],
+				"h2_2": 1,
+				"h2_3": 0,
+				"h2_4": 1,
+				"q1_0": 1,
+				"h3_0": 1,
+				"h3_1": "2026-10-08 12:00:00",
+				"h3_2": "Done",
+				"h3_3": 0,
+				"h3_4": 1,
+				"h4_0": "Blocker",
+				"h4_1": "Open",
+				"h4_2": 0,
+				"h4_3": 1,
+				"x1_0": 1,
+				"x1_1": "2026-10-08 12:00:00",
+				"x1_2": "Done",
+				"x1_3": 0,
+				"x1_4": 1,
+				"fE0": 1,
+				"fE1": 3,
+				"fE2": 10
+			},
+			"Types": {
+				"p_0": "Array(String)",
+				"p_1": "DateTime64(3, 'UTC')",
+				"p_2": "DateTime64(3, 'UTC')",
+				"p_3": "UInt8",
+				"p_4": "Int64",
+				"h1_0": "Array(Int64)",
+				"h1_1": "UInt8",
+				"h1_2": "Int64",
+				"h2_0": "Int64",
+				"h2_1": "Array(String)",
+				"h2_2": "UInt8",
+				"h2_3": "UInt8",
+				"h2_4": "Int64",
+				"q1_0": "Int64",
+				"h3_0": "Int64",
+				"h3_1": "DateTime64(3, 'UTC')",
+				"h3_2": "String",
+				"h3_3": "UInt8",
+				"h3_4": "Int64",
+				"h4_0": "String",
+				"h4_1": "String",
+				"h4_2": "UInt8",
+				"h4_3": "Int64",
+				"x1_0": "Int64",
+				"x1_1": "DateTime64(3, 'UTC')",
+				"x1_2": "String",
+				"x1_3": "UInt8",
+				"x1_4": "Int64",
+				"fE0": "Int64",
+				"fE1": "Int64",
+				"fE2": "Int64"
+			},
+			"MaxRows": 4
+		},
+		"ProjectTrack/E1 cube/Started/0": {
+			"Purpose": "DateHistogram",
+			"SQL": "SELECT formatDateTime(B, '%Y-%m-%d 00:00:00') AS Key, Count, formatDateTime(LoV, '%Y-%m-%d %H:%i:%S') AS Lo, formatDateTime(HiV, '%Y-%m-%d %H:%i:%S') AS Hi FROM (SELECT toStartOfMonth(p.`StartDate`) AS B, count() AS Count, min(p.`StartDate`) AS LoV, max(p.`StartDate`) AS HiV FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser`, p.`StartDate` AS `StartDate` FROM (SELECT `IDProject`, `IDClient`, `OwnerIDUser`, `StartDate` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} ) AND `Deleted` = {p_1:UInt8} AND `IDCustomer` = {p_2:Int64})) AS p WHERE (ifNull(p.`IDClient` IN (SELECT h1.`IDClient` FROM (SELECT `IDClient` FROM `rfs_main`.`Client` FINAL WHERE `_IsDeleted` = 0 AND (( `IDClient` IN {h1_0:Array(Int64)} ) AND `Deleted` = {h1_1:UInt8} AND `IDCustomer` = {h1_2:Int64})) AS h1), 0) AND (ifNull(p.`IDProject` IN (SELECT h2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {h2_0:Int64} AND `Role` IN {h2_1:Array(String)} AND `Active` = {h2_2:UInt8} ) ) AND `Deleted` = {h2_3:UInt8} AND `IDCustomer` = {h2_4:Int64})) AS h2), 0) OR (p.`OwnerIDUser` = {q1_0:Int64})) AND ifNull(p.`IDProject` IN (SELECT h3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {h3_0:Int64} AND `DueDate` < {h3_1:DateTime64(3, 'UTC')} AND `Status` != {h3_2:String} ) ) AND `Deleted` = {h3_3:UInt8} AND `IDCustomer` = {h3_4:Int64})) AS h3), 0) AND NOT ifNull(p.`IDProject` IN (SELECT h4.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( ( `Severity` = {h4_0:String} AND `State` = {h4_1:String} ) ) AND `Deleted` = {h4_2:UInt8} AND `IDCustomer` = {h4_3:Int64})) AS h4), 0))) AS p GROUP BY B) ORDER BY isNull(B), B LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": [
+					"Active",
+					"AtRisk"
+				],
+				"p_1": 0,
+				"p_2": 1,
+				"h1_0": [
+					1,
+					2,
+					3,
+					8,
+					101
+				],
+				"h1_1": 0,
+				"h1_2": 1,
+				"h2_0": 1,
+				"h2_1": [
+					"Owner",
+					"Lead"
+				],
+				"h2_2": 1,
+				"h2_3": 0,
+				"h2_4": 1,
+				"q1_0": 1,
+				"h3_0": 1,
+				"h3_1": "2026-10-08 12:00:00",
+				"h3_2": "Done",
+				"h3_3": 0,
+				"h3_4": 1,
+				"h4_0": "Blocker",
+				"h4_1": "Open",
+				"h4_2": 0,
+				"h4_3": 1,
+				"fMaxGroups": 402
+			},
+			"Types": {
+				"p_0": "Array(String)",
+				"p_1": "UInt8",
+				"p_2": "Int64",
+				"h1_0": "Array(Int64)",
+				"h1_1": "UInt8",
+				"h1_2": "Int64",
+				"h2_0": "Int64",
+				"h2_1": "Array(String)",
+				"h2_2": "UInt8",
+				"h2_3": "UInt8",
+				"h2_4": "Int64",
+				"q1_0": "Int64",
+				"h3_0": "Int64",
+				"h3_1": "DateTime64(3, 'UTC')",
+				"h3_2": "String",
+				"h3_3": "UInt8",
+				"h3_4": "Int64",
+				"h4_0": "String",
+				"h4_1": "String",
+				"h4_2": "UInt8",
+				"h4_3": "Int64",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 402
+		},
+		"ProjectTrack/E1 cube/Status/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`Status` AS Key, count() AS Count FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser`, p.`Status` AS `Status` FROM (SELECT `IDProject`, `IDClient`, `OwnerIDUser`, `Status` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( ( `StartDate` >= {p_0:DateTime64(3, 'UTC')} AND `StartDate` < {p_1:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_2:UInt8} AND `IDCustomer` = {p_3:Int64})) AS p WHERE (ifNull(p.`IDClient` IN (SELECT h1.`IDClient` FROM (SELECT `IDClient` FROM `rfs_main`.`Client` FINAL WHERE `_IsDeleted` = 0 AND (( `IDClient` IN {h1_0:Array(Int64)} ) AND `Deleted` = {h1_1:UInt8} AND `IDCustomer` = {h1_2:Int64})) AS h1), 0) AND (ifNull(p.`IDProject` IN (SELECT h2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {h2_0:Int64} AND `Role` IN {h2_1:Array(String)} AND `Active` = {h2_2:UInt8} ) ) AND `Deleted` = {h2_3:UInt8} AND `IDCustomer` = {h2_4:Int64})) AS h2), 0) OR (p.`OwnerIDUser` = {q1_0:Int64})) AND ifNull(p.`IDProject` IN (SELECT h3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {h3_0:Int64} AND `DueDate` < {h3_1:DateTime64(3, 'UTC')} AND `Status` != {h3_2:String} ) ) AND `Deleted` = {h3_3:UInt8} AND `IDCustomer` = {h3_4:Int64})) AS h3), 0) AND NOT ifNull(p.`IDProject` IN (SELECT h4.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( ( `Severity` = {h4_0:String} AND `State` = {h4_1:String} ) ) AND `Deleted` = {h4_2:UInt8} AND `IDCustomer` = {h4_3:Int64})) AS h4), 0))) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) OR Key IN {fSelected:Array(String)} ORDER BY FacetRow",
+			"Params": {
+				"p_0": "2024-06-01 00:00:00",
+				"p_1": "2027-01-01 00:00:00",
+				"p_2": 0,
+				"p_3": 1,
+				"h1_0": [
+					1,
+					2,
+					3,
+					8,
+					101
+				],
+				"h1_1": 0,
+				"h1_2": 1,
+				"h2_0": 1,
+				"h2_1": [
+					"Owner",
+					"Lead"
+				],
+				"h2_2": 1,
+				"h2_3": 0,
+				"h2_4": 1,
+				"q1_0": 1,
+				"h3_0": 1,
+				"h3_1": "2026-10-08 12:00:00",
+				"h3_2": "Done",
+				"h3_3": 0,
+				"h3_4": 1,
+				"h4_0": "Blocker",
+				"h4_1": "Open",
+				"h4_2": 0,
+				"h4_3": 1,
+				"fTopPlusOne": 11,
+				"fMaxGroups": 10000,
+				"fSelected": [
+					"Active",
+					"AtRisk"
+				]
+			},
+			"Types": {
+				"p_0": "DateTime64(3, 'UTC')",
+				"p_1": "DateTime64(3, 'UTC')",
+				"p_2": "UInt8",
+				"p_3": "Int64",
+				"h1_0": "Array(Int64)",
+				"h1_1": "UInt8",
+				"h1_2": "Int64",
+				"h2_0": "Int64",
+				"h2_1": "Array(String)",
+				"h2_2": "UInt8",
+				"h2_3": "UInt8",
+				"h2_4": "Int64",
+				"q1_0": "Int64",
+				"h3_0": "Int64",
+				"h3_1": "DateTime64(3, 'UTC')",
+				"h3_2": "String",
+				"h3_3": "UInt8",
+				"h3_4": "Int64",
+				"h4_0": "String",
+				"h4_1": "String",
+				"h4_2": "UInt8",
+				"h4_3": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32",
+				"fSelected": "Array(String)"
+			},
+			"MaxRows": 10002
+		},
+		"ProjectTrack/E1 cube/StatusByClient/0": {
+			"Purpose": "Pivot",
+			"SQL": "SELECT K1, K2, count() AS Count FROM (SELECT p.`Status` AS K1, p.`IDClient` AS K2 FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser`, p.`Status` AS `Status` FROM (SELECT `IDProject`, `IDClient`, `OwnerIDUser`, `Status` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} AND ( `StartDate` >= {p_1:DateTime64(3, 'UTC')} AND `StartDate` < {p_2:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_3:UInt8} AND `IDCustomer` = {p_4:Int64})) AS p WHERE (ifNull(p.`IDClient` IN (SELECT h1.`IDClient` FROM (SELECT `IDClient` FROM `rfs_main`.`Client` FINAL WHERE `_IsDeleted` = 0 AND (( `IDClient` IN {h1_0:Array(Int64)} ) AND `Deleted` = {h1_1:UInt8} AND `IDCustomer` = {h1_2:Int64})) AS h1), 0) AND (ifNull(p.`IDProject` IN (SELECT h2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {h2_0:Int64} AND `Role` IN {h2_1:Array(String)} AND `Active` = {h2_2:UInt8} ) ) AND `Deleted` = {h2_3:UInt8} AND `IDCustomer` = {h2_4:Int64})) AS h2), 0) OR (p.`OwnerIDUser` = {q1_0:Int64})) AND ifNull(p.`IDProject` IN (SELECT h3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {h3_0:Int64} AND `DueDate` < {h3_1:DateTime64(3, 'UTC')} AND `Status` != {h3_2:String} ) ) AND `Deleted` = {h3_3:UInt8} AND `IDCustomer` = {h3_4:Int64})) AS h3), 0) AND NOT ifNull(p.`IDProject` IN (SELECT h4.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( ( `Severity` = {h4_0:String} AND `State` = {h4_1:String} ) ) AND `Deleted` = {h4_2:UInt8} AND `IDCustomer` = {h4_3:Int64})) AS h4), 0))) AS p) GROUP BY K1, K2 LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": [
+					"Active",
+					"AtRisk"
+				],
+				"p_1": "2024-06-01 00:00:00",
+				"p_2": "2027-01-01 00:00:00",
+				"p_3": 0,
+				"p_4": 1,
+				"h1_0": [
+					1,
+					2,
+					3,
+					8,
+					101
+				],
+				"h1_1": 0,
+				"h1_2": 1,
+				"h2_0": 1,
+				"h2_1": [
+					"Owner",
+					"Lead"
+				],
+				"h2_2": 1,
+				"h2_3": 0,
+				"h2_4": 1,
+				"q1_0": 1,
+				"h3_0": 1,
+				"h3_1": "2026-10-08 12:00:00",
+				"h3_2": "Done",
+				"h3_3": 0,
+				"h3_4": 1,
+				"h4_0": "Blocker",
+				"h4_1": "Open",
+				"h4_2": 0,
+				"h4_3": 1,
+				"fMaxGroups": 100001
+			},
+			"Types": {
+				"p_0": "Array(String)",
+				"p_1": "DateTime64(3, 'UTC')",
+				"p_2": "DateTime64(3, 'UTC')",
+				"p_3": "UInt8",
+				"p_4": "Int64",
+				"h1_0": "Array(Int64)",
+				"h1_1": "UInt8",
+				"h1_2": "Int64",
+				"h2_0": "Int64",
+				"h2_1": "Array(String)",
+				"h2_2": "UInt8",
+				"h2_3": "UInt8",
+				"h2_4": "Int64",
+				"q1_0": "Int64",
+				"h3_0": "Int64",
+				"h3_1": "DateTime64(3, 'UTC')",
+				"h3_2": "String",
+				"h3_3": "UInt8",
+				"h3_4": "Int64",
+				"h4_0": "String",
+				"h4_1": "String",
+				"h4_2": "UInt8",
+				"h4_3": "Int64",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 100001
+		},
+		"ProjectTrack/E1 cube/cube:cube0": {
+			"Purpose": "Cube",
+			"SQL": "SELECT `d1`, `d2`, `d3`, `d4`, `b1`, `b2`, `b3`, formatDateTime(min(`v3`), '%Y-%m-%d %H:%i:%S') AS `lo3`, formatDateTime(max(`v3`), '%Y-%m-%d %H:%i:%S') AS `hi3`, count() AS `N` FROM (SELECT p.`Status` AS `d1`, p.`IDClient` AS `d2`, formatDateTime(toStartOfMonth(p.`StartDate`), '%Y-%m-%d 00:00:00') AS `d3`, multiIf(p.`FacetC3` < {fd3E0:Int64}, 0, p.`FacetC3` < {fd3E1:Int64}, 1, p.`FacetC3` < {fd3E2:Int64}, 2, 3) AS `d4`, p.`b1` AS `b1`, p.`b2` AS `b2`, p.`b3` AS `b3`, p.`StartDate` AS `v3`, 0 AS `z` FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser`, p.`StartDate` AS `StartDate`, p.`Status` AS `Status`, p.`b1` AS `b1`, p.`b2` AS `b2`, p.`b3` AS `b3`, ifNull(ca3.`N`, 0) AS `FacetC3` FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser`, p.`StartDate` AS `StartDate`, p.`Status` AS `Status`, if((p.`Status` IN {q2_0:Array(String)}), 1, 0) AS `b1`, if(ifNull(p.`IDClient` IN (SELECT h1.`IDClient` FROM (SELECT `IDClient` FROM `rfs_main`.`Client` FINAL WHERE `_IsDeleted` = 0 AND (( `IDClient` IN {h1_0:Array(Int64)} ) AND `Deleted` = {h1_1:UInt8} AND `IDCustomer` = {h1_2:Int64})) AS h1), 0), 1, 0) AS `b2`, if((( p.`StartDate` >= {q3_0:DateTime64(3, 'UTC')} AND p.`StartDate` < {q3_1:DateTime64(3, 'UTC')} )), 1, 0) AS `b3` FROM (SELECT `IDProject`, `IDClient`, `OwnerIDUser`, `StartDate`, `Status` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE ((ifNull(p.`IDProject` IN (SELECT h2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {h2_0:Int64} AND `Role` IN {h2_1:Array(String)} AND `Active` = {h2_2:UInt8} ) ) AND `Deleted` = {h2_3:UInt8} AND `IDCustomer` = {h2_4:Int64})) AS h2), 0) OR (p.`OwnerIDUser` = {q1_0:Int64})) AND ifNull(p.`IDProject` IN (SELECT h3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {h3_0:Int64} AND `DueDate` < {h3_1:DateTime64(3, 'UTC')} AND `Status` != {h3_2:String} ) ) AND `Deleted` = {h3_3:UInt8} AND `IDCustomer` = {h3_4:Int64})) AS h3), 0) AND NOT ifNull(p.`IDProject` IN (SELECT h4.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( ( `Severity` = {h4_0:String} AND `State` = {h4_1:String} ) ) AND `Deleted` = {h4_2:UInt8} AND `IDCustomer` = {h4_3:Int64})) AS h4), 0))) AS p LEFT JOIN (SELECT x1.`IDProject` AS `K0`, count() AS `N` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {x1_0:Int64} AND `DueDate` < {x1_1:DateTime64(3, 'UTC')} AND `Status` != {x1_2:String} ) ) AND `Deleted` = {x1_3:UInt8} AND `IDCustomer` = {x1_4:Int64})) AS x1 WHERE x1.`IDProject` IN (SELECT p2.`IDProject` FROM (SELECT `IDProject` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p2) GROUP BY `K0`) AS ca3 ON ca3.`K0` = p.`IDProject`) AS p) GROUP BY `d1`, `d2`, `d3`, `d4`, `b1`, `b2`, `b3`, `z` LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"h2_0": 1,
+				"h2_1": [
+					"Owner",
+					"Lead"
+				],
+				"h2_2": 1,
+				"h2_3": 0,
+				"h2_4": 1,
+				"q1_0": 1,
+				"h3_0": 1,
+				"h3_1": "2026-10-08 12:00:00",
+				"h3_2": "Done",
+				"h3_3": 0,
+				"h3_4": 1,
+				"h4_0": "Blocker",
+				"h4_1": "Open",
+				"h4_2": 0,
+				"h4_3": 1,
+				"q2_0": [
+					"Active",
+					"AtRisk"
+				],
+				"h1_0": [
+					1,
+					2,
+					3,
+					8,
+					101
+				],
+				"h1_1": 0,
+				"h1_2": 1,
+				"q3_0": "2024-06-01 00:00:00",
+				"q3_1": "2027-01-01 00:00:00",
+				"x1_0": 1,
+				"x1_1": "2026-10-08 12:00:00",
+				"x1_2": "Done",
+				"x1_3": 0,
+				"x1_4": 1,
+				"fd3E0": 1,
+				"fd3E1": 3,
+				"fd3E2": 10,
+				"fMaxGroups": 100001
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"h2_0": "Int64",
+				"h2_1": "Array(String)",
+				"h2_2": "UInt8",
+				"h2_3": "UInt8",
+				"h2_4": "Int64",
+				"q1_0": "Int64",
+				"h3_0": "Int64",
+				"h3_1": "DateTime64(3, 'UTC')",
+				"h3_2": "String",
+				"h3_3": "UInt8",
+				"h3_4": "Int64",
+				"h4_0": "String",
+				"h4_1": "String",
+				"h4_2": "UInt8",
+				"h4_3": "Int64",
+				"q2_0": "Array(String)",
+				"h1_0": "Array(Int64)",
+				"h1_1": "UInt8",
+				"h1_2": "Int64",
+				"q3_0": "DateTime64(3, 'UTC')",
+				"q3_1": "DateTime64(3, 'UTC')",
+				"x1_0": "Int64",
+				"x1_1": "DateTime64(3, 'UTC')",
+				"x1_2": "String",
+				"x1_3": "UInt8",
+				"x1_4": "Int64",
+				"fd3E0": "Int64",
+				"fd3E1": "Int64",
+				"fd3E2": "Int64",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 100001
+		},
+		"ProjectTrack/E2/#Total/0": {
+			"Purpose": "Count",
+			"SQL": "SELECT count() AS Total FROM (SELECT p.`IDDocument` AS `IDDocument`, p.`IDFormType` AS `IDFormType` FROM (SELECT `IDDocument`, `IDFormType` FROM `rfs_main`.`Document` FINAL WHERE `_IsDeleted` = 0 AND (( ( `DocumentDate` >= {p_0:DateTime64(3, 'UTC')} AND `DocumentDate` < {p_1:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_2:UInt8} AND `IDCustomer` = {p_3:Int64})) AS p WHERE ifNull(p.`IDFormType` IN (SELECT h1.`IDFormType` FROM (SELECT `IDFormType` FROM `rfs_main`.`FormType` FINAL WHERE `_IsDeleted` = 0 AND (( `IDFormType` IN {h1_0:Array(Int64)} ))) AS h1), 0)) AS p",
+			"Params": {
+				"p_0": "2025-03-01 00:00:00",
+				"p_1": "2026-07-01 00:00:00",
+				"p_2": 0,
+				"p_3": 1,
+				"h1_0": [
+					3
+				]
+			},
+			"Types": {
+				"p_0": "DateTime64(3, 'UTC')",
+				"p_1": "DateTime64(3, 'UTC')",
+				"p_2": "UInt8",
+				"p_3": "Int64",
+				"h1_0": "Array(Int64)"
+			},
+			"MaxRows": 1
+		},
+		"ProjectTrack/E2/ByForm/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`IDFormType` AS Key, count() AS Count FROM (SELECT `IDDocument`, `IDFormType` FROM `rfs_main`.`Document` FINAL WHERE `_IsDeleted` = 0 AND (( ( `DocumentDate` >= {p_0:DateTime64(3, 'UTC')} AND `DocumentDate` < {p_1:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_2:UInt8} AND `IDCustomer` = {p_3:Int64})) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) OR Key IN {fSelected:Array(Int64)} ORDER BY FacetRow",
+			"Params": {
+				"p_0": "2025-03-01 00:00:00",
+				"p_1": "2026-07-01 00:00:00",
+				"p_2": 0,
+				"p_3": 1,
+				"fTopPlusOne": 21,
+				"fMaxGroups": 10000,
+				"fSelected": [
+					3
+				]
+			},
+			"Types": {
+				"p_0": "DateTime64(3, 'UTC')",
+				"p_1": "DateTime64(3, 'UTC')",
+				"p_2": "UInt8",
+				"p_3": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32",
+				"fSelected": "Array(Int64)"
+			},
+			"MaxRows": 10001
+		},
+		"ProjectTrack/E2/ByMonth/0": {
+			"Purpose": "DateHistogram",
+			"SQL": "SELECT formatDateTime(B, '%Y-%m-%d 00:00:00') AS Key, Count, formatDateTime(LoV, '%Y-%m-%d %H:%i:%S') AS Lo, formatDateTime(HiV, '%Y-%m-%d %H:%i:%S') AS Hi FROM (SELECT toStartOfMonth(p.`DocumentDate`) AS B, count() AS Count, min(p.`DocumentDate`) AS LoV, max(p.`DocumentDate`) AS HiV FROM (SELECT p.`IDDocument` AS `IDDocument`, p.`DocumentDate` AS `DocumentDate`, p.`IDFormType` AS `IDFormType` FROM (SELECT `IDDocument`, `DocumentDate`, `IDFormType` FROM `rfs_main`.`Document` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE ifNull(p.`IDFormType` IN (SELECT h1.`IDFormType` FROM (SELECT `IDFormType` FROM `rfs_main`.`FormType` FINAL WHERE `_IsDeleted` = 0 AND (( `IDFormType` IN {h1_0:Array(Int64)} ))) AS h1), 0)) AS p GROUP BY B) ORDER BY isNull(B), B LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"h1_0": [
+					3
+				],
+				"fMaxGroups": 402
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"h1_0": "Array(Int64)",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 402
+		},
+		"ProjectTrack/E2/Status/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`Status` AS Key, count() AS Count FROM (SELECT p.`IDDocument` AS `IDDocument`, p.`IDFormType` AS `IDFormType`, p.`Status` AS `Status` FROM (SELECT `IDDocument`, `IDFormType`, `Status` FROM `rfs_main`.`Document` FINAL WHERE `_IsDeleted` = 0 AND (( ( `DocumentDate` >= {p_0:DateTime64(3, 'UTC')} AND `DocumentDate` < {p_1:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_2:UInt8} AND `IDCustomer` = {p_3:Int64})) AS p WHERE ifNull(p.`IDFormType` IN (SELECT h1.`IDFormType` FROM (SELECT `IDFormType` FROM `rfs_main`.`FormType` FINAL WHERE `_IsDeleted` = 0 AND (( `IDFormType` IN {h1_0:Array(Int64)} ))) AS h1), 0)) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"p_0": "2025-03-01 00:00:00",
+				"p_1": "2026-07-01 00:00:00",
+				"p_2": 0,
+				"p_3": 1,
+				"h1_0": [
+					3
+				],
+				"fTopPlusOne": 51,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"p_0": "DateTime64(3, 'UTC')",
+				"p_1": "DateTime64(3, 'UTC')",
+				"p_2": "UInt8",
+				"p_3": "Int64",
+				"h1_0": "Array(Int64)",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"ProjectTrack/Project coverage/ByMember/0": {
+			"Purpose": "MultiTerms",
+			"SQL": "SELECT Key, Count, FacetDistinct FROM (SELECT Key, Count, count() OVER () AS FacetDistinct, rank() OVER (ORDER BY Count DESC) AS FacetRank, row_number() OVER (ORDER BY Count DESC, Key ASC) AS FacetRow FROM (SELECT m2.`IDUser` AS Key, uniqExact(p.`IDProject`) AS Count FROM (SELECT `IDProject` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p INNER JOIN (SELECT `IDProjectMembership`, `IDProject`, `IDUser` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( `Active` = {m1_0:UInt8} ) AND `Deleted` = {m1_1:UInt8} AND `IDCustomer` = {m1_2:Int64})) AS m1 ON m1.`IDProject` = p.`IDProject` INNER JOIN (SELECT `IDUser` FROM `rfs_main`.`User` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {m2_0:UInt8} AND `IDCustomer` = {m2_1:Int64})) AS m2 ON m2.`IDUser` = m1.`IDUser` WHERE isNotNull(m2.`IDUser`) GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"m1_0": 1,
+				"m1_1": 0,
+				"m1_2": 1,
+				"m2_0": 0,
+				"m2_1": 1,
+				"fTopPlusOne": 51,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"m1_0": "UInt8",
+				"m1_1": "UInt8",
+				"m1_2": "Int64",
+				"m2_0": "UInt8",
+				"m2_1": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"ProjectTrack/Project coverage/ByMember/1": {
+			"Purpose": "Count",
+			"SQL": "SELECT count() AS Total FROM (SELECT `IDProject` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64"
+			},
+			"MaxRows": 1
+		},
+		"ProjectTrack/Project coverage/ByMember/2": {
+			"Purpose": "MultiCovered",
+			"SQL": "SELECT uniqExact(p.`IDProject`) AS Covered FROM (SELECT `IDProject` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p INNER JOIN (SELECT `IDProjectMembership`, `IDProject`, `IDUser` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( `Active` = {m1_0:UInt8} ) AND `Deleted` = {m1_1:UInt8} AND `IDCustomer` = {m1_2:Int64})) AS m1 ON m1.`IDProject` = p.`IDProject` INNER JOIN (SELECT `IDUser` FROM `rfs_main`.`User` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {m2_0:UInt8} AND `IDCustomer` = {m2_1:Int64})) AS m2 ON m2.`IDUser` = m1.`IDUser` WHERE isNotNull(m2.`IDUser`)",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"m1_0": 1,
+				"m1_1": 0,
+				"m1_2": 1,
+				"m2_0": 0,
+				"m2_1": 1
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"m1_0": "UInt8",
+				"m1_1": "UInt8",
+				"m1_2": "Int64",
+				"m2_0": "UInt8",
+				"m2_1": "Int64"
+			},
+			"MaxRows": 1
+		},
+		"ProjectTrack/Project coverage/HasOpenIssues/0": {
+			"Purpose": "KeyGroups",
+			"SQL": "SELECT Key, count() AS Count FROM (SELECT p.`FacetX0` AS Key FROM (SELECT p.`IDProject` AS `IDProject`, if(ifNull(p.`IDProject` IN (SELECT e1.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( `State` = {e1_0:String} ) AND `Deleted` = {e1_1:UInt8} AND `IDCustomer` = {e1_2:Int64})) AS e1), 0), 1, 0) AS `FacetX0` FROM (SELECT `IDProject` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p) AS p) GROUP BY Key",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"e1_0": "Open",
+				"e1_1": 0,
+				"e1_2": 1
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"e1_0": "String",
+				"e1_1": "UInt8",
+				"e1_2": "Int64"
+			},
+			"MaxRows": 2
+		},
+		"ProjectTrack/Project coverage/ManyOverdue/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`Status` AS Key, count() AS Count FROM (SELECT p.`IDProject` AS `IDProject`, p.`Status` AS `Status` FROM (SELECT `IDProject`, `Status` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE ifNull(p.`IDProject` IN (SELECT j3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {j3_0:Int64} AND `DueDate` < {j3_1:DateTime64(3, 'UTC')} AND `Status` != {j3_2:String} ) ) AND `Deleted` = {j3_3:UInt8} AND `IDCustomer` = {j3_4:Int64})) AS j3 GROUP BY j3.`IDProject` HAVING count() >= {q1_N:UInt64}), 0)) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j3_0": 1,
+				"j3_1": "2026-10-08 12:00:00",
+				"j3_2": "Done",
+				"j3_3": 0,
+				"j3_4": 1,
+				"q1_N": 3,
+				"fTopPlusOne": 51,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j3_0": "Int64",
+				"j3_1": "DateTime64(3, 'UTC')",
+				"j3_2": "String",
+				"j3_3": "UInt8",
+				"j3_4": "Int64",
+				"q1_N": "UInt64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"ProjectTrack/Document coverage/ByClient/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`FacetV0` AS Key, count() AS Count FROM (SELECT p.`IDDocument` AS `IDDocument`, p.`IDProject` AS `IDProject`, l2.`Name` AS `FacetV0` FROM (SELECT `IDDocument`, `IDProject` FROM `rfs_main`.`Document` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p ANY LEFT JOIN (SELECT `IDProject`, `IDClient` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {l1_0:UInt8} AND `IDCustomer` = {l1_1:Int64})) AS l1 ON l1.`IDProject` = p.`IDProject` ANY LEFT JOIN (SELECT `IDClient`, `Name` FROM `rfs_main`.`Client` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {l2_0:UInt8} AND `IDCustomer` = {l2_1:Int64})) AS l2 ON l2.`IDClient` = l1.`IDClient`) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"l1_0": 0,
+				"l1_1": 1,
+				"l2_0": 0,
+				"l2_1": 1,
+				"fTopPlusOne": 51,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"l1_0": "UInt8",
+				"l1_1": "Int64",
+				"l2_0": "UInt8",
+				"l2_1": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"ProjectTrack/Document coverage/InMyProjects/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`Status` AS Key, count() AS Count FROM (SELECT p.`IDDocument` AS `IDDocument`, p.`IDProject` AS `IDProject`, p.`Status` AS `Status` FROM (SELECT `IDDocument`, `IDProject`, `Status` FROM `rfs_main`.`Document` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE ifNull(p.`IDProject` IN (SELECT j1.`IDProject` FROM (SELECT `IDProject` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j1_0:UInt8} AND `IDCustomer` = {j1_1:Int64})) AS j1 WHERE ifNull(j1.`IDProject` IN (SELECT j2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j2_0:Int64} AND `Active` = {j2_1:UInt8} ) ) AND `Deleted` = {j2_2:UInt8} AND `IDCustomer` = {j2_3:Int64})) AS j2), 0)), 0)) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j2_0": 1,
+				"j2_1": 1,
+				"j2_2": 0,
+				"j2_3": 1,
+				"j1_0": 0,
+				"j1_1": 1,
+				"fTopPlusOne": 51,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j2_0": "Int64",
+				"j2_1": "UInt8",
+				"j2_2": "UInt8",
+				"j2_3": "Int64",
+				"j1_0": "UInt8",
+				"j1_1": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"ProjectTrack/Project extras/ClientNice/0": {
+			"Purpose": "NumericBounds",
+			"SQL": "SELECT count() AS Rows, count(p.`IDClient`) AS NonNull, min(p.`IDClient`) AS Lo, max(p.`IDClient`) AS Hi FROM (SELECT `IDProject`, `IDClient` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64"
+			},
+			"MaxRows": 1
+		},
+		"ProjectTrack/Project extras/ClientStats/0": {
+			"Purpose": "Stats",
+			"SQL": "SELECT count() AS Rows, count(p.`IDClient`) AS NonNull, min(p.`IDClient`) AS Min, max(p.`IDClient`) AS Max, sum(p.`IDClient`) AS SumUnits FROM (SELECT `IDProject`, `IDClient` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64"
+			},
+			"MaxRows": 1
+		},
+		"ProjectTrack/Project extras/FewOpenIssues/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`Status` AS Key, count() AS Count FROM (SELECT p.`IDProject` AS `IDProject`, p.`Status` AS `Status` FROM (SELECT `IDProject`, `Status` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE NOT ifNull(p.`IDProject` IN (SELECT j9.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( `State` = {j9_0:String} ) AND `Deleted` = {j9_1:UInt8} AND `IDCustomer` = {j9_2:Int64})) AS j9 GROUP BY j9.`IDProject` HAVING NOT (count() < {q1_N:UInt64})), 0)) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j9_0": "Open",
+				"j9_1": 0,
+				"j9_2": 1,
+				"q1_N": 2,
+				"fTopPlusOne": 51,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j9_0": "String",
+				"j9_1": "UInt8",
+				"j9_2": "Int64",
+				"q1_N": "UInt64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"ProjectTrack/Project extras/FewOpenIssuesTotal/0": {
+			"Purpose": "Count",
+			"SQL": "SELECT count() AS Total FROM (SELECT p.`IDProject` AS `IDProject` FROM (SELECT `IDProject` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE NOT ifNull(p.`IDProject` IN (SELECT j9.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( `State` = {j9_0:String} ) AND `Deleted` = {j9_1:UInt8} AND `IDCustomer` = {j9_2:Int64})) AS j9 GROUP BY j9.`IDProject` HAVING NOT (count() < {q1_N:UInt64})), 0)) AS p",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j9_0": "Open",
+				"j9_1": 0,
+				"j9_2": 1,
+				"q1_N": 2
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j9_0": "String",
+				"j9_1": "UInt8",
+				"j9_2": "Int64",
+				"q1_N": "UInt64"
+			},
+			"MaxRows": 1
+		},
+		"ProjectTrack/Project extras/StartDay/0": {
+			"Purpose": "DateHistogram",
+			"SQL": "SELECT formatDateTime(B, '%Y-%m-%d 00:00:00') AS Key, Count, formatDateTime(LoV, '%Y-%m-%d %H:%i:%S') AS Lo, formatDateTime(HiV, '%Y-%m-%d %H:%i:%S') AS Hi FROM (SELECT toDate32(p.`StartDate`) AS B, count() AS Count, min(p.`StartDate`) AS LoV, max(p.`StartDate`) AS HiV FROM (SELECT `IDProject`, `StartDate` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p GROUP BY B) ORDER BY isNull(B), B LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"fMaxGroups": 402
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 402
+		},
+		"ProjectTrack/Project extras/StartDistinct/0": {
+			"Purpose": "DistinctCount",
+			"SQL": "SELECT count() AS Rows, count(p.`StartDate`) AS NonNull, uniqExact(p.`StartDate`) AS Distinct FROM (SELECT `IDProject`, `StartDate` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64"
+			},
+			"MaxRows": 1
+		},
+		"ProjectTrack/Project extras/StartMissing/0": {
+			"Purpose": "Missing",
+			"SQL": "SELECT count() AS Rows, count(p.`StartDate`) AS NonNull FROM (SELECT `IDProject`, `StartDate` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64"
+			},
+			"MaxRows": 1
+		},
+		"ProjectTrack/Project extras/StartQuarter/0": {
+			"Purpose": "DateHistogram",
+			"SQL": "SELECT formatDateTime(B, '%Y-%m-%d 00:00:00') AS Key, Count, formatDateTime(LoV, '%Y-%m-%d %H:%i:%S') AS Lo, formatDateTime(HiV, '%Y-%m-%d %H:%i:%S') AS Hi FROM (SELECT toStartOfQuarter(p.`StartDate`) AS B, count() AS Count, min(p.`StartDate`) AS LoV, max(p.`StartDate`) AS HiV FROM (SELECT `IDProject`, `StartDate` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p GROUP BY B) ORDER BY isNull(B), B LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"fMaxGroups": 402
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 402
+		},
+		"ProjectTrack/Project extras/StartStats/0": {
+			"Purpose": "Stats",
+			"SQL": "SELECT count() AS Rows, count(p.`StartDate`) AS NonNull, formatDateTime(min(p.`StartDate`), '%Y-%m-%d %H:%i:%S') AS Min, formatDateTime(max(p.`StartDate`), '%Y-%m-%d %H:%i:%S') AS Max, NULL AS SumUnits FROM (SELECT `IDProject`, `StartDate` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64"
+			},
+			"MaxRows": 1
+		},
+		"ProjectTrack/Project extras/StartWeek/0": {
+			"Purpose": "DateHistogram",
+			"SQL": "SELECT formatDateTime(B, '%Y-%m-%d 00:00:00') AS Key, Count, formatDateTime(LoV, '%Y-%m-%d %H:%i:%S') AS Lo, formatDateTime(HiV, '%Y-%m-%d %H:%i:%S') AS Hi FROM (SELECT toMonday(p.`StartDate`) AS B, count() AS Count, min(p.`StartDate`) AS LoV, max(p.`StartDate`) AS HiV FROM (SELECT `IDProject`, `StartDate` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p GROUP BY B) ORDER BY isNull(B), B LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"fMaxGroups": 402
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 402
+		},
+		"ProjectTrack/Project extras/StartYear/0": {
+			"Purpose": "DateHistogram",
+			"SQL": "SELECT formatDateTime(B, '%Y-%m-%d 00:00:00') AS Key, Count, formatDateTime(LoV, '%Y-%m-%d %H:%i:%S') AS Lo, formatDateTime(HiV, '%Y-%m-%d %H:%i:%S') AS Hi FROM (SELECT toStartOfYear(p.`StartDate`) AS B, count() AS Count, min(p.`StartDate`) AS LoV, max(p.`StartDate`) AS HiV FROM (SELECT `IDProject`, `StartDate` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p GROUP BY B) ORDER BY isNull(B), B LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"fMaxGroups": 402
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 402
+		},
+		"ProjectTrack/Project extras/StatusByYear/0": {
+			"Purpose": "Pivot",
+			"SQL": "SELECT K1, K2, count() AS Count FROM (SELECT p.`Status` AS K1, formatDateTime(toStartOfYear(p.`StartDate`), '%Y-%m-%d 00:00:00') AS K2 FROM (SELECT `IDProject`, `StartDate`, `Status` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p) GROUP BY K1, K2 LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"fMaxGroups": 100001
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 100001
+		},
+		"ProjectTrack/E1 as tenant 2/#Total/0": {
+			"Purpose": "Count",
+			"SQL": "SELECT count() AS Total FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser` FROM (SELECT `IDProject`, `IDClient`, `OwnerIDUser` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} AND ( `StartDate` >= {p_1:DateTime64(3, 'UTC')} AND `StartDate` < {p_2:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_3:UInt8} AND `IDCustomer` = {p_4:Int64})) AS p WHERE (ifNull(p.`IDClient` IN (SELECT h1.`IDClient` FROM (SELECT `IDClient` FROM `rfs_main`.`Client` FINAL WHERE `_IsDeleted` = 0 AND (( `IDClient` IN {h1_0:Array(Int64)} ) AND `Deleted` = {h1_1:UInt8} AND `IDCustomer` = {h1_2:Int64})) AS h1), 0) AND (ifNull(p.`IDProject` IN (SELECT h2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {h2_0:Int64} AND `Role` IN {h2_1:Array(String)} AND `Active` = {h2_2:UInt8} ) ) AND `Deleted` = {h2_3:UInt8} AND `IDCustomer` = {h2_4:Int64})) AS h2), 0) OR (p.`OwnerIDUser` = {q1_0:Int64})) AND ifNull(p.`IDProject` IN (SELECT h3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {h3_0:Int64} AND `DueDate` < {h3_1:DateTime64(3, 'UTC')} AND `Status` != {h3_2:String} ) ) AND `Deleted` = {h3_3:UInt8} AND `IDCustomer` = {h3_4:Int64})) AS h3), 0) AND NOT ifNull(p.`IDProject` IN (SELECT h4.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( ( `Severity` = {h4_0:String} AND `State` = {h4_1:String} ) ) AND `Deleted` = {h4_2:UInt8} AND `IDCustomer` = {h4_3:Int64})) AS h4), 0))) AS p",
+			"Params": {
+				"p_0": [
+					"Active",
+					"AtRisk"
+				],
+				"p_1": "2024-06-01 00:00:00",
+				"p_2": "2027-01-01 00:00:00",
+				"p_3": 0,
+				"p_4": 2,
+				"h1_0": [
+					101,
+					102,
+					103,
+					1
+				],
+				"h1_1": 0,
+				"h1_2": 2,
+				"h2_0": 101,
+				"h2_1": [
+					"Owner",
+					"Lead"
+				],
+				"h2_2": 1,
+				"h2_3": 0,
+				"h2_4": 2,
+				"q1_0": 101,
+				"h3_0": 101,
+				"h3_1": "2026-10-08 12:00:00",
+				"h3_2": "Done",
+				"h3_3": 0,
+				"h3_4": 2,
+				"h4_0": "Blocker",
+				"h4_1": "Open",
+				"h4_2": 0,
+				"h4_3": 2
+			},
+			"Types": {
+				"p_0": "Array(String)",
+				"p_1": "DateTime64(3, 'UTC')",
+				"p_2": "DateTime64(3, 'UTC')",
+				"p_3": "UInt8",
+				"p_4": "Int64",
+				"h1_0": "Array(Int64)",
+				"h1_1": "UInt8",
+				"h1_2": "Int64",
+				"h2_0": "Int64",
+				"h2_1": "Array(String)",
+				"h2_2": "UInt8",
+				"h2_3": "UInt8",
+				"h2_4": "Int64",
+				"q1_0": "Int64",
+				"h3_0": "Int64",
+				"h3_1": "DateTime64(3, 'UTC')",
+				"h3_2": "String",
+				"h3_3": "UInt8",
+				"h3_4": "Int64",
+				"h4_0": "String",
+				"h4_1": "String",
+				"h4_2": "UInt8",
+				"h4_3": "Int64"
+			},
+			"MaxRows": 1
+		},
+		"ProjectTrack/E1 as tenant 2/Client/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`IDClient` AS Key, count() AS Count FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser` FROM (SELECT `IDProject`, `IDClient`, `OwnerIDUser` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} AND ( `StartDate` >= {p_1:DateTime64(3, 'UTC')} AND `StartDate` < {p_2:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_3:UInt8} AND `IDCustomer` = {p_4:Int64})) AS p WHERE ((ifNull(p.`IDProject` IN (SELECT h2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {h2_0:Int64} AND `Role` IN {h2_1:Array(String)} AND `Active` = {h2_2:UInt8} ) ) AND `Deleted` = {h2_3:UInt8} AND `IDCustomer` = {h2_4:Int64})) AS h2), 0) OR (p.`OwnerIDUser` = {q1_0:Int64})) AND ifNull(p.`IDProject` IN (SELECT h3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {h3_0:Int64} AND `DueDate` < {h3_1:DateTime64(3, 'UTC')} AND `Status` != {h3_2:String} ) ) AND `Deleted` = {h3_3:UInt8} AND `IDCustomer` = {h3_4:Int64})) AS h3), 0) AND NOT ifNull(p.`IDProject` IN (SELECT h4.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( ( `Severity` = {h4_0:String} AND `State` = {h4_1:String} ) ) AND `Deleted` = {h4_2:UInt8} AND `IDCustomer` = {h4_3:Int64})) AS h4), 0))) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) OR Key IN {fSelected:Array(Int64)} ORDER BY FacetRow",
+			"Params": {
+				"p_0": [
+					"Active",
+					"AtRisk"
+				],
+				"p_1": "2024-06-01 00:00:00",
+				"p_2": "2027-01-01 00:00:00",
+				"p_3": 0,
+				"p_4": 2,
+				"h2_0": 101,
+				"h2_1": [
+					"Owner",
+					"Lead"
+				],
+				"h2_2": 1,
+				"h2_3": 0,
+				"h2_4": 2,
+				"q1_0": 101,
+				"h3_0": 101,
+				"h3_1": "2026-10-08 12:00:00",
+				"h3_2": "Done",
+				"h3_3": 0,
+				"h3_4": 2,
+				"h4_0": "Blocker",
+				"h4_1": "Open",
+				"h4_2": 0,
+				"h4_3": 2,
+				"fTopPlusOne": 21,
+				"fMaxGroups": 10000,
+				"fSelected": [
+					101,
+					102,
+					103,
+					1
+				]
+			},
+			"Types": {
+				"p_0": "Array(String)",
+				"p_1": "DateTime64(3, 'UTC')",
+				"p_2": "DateTime64(3, 'UTC')",
+				"p_3": "UInt8",
+				"p_4": "Int64",
+				"h2_0": "Int64",
+				"h2_1": "Array(String)",
+				"h2_2": "UInt8",
+				"h2_3": "UInt8",
+				"h2_4": "Int64",
+				"q1_0": "Int64",
+				"h3_0": "Int64",
+				"h3_1": "DateTime64(3, 'UTC')",
+				"h3_2": "String",
+				"h3_3": "UInt8",
+				"h3_4": "Int64",
+				"h4_0": "String",
+				"h4_1": "String",
+				"h4_2": "UInt8",
+				"h4_3": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32",
+				"fSelected": "Array(Int64)"
+			},
+			"MaxRows": 10004
+		},
+		"ProjectTrack/E1 as tenant 2/MyOverdue/0": {
+			"Purpose": "KeyGroups",
+			"SQL": "SELECT Key, count() AS Count FROM (SELECT multiIf(p.`FacetC0` < {fE0:Int64}, 0, p.`FacetC0` < {fE1:Int64}, 1, p.`FacetC0` < {fE2:Int64}, 2, 3) AS Key FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser`, ifNull(ca0.`N`, 0) AS `FacetC0` FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser` FROM (SELECT `IDProject`, `IDClient`, `OwnerIDUser` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} AND ( `StartDate` >= {p_1:DateTime64(3, 'UTC')} AND `StartDate` < {p_2:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_3:UInt8} AND `IDCustomer` = {p_4:Int64})) AS p WHERE (ifNull(p.`IDClient` IN (SELECT h1.`IDClient` FROM (SELECT `IDClient` FROM `rfs_main`.`Client` FINAL WHERE `_IsDeleted` = 0 AND (( `IDClient` IN {h1_0:Array(Int64)} ) AND `Deleted` = {h1_1:UInt8} AND `IDCustomer` = {h1_2:Int64})) AS h1), 0) AND (ifNull(p.`IDProject` IN (SELECT h2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {h2_0:Int64} AND `Role` IN {h2_1:Array(String)} AND `Active` = {h2_2:UInt8} ) ) AND `Deleted` = {h2_3:UInt8} AND `IDCustomer` = {h2_4:Int64})) AS h2), 0) OR (p.`OwnerIDUser` = {q1_0:Int64})) AND ifNull(p.`IDProject` IN (SELECT h3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {h3_0:Int64} AND `DueDate` < {h3_1:DateTime64(3, 'UTC')} AND `Status` != {h3_2:String} ) ) AND `Deleted` = {h3_3:UInt8} AND `IDCustomer` = {h3_4:Int64})) AS h3), 0) AND NOT ifNull(p.`IDProject` IN (SELECT h4.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( ( `Severity` = {h4_0:String} AND `State` = {h4_1:String} ) ) AND `Deleted` = {h4_2:UInt8} AND `IDCustomer` = {h4_3:Int64})) AS h4), 0))) AS p LEFT JOIN (SELECT x1.`IDProject` AS `K0`, count() AS `N` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {x1_0:Int64} AND `DueDate` < {x1_1:DateTime64(3, 'UTC')} AND `Status` != {x1_2:String} ) ) AND `Deleted` = {x1_3:UInt8} AND `IDCustomer` = {x1_4:Int64})) AS x1 WHERE x1.`IDProject` IN (SELECT p2.`IDProject` FROM (SELECT `IDProject` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} AND ( `StartDate` >= {p_1:DateTime64(3, 'UTC')} AND `StartDate` < {p_2:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_3:UInt8} AND `IDCustomer` = {p_4:Int64})) AS p2) GROUP BY `K0`) AS ca0 ON ca0.`K0` = p.`IDProject`) AS p) GROUP BY Key",
+			"Params": {
+				"p_0": [
+					"Active",
+					"AtRisk"
+				],
+				"p_1": "2024-06-01 00:00:00",
+				"p_2": "2027-01-01 00:00:00",
+				"p_3": 0,
+				"p_4": 2,
+				"h1_0": [
+					101,
+					102,
+					103,
+					1
+				],
+				"h1_1": 0,
+				"h1_2": 2,
+				"h2_0": 101,
+				"h2_1": [
+					"Owner",
+					"Lead"
+				],
+				"h2_2": 1,
+				"h2_3": 0,
+				"h2_4": 2,
+				"q1_0": 101,
+				"h3_0": 101,
+				"h3_1": "2026-10-08 12:00:00",
+				"h3_2": "Done",
+				"h3_3": 0,
+				"h3_4": 2,
+				"h4_0": "Blocker",
+				"h4_1": "Open",
+				"h4_2": 0,
+				"h4_3": 2,
+				"x1_0": 101,
+				"x1_1": "2026-10-08 12:00:00",
+				"x1_2": "Done",
+				"x1_3": 0,
+				"x1_4": 2,
+				"fE0": 1,
+				"fE1": 3,
+				"fE2": 10
+			},
+			"Types": {
+				"p_0": "Array(String)",
+				"p_1": "DateTime64(3, 'UTC')",
+				"p_2": "DateTime64(3, 'UTC')",
+				"p_3": "UInt8",
+				"p_4": "Int64",
+				"h1_0": "Array(Int64)",
+				"h1_1": "UInt8",
+				"h1_2": "Int64",
+				"h2_0": "Int64",
+				"h2_1": "Array(String)",
+				"h2_2": "UInt8",
+				"h2_3": "UInt8",
+				"h2_4": "Int64",
+				"q1_0": "Int64",
+				"h3_0": "Int64",
+				"h3_1": "DateTime64(3, 'UTC')",
+				"h3_2": "String",
+				"h3_3": "UInt8",
+				"h3_4": "Int64",
+				"h4_0": "String",
+				"h4_1": "String",
+				"h4_2": "UInt8",
+				"h4_3": "Int64",
+				"x1_0": "Int64",
+				"x1_1": "DateTime64(3, 'UTC')",
+				"x1_2": "String",
+				"x1_3": "UInt8",
+				"x1_4": "Int64",
+				"fE0": "Int64",
+				"fE1": "Int64",
+				"fE2": "Int64"
+			},
+			"MaxRows": 4
+		},
+		"ProjectTrack/E1 as tenant 2/Started/0": {
+			"Purpose": "DateHistogram",
+			"SQL": "SELECT formatDateTime(B, '%Y-%m-%d 00:00:00') AS Key, Count, formatDateTime(LoV, '%Y-%m-%d %H:%i:%S') AS Lo, formatDateTime(HiV, '%Y-%m-%d %H:%i:%S') AS Hi FROM (SELECT toStartOfMonth(p.`StartDate`) AS B, count() AS Count, min(p.`StartDate`) AS LoV, max(p.`StartDate`) AS HiV FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser`, p.`StartDate` AS `StartDate` FROM (SELECT `IDProject`, `IDClient`, `OwnerIDUser`, `StartDate` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} ) AND `Deleted` = {p_1:UInt8} AND `IDCustomer` = {p_2:Int64})) AS p WHERE (ifNull(p.`IDClient` IN (SELECT h1.`IDClient` FROM (SELECT `IDClient` FROM `rfs_main`.`Client` FINAL WHERE `_IsDeleted` = 0 AND (( `IDClient` IN {h1_0:Array(Int64)} ) AND `Deleted` = {h1_1:UInt8} AND `IDCustomer` = {h1_2:Int64})) AS h1), 0) AND (ifNull(p.`IDProject` IN (SELECT h2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {h2_0:Int64} AND `Role` IN {h2_1:Array(String)} AND `Active` = {h2_2:UInt8} ) ) AND `Deleted` = {h2_3:UInt8} AND `IDCustomer` = {h2_4:Int64})) AS h2), 0) OR (p.`OwnerIDUser` = {q1_0:Int64})) AND ifNull(p.`IDProject` IN (SELECT h3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {h3_0:Int64} AND `DueDate` < {h3_1:DateTime64(3, 'UTC')} AND `Status` != {h3_2:String} ) ) AND `Deleted` = {h3_3:UInt8} AND `IDCustomer` = {h3_4:Int64})) AS h3), 0) AND NOT ifNull(p.`IDProject` IN (SELECT h4.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( ( `Severity` = {h4_0:String} AND `State` = {h4_1:String} ) ) AND `Deleted` = {h4_2:UInt8} AND `IDCustomer` = {h4_3:Int64})) AS h4), 0))) AS p GROUP BY B) ORDER BY isNull(B), B LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": [
+					"Active",
+					"AtRisk"
+				],
+				"p_1": 0,
+				"p_2": 2,
+				"h1_0": [
+					101,
+					102,
+					103,
+					1
+				],
+				"h1_1": 0,
+				"h1_2": 2,
+				"h2_0": 101,
+				"h2_1": [
+					"Owner",
+					"Lead"
+				],
+				"h2_2": 1,
+				"h2_3": 0,
+				"h2_4": 2,
+				"q1_0": 101,
+				"h3_0": 101,
+				"h3_1": "2026-10-08 12:00:00",
+				"h3_2": "Done",
+				"h3_3": 0,
+				"h3_4": 2,
+				"h4_0": "Blocker",
+				"h4_1": "Open",
+				"h4_2": 0,
+				"h4_3": 2,
+				"fMaxGroups": 402
+			},
+			"Types": {
+				"p_0": "Array(String)",
+				"p_1": "UInt8",
+				"p_2": "Int64",
+				"h1_0": "Array(Int64)",
+				"h1_1": "UInt8",
+				"h1_2": "Int64",
+				"h2_0": "Int64",
+				"h2_1": "Array(String)",
+				"h2_2": "UInt8",
+				"h2_3": "UInt8",
+				"h2_4": "Int64",
+				"q1_0": "Int64",
+				"h3_0": "Int64",
+				"h3_1": "DateTime64(3, 'UTC')",
+				"h3_2": "String",
+				"h3_3": "UInt8",
+				"h3_4": "Int64",
+				"h4_0": "String",
+				"h4_1": "String",
+				"h4_2": "UInt8",
+				"h4_3": "Int64",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 402
+		},
+		"ProjectTrack/E1 as tenant 2/Status/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`Status` AS Key, count() AS Count FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser`, p.`Status` AS `Status` FROM (SELECT `IDProject`, `IDClient`, `OwnerIDUser`, `Status` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( ( `StartDate` >= {p_0:DateTime64(3, 'UTC')} AND `StartDate` < {p_1:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_2:UInt8} AND `IDCustomer` = {p_3:Int64})) AS p WHERE (ifNull(p.`IDClient` IN (SELECT h1.`IDClient` FROM (SELECT `IDClient` FROM `rfs_main`.`Client` FINAL WHERE `_IsDeleted` = 0 AND (( `IDClient` IN {h1_0:Array(Int64)} ) AND `Deleted` = {h1_1:UInt8} AND `IDCustomer` = {h1_2:Int64})) AS h1), 0) AND (ifNull(p.`IDProject` IN (SELECT h2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {h2_0:Int64} AND `Role` IN {h2_1:Array(String)} AND `Active` = {h2_2:UInt8} ) ) AND `Deleted` = {h2_3:UInt8} AND `IDCustomer` = {h2_4:Int64})) AS h2), 0) OR (p.`OwnerIDUser` = {q1_0:Int64})) AND ifNull(p.`IDProject` IN (SELECT h3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {h3_0:Int64} AND `DueDate` < {h3_1:DateTime64(3, 'UTC')} AND `Status` != {h3_2:String} ) ) AND `Deleted` = {h3_3:UInt8} AND `IDCustomer` = {h3_4:Int64})) AS h3), 0) AND NOT ifNull(p.`IDProject` IN (SELECT h4.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( ( `Severity` = {h4_0:String} AND `State` = {h4_1:String} ) ) AND `Deleted` = {h4_2:UInt8} AND `IDCustomer` = {h4_3:Int64})) AS h4), 0))) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) OR Key IN {fSelected:Array(String)} ORDER BY FacetRow",
+			"Params": {
+				"p_0": "2024-06-01 00:00:00",
+				"p_1": "2027-01-01 00:00:00",
+				"p_2": 0,
+				"p_3": 2,
+				"h1_0": [
+					101,
+					102,
+					103,
+					1
+				],
+				"h1_1": 0,
+				"h1_2": 2,
+				"h2_0": 101,
+				"h2_1": [
+					"Owner",
+					"Lead"
+				],
+				"h2_2": 1,
+				"h2_3": 0,
+				"h2_4": 2,
+				"q1_0": 101,
+				"h3_0": 101,
+				"h3_1": "2026-10-08 12:00:00",
+				"h3_2": "Done",
+				"h3_3": 0,
+				"h3_4": 2,
+				"h4_0": "Blocker",
+				"h4_1": "Open",
+				"h4_2": 0,
+				"h4_3": 2,
+				"fTopPlusOne": 11,
+				"fMaxGroups": 10000,
+				"fSelected": [
+					"Active",
+					"AtRisk"
+				]
+			},
+			"Types": {
+				"p_0": "DateTime64(3, 'UTC')",
+				"p_1": "DateTime64(3, 'UTC')",
+				"p_2": "UInt8",
+				"p_3": "Int64",
+				"h1_0": "Array(Int64)",
+				"h1_1": "UInt8",
+				"h1_2": "Int64",
+				"h2_0": "Int64",
+				"h2_1": "Array(String)",
+				"h2_2": "UInt8",
+				"h2_3": "UInt8",
+				"h2_4": "Int64",
+				"q1_0": "Int64",
+				"h3_0": "Int64",
+				"h3_1": "DateTime64(3, 'UTC')",
+				"h3_2": "String",
+				"h3_3": "UInt8",
+				"h3_4": "Int64",
+				"h4_0": "String",
+				"h4_1": "String",
+				"h4_2": "UInt8",
+				"h4_3": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32",
+				"fSelected": "Array(String)"
+			},
+			"MaxRows": 10002
+		},
+		"ProjectTrack/E1 as tenant 2/StatusByClient/0": {
+			"Purpose": "Pivot",
+			"SQL": "SELECT K1, K2, count() AS Count FROM (SELECT p.`Status` AS K1, p.`IDClient` AS K2 FROM (SELECT p.`IDProject` AS `IDProject`, p.`IDClient` AS `IDClient`, p.`OwnerIDUser` AS `OwnerIDUser`, p.`Status` AS `Status` FROM (SELECT `IDProject`, `IDClient`, `OwnerIDUser`, `Status` FROM `rfs_main`.`Project` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} AND ( `StartDate` >= {p_1:DateTime64(3, 'UTC')} AND `StartDate` < {p_2:DateTime64(3, 'UTC')} ) ) AND `Deleted` = {p_3:UInt8} AND `IDCustomer` = {p_4:Int64})) AS p WHERE (ifNull(p.`IDClient` IN (SELECT h1.`IDClient` FROM (SELECT `IDClient` FROM `rfs_main`.`Client` FINAL WHERE `_IsDeleted` = 0 AND (( `IDClient` IN {h1_0:Array(Int64)} ) AND `Deleted` = {h1_1:UInt8} AND `IDCustomer` = {h1_2:Int64})) AS h1), 0) AND (ifNull(p.`IDProject` IN (SELECT h2.`IDProject` FROM (SELECT `IDProjectMembership`, `IDProject` FROM `rfs_main`.`ProjectMembership` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {h2_0:Int64} AND `Role` IN {h2_1:Array(String)} AND `Active` = {h2_2:UInt8} ) ) AND `Deleted` = {h2_3:UInt8} AND `IDCustomer` = {h2_4:Int64})) AS h2), 0) OR (p.`OwnerIDUser` = {q1_0:Int64})) AND ifNull(p.`IDProject` IN (SELECT h3.`IDProject` FROM (SELECT `IDTask`, `IDProject` FROM `rfs_main`.`Task` FINAL WHERE `_IsDeleted` = 0 AND (( ( `AssignedIDUser` = {h3_0:Int64} AND `DueDate` < {h3_1:DateTime64(3, 'UTC')} AND `Status` != {h3_2:String} ) ) AND `Deleted` = {h3_3:UInt8} AND `IDCustomer` = {h3_4:Int64})) AS h3), 0) AND NOT ifNull(p.`IDProject` IN (SELECT h4.`IDProject` FROM (SELECT `IDIssue`, `IDProject` FROM `rfs_main`.`Issue` FINAL WHERE `_IsDeleted` = 0 AND (( ( `Severity` = {h4_0:String} AND `State` = {h4_1:String} ) ) AND `Deleted` = {h4_2:UInt8} AND `IDCustomer` = {h4_3:Int64})) AS h4), 0))) AS p) GROUP BY K1, K2 LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": [
+					"Active",
+					"AtRisk"
+				],
+				"p_1": "2024-06-01 00:00:00",
+				"p_2": "2027-01-01 00:00:00",
+				"p_3": 0,
+				"p_4": 2,
+				"h1_0": [
+					101,
+					102,
+					103,
+					1
+				],
+				"h1_1": 0,
+				"h1_2": 2,
+				"h2_0": 101,
+				"h2_1": [
+					"Owner",
+					"Lead"
+				],
+				"h2_2": 1,
+				"h2_3": 0,
+				"h2_4": 2,
+				"q1_0": 101,
+				"h3_0": 101,
+				"h3_1": "2026-10-08 12:00:00",
+				"h3_2": "Done",
+				"h3_3": 0,
+				"h3_4": 2,
+				"h4_0": "Blocker",
+				"h4_1": "Open",
+				"h4_2": 0,
+				"h4_3": 2,
+				"fMaxGroups": 100001
+			},
+			"Types": {
+				"p_0": "Array(String)",
+				"p_1": "DateTime64(3, 'UTC')",
+				"p_2": "DateTime64(3, 'UTC')",
+				"p_3": "UInt8",
+				"p_4": "Int64",
+				"h1_0": "Array(Int64)",
+				"h1_1": "UInt8",
+				"h1_2": "Int64",
+				"h2_0": "Int64",
+				"h2_1": "Array(String)",
+				"h2_2": "UInt8",
+				"h2_3": "UInt8",
+				"h2_4": "Int64",
+				"q1_0": "Int64",
+				"h3_0": "Int64",
+				"h3_1": "DateTime64(3, 'UTC')",
+				"h3_2": "String",
+				"h3_3": "UInt8",
+				"h3_4": "Int64",
+				"h4_0": "String",
+				"h4_1": "String",
+				"h4_2": "UInt8",
+				"h4_3": "Int64",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 100001
+		},
+		"LabTrack/E3A TenantOnly/Discipline/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`FacetV0` AS Key, count() AS Count FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake`, l3.`Discipline` AS `FacetV0` FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake` FROM (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE (ifNull(p.`IDMaterialIntake` IN (SELECT j1.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {j1_0:Array(String)} ) AND `Deleted` = {j1_1:UInt8} AND `IDCustomer` = {j1_2:Int64})) AS j1 WHERE ifNull(j1.`IDLabQueue` IN (SELECT j2.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j2_0:UInt8} AND `IDCustomer` = {j2_1:Int64})) AS j2 WHERE ifNull(j2.`IDLabQueue` IN (SELECT j3.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j3_0:Int64} AND `Active` = {j3_1:UInt8} ) ) AND `Deleted` = {j3_2:UInt8} AND `IDCustomer` = {j3_3:Int64})) AS j3), 0)), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT j4.`IDMaterialIntake`, j4.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j4_0:String} ) AND `Deleted` = {j4_1:UInt8} AND `IDCustomer` = {j4_2:Int64})) AS j4), 0))) AS p ANY LEFT JOIN (SELECT `IDLabFormType`, `Discipline` FROM `rfs_main`.`LabFormType` FINAL WHERE `_IsDeleted` = 0) AS l3 ON l3.`IDLabFormType` = p.`IDLabFormType`) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j3_0": 1,
+				"j3_1": 1,
+				"j3_2": 0,
+				"j3_3": 1,
+				"j2_0": 0,
+				"j2_1": 1,
+				"j1_0": [
+					"Received",
+					"InProgress"
+				],
+				"j1_1": 0,
+				"j1_2": 1,
+				"j4_0": "Complete",
+				"j4_1": 0,
+				"j4_2": 1,
+				"fTopPlusOne": 51,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j3_0": "Int64",
+				"j3_1": "UInt8",
+				"j3_2": "UInt8",
+				"j3_3": "Int64",
+				"j2_0": "UInt8",
+				"j2_1": "Int64",
+				"j1_0": "Array(String)",
+				"j1_1": "UInt8",
+				"j1_2": "Int64",
+				"j4_0": "String",
+				"j4_1": "UInt8",
+				"j4_2": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"LabTrack/E3A TenantOnly/Queue/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`FacetV0` AS Key, count() AS Count FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake`, l2.`IDLabQueue` AS `FacetV0` FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake` FROM (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE (ifNull(p.`IDMaterialIntake` IN (SELECT j1.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {j1_0:Array(String)} ) AND `Deleted` = {j1_1:UInt8} AND `IDCustomer` = {j1_2:Int64})) AS j1 WHERE ifNull(j1.`IDLabQueue` IN (SELECT j2.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j2_0:UInt8} AND `IDCustomer` = {j2_1:Int64})) AS j2 WHERE ifNull(j2.`IDLabQueue` IN (SELECT j3.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j3_0:Int64} AND `Active` = {j3_1:UInt8} ) ) AND `Deleted` = {j3_2:UInt8} AND `IDCustomer` = {j3_3:Int64})) AS j3), 0)), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT j4.`IDMaterialIntake`, j4.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j4_0:String} ) AND `Deleted` = {j4_1:UInt8} AND `IDCustomer` = {j4_2:Int64})) AS j4), 0))) AS p ANY LEFT JOIN (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {l1_0:UInt8} AND `IDCustomer` = {l1_1:Int64})) AS l1 ON l1.`IDMaterialIntake` = p.`IDMaterialIntake` ANY LEFT JOIN (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {l2_0:UInt8} AND `IDCustomer` = {l2_1:Int64})) AS l2 ON l2.`IDLabQueue` = l1.`IDLabQueue`) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j3_0": 1,
+				"j3_1": 1,
+				"j3_2": 0,
+				"j3_3": 1,
+				"j2_0": 0,
+				"j2_1": 1,
+				"j1_0": [
+					"Received",
+					"InProgress"
+				],
+				"j1_1": 0,
+				"j1_2": 1,
+				"j4_0": "Complete",
+				"j4_1": 0,
+				"j4_2": 1,
+				"l1_0": 0,
+				"l1_1": 1,
+				"l2_0": 0,
+				"l2_1": 1,
+				"fTopPlusOne": 51,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j3_0": "Int64",
+				"j3_1": "UInt8",
+				"j3_2": "UInt8",
+				"j3_3": "Int64",
+				"j2_0": "UInt8",
+				"j2_1": "Int64",
+				"j1_0": "Array(String)",
+				"j1_1": "UInt8",
+				"j1_2": "Int64",
+				"j4_0": "String",
+				"j4_1": "UInt8",
+				"j4_2": "Int64",
+				"l1_0": "UInt8",
+				"l1_1": "Int64",
+				"l2_0": "UInt8",
+				"l2_1": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"LabTrack/E3A TenantOnly/Started/0": {
+			"Purpose": "KeyGroups",
+			"SQL": "SELECT Key, count() AS Count FROM (SELECT p.`FacetX0` AS Key FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake`, if(ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT e1.`IDMaterialIntake`, e1.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` != {e1_0:String} ) AND `Deleted` = {e1_1:UInt8} AND `IDCustomer` = {e1_2:Int64} AND `OwnerIDUser` = {e1_3:Int64})) AS e1), 0), 1, 0) AS `FacetX0` FROM (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE (ifNull(p.`IDMaterialIntake` IN (SELECT j1.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {j1_0:Array(String)} ) AND `Deleted` = {j1_1:UInt8} AND `IDCustomer` = {j1_2:Int64})) AS j1 WHERE ifNull(j1.`IDLabQueue` IN (SELECT j2.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j2_0:UInt8} AND `IDCustomer` = {j2_1:Int64})) AS j2 WHERE ifNull(j2.`IDLabQueue` IN (SELECT j3.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j3_0:Int64} AND `Active` = {j3_1:UInt8} ) ) AND `Deleted` = {j3_2:UInt8} AND `IDCustomer` = {j3_3:Int64})) AS j3), 0)), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT j4.`IDMaterialIntake`, j4.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j4_0:String} ) AND `Deleted` = {j4_1:UInt8} AND `IDCustomer` = {j4_2:Int64})) AS j4), 0))) AS p) GROUP BY Key",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j3_0": 1,
+				"j3_1": 1,
+				"j3_2": 0,
+				"j3_3": 1,
+				"j2_0": 0,
+				"j2_1": 1,
+				"j1_0": [
+					"Received",
+					"InProgress"
+				],
+				"j1_1": 0,
+				"j1_2": 1,
+				"j4_0": "Complete",
+				"j4_1": 0,
+				"j4_2": 1,
+				"e1_0": "Complete",
+				"e1_1": 0,
+				"e1_2": 1,
+				"e1_3": 1
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j3_0": "Int64",
+				"j3_1": "UInt8",
+				"j3_2": "UInt8",
+				"j3_3": "Int64",
+				"j2_0": "UInt8",
+				"j2_1": "Int64",
+				"j1_0": "Array(String)",
+				"j1_1": "UInt8",
+				"j1_2": "Int64",
+				"j4_0": "String",
+				"j4_1": "UInt8",
+				"j4_2": "Int64",
+				"e1_0": "String",
+				"e1_1": "UInt8",
+				"e1_2": "Int64",
+				"e1_3": "Int64"
+			},
+			"MaxRows": 2
+		},
+		"LabTrack/E3A TenantOnly/ToDo/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`IDLabFormType` AS Key, count() AS Count FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake` FROM (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE (ifNull(p.`IDMaterialIntake` IN (SELECT j1.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {j1_0:Array(String)} ) AND `Deleted` = {j1_1:UInt8} AND `IDCustomer` = {j1_2:Int64})) AS j1 WHERE ifNull(j1.`IDLabQueue` IN (SELECT j2.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j2_0:UInt8} AND `IDCustomer` = {j2_1:Int64})) AS j2 WHERE ifNull(j2.`IDLabQueue` IN (SELECT j3.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j3_0:Int64} AND `Active` = {j3_1:UInt8} ) ) AND `Deleted` = {j3_2:UInt8} AND `IDCustomer` = {j3_3:Int64})) AS j3), 0)), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT j4.`IDMaterialIntake`, j4.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j4_0:String} ) AND `Deleted` = {j4_1:UInt8} AND `IDCustomer` = {j4_2:Int64})) AS j4), 0))) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j3_0": 1,
+				"j3_1": 1,
+				"j3_2": 0,
+				"j3_3": 1,
+				"j2_0": 0,
+				"j2_1": 1,
+				"j1_0": [
+					"Received",
+					"InProgress"
+				],
+				"j1_1": 0,
+				"j1_2": 1,
+				"j4_0": "Complete",
+				"j4_1": 0,
+				"j4_2": 1,
+				"fTopPlusOne": 51,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j3_0": "Int64",
+				"j3_1": "UInt8",
+				"j3_2": "UInt8",
+				"j3_3": "Int64",
+				"j2_0": "UInt8",
+				"j2_1": "Int64",
+				"j1_0": "Array(String)",
+				"j1_1": "UInt8",
+				"j1_2": "Int64",
+				"j4_0": "String",
+				"j4_1": "UInt8",
+				"j4_2": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"LabTrack/E3A TenantOnly/Week/0": {
+			"Purpose": "DateHistogram",
+			"SQL": "SELECT formatDateTime(B, '%Y-%m-%d 00:00:00') AS Key, Count, formatDateTime(LoV, '%Y-%m-%d %H:%i:%S') AS Lo, formatDateTime(HiV, '%Y-%m-%d %H:%i:%S') AS Hi FROM (SELECT toMonday(p.`FacetV0`) AS B, count() AS Count, min(p.`FacetV0`) AS LoV, max(p.`FacetV0`) AS HiV FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake`, l4.`ReceivedDate` AS `FacetV0` FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake` FROM (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE (ifNull(p.`IDMaterialIntake` IN (SELECT j1.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {j1_0:Array(String)} ) AND `Deleted` = {j1_1:UInt8} AND `IDCustomer` = {j1_2:Int64})) AS j1 WHERE ifNull(j1.`IDLabQueue` IN (SELECT j2.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j2_0:UInt8} AND `IDCustomer` = {j2_1:Int64})) AS j2 WHERE ifNull(j2.`IDLabQueue` IN (SELECT j3.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j3_0:Int64} AND `Active` = {j3_1:UInt8} ) ) AND `Deleted` = {j3_2:UInt8} AND `IDCustomer` = {j3_3:Int64})) AS j3), 0)), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT j4.`IDMaterialIntake`, j4.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j4_0:String} ) AND `Deleted` = {j4_1:UInt8} AND `IDCustomer` = {j4_2:Int64})) AS j4), 0))) AS p ANY LEFT JOIN (SELECT `IDMaterialIntake`, `ReceivedDate` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {l4_0:UInt8} AND `IDCustomer` = {l4_1:Int64})) AS l4 ON l4.`IDMaterialIntake` = p.`IDMaterialIntake`) AS p GROUP BY B) ORDER BY isNull(B), B LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j3_0": 1,
+				"j3_1": 1,
+				"j3_2": 0,
+				"j3_3": 1,
+				"j2_0": 0,
+				"j2_1": 1,
+				"j1_0": [
+					"Received",
+					"InProgress"
+				],
+				"j1_1": 0,
+				"j1_2": 1,
+				"j4_0": "Complete",
+				"j4_1": 0,
+				"j4_2": 1,
+				"l4_0": 0,
+				"l4_1": 1,
+				"fMaxGroups": 402
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j3_0": "Int64",
+				"j3_1": "UInt8",
+				"j3_2": "UInt8",
+				"j3_3": "Int64",
+				"j2_0": "UInt8",
+				"j2_1": "Int64",
+				"j1_0": "Array(String)",
+				"j1_1": "UInt8",
+				"j1_2": "Int64",
+				"j4_0": "String",
+				"j4_1": "UInt8",
+				"j4_2": "Int64",
+				"l4_0": "UInt8",
+				"l4_1": "Int64",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 402
+		},
+		"LabTrack/E3A Inherit/Discipline/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`FacetV0` AS Key, count() AS Count FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake`, l3.`Discipline` AS `FacetV0` FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake` FROM (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE (ifNull(p.`IDMaterialIntake` IN (SELECT j1.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {j1_0:Array(String)} ) AND `Deleted` = {j1_1:UInt8} AND `IDCustomer` = {j1_2:Int64})) AS j1 WHERE ifNull(j1.`IDLabQueue` IN (SELECT j2.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j2_0:UInt8} AND `IDCustomer` = {j2_1:Int64})) AS j2 WHERE ifNull(j2.`IDLabQueue` IN (SELECT j3.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j3_0:Int64} AND `Active` = {j3_1:UInt8} ) ) AND `Deleted` = {j3_2:UInt8} AND `IDCustomer` = {j3_3:Int64})) AS j3), 0)), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT j4.`IDMaterialIntake`, j4.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j4_0:String} ) AND `Deleted` = {j4_1:UInt8} AND `IDCustomer` = {j4_2:Int64} AND `OwnerIDUser` = {j4_3:Int64})) AS j4), 0))) AS p ANY LEFT JOIN (SELECT `IDLabFormType`, `Discipline` FROM `rfs_main`.`LabFormType` FINAL WHERE `_IsDeleted` = 0) AS l3 ON l3.`IDLabFormType` = p.`IDLabFormType`) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j3_0": 1,
+				"j3_1": 1,
+				"j3_2": 0,
+				"j3_3": 1,
+				"j2_0": 0,
+				"j2_1": 1,
+				"j1_0": [
+					"Received",
+					"InProgress"
+				],
+				"j1_1": 0,
+				"j1_2": 1,
+				"j4_0": "Complete",
+				"j4_1": 0,
+				"j4_2": 1,
+				"j4_3": 1,
+				"fTopPlusOne": 51,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j3_0": "Int64",
+				"j3_1": "UInt8",
+				"j3_2": "UInt8",
+				"j3_3": "Int64",
+				"j2_0": "UInt8",
+				"j2_1": "Int64",
+				"j1_0": "Array(String)",
+				"j1_1": "UInt8",
+				"j1_2": "Int64",
+				"j4_0": "String",
+				"j4_1": "UInt8",
+				"j4_2": "Int64",
+				"j4_3": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"LabTrack/E3A Inherit/Queue/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`FacetV0` AS Key, count() AS Count FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake`, l2.`IDLabQueue` AS `FacetV0` FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake` FROM (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE (ifNull(p.`IDMaterialIntake` IN (SELECT j1.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {j1_0:Array(String)} ) AND `Deleted` = {j1_1:UInt8} AND `IDCustomer` = {j1_2:Int64})) AS j1 WHERE ifNull(j1.`IDLabQueue` IN (SELECT j2.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j2_0:UInt8} AND `IDCustomer` = {j2_1:Int64})) AS j2 WHERE ifNull(j2.`IDLabQueue` IN (SELECT j3.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j3_0:Int64} AND `Active` = {j3_1:UInt8} ) ) AND `Deleted` = {j3_2:UInt8} AND `IDCustomer` = {j3_3:Int64})) AS j3), 0)), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT j4.`IDMaterialIntake`, j4.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j4_0:String} ) AND `Deleted` = {j4_1:UInt8} AND `IDCustomer` = {j4_2:Int64} AND `OwnerIDUser` = {j4_3:Int64})) AS j4), 0))) AS p ANY LEFT JOIN (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {l1_0:UInt8} AND `IDCustomer` = {l1_1:Int64})) AS l1 ON l1.`IDMaterialIntake` = p.`IDMaterialIntake` ANY LEFT JOIN (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {l2_0:UInt8} AND `IDCustomer` = {l2_1:Int64})) AS l2 ON l2.`IDLabQueue` = l1.`IDLabQueue`) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j3_0": 1,
+				"j3_1": 1,
+				"j3_2": 0,
+				"j3_3": 1,
+				"j2_0": 0,
+				"j2_1": 1,
+				"j1_0": [
+					"Received",
+					"InProgress"
+				],
+				"j1_1": 0,
+				"j1_2": 1,
+				"j4_0": "Complete",
+				"j4_1": 0,
+				"j4_2": 1,
+				"j4_3": 1,
+				"l1_0": 0,
+				"l1_1": 1,
+				"l2_0": 0,
+				"l2_1": 1,
+				"fTopPlusOne": 51,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j3_0": "Int64",
+				"j3_1": "UInt8",
+				"j3_2": "UInt8",
+				"j3_3": "Int64",
+				"j2_0": "UInt8",
+				"j2_1": "Int64",
+				"j1_0": "Array(String)",
+				"j1_1": "UInt8",
+				"j1_2": "Int64",
+				"j4_0": "String",
+				"j4_1": "UInt8",
+				"j4_2": "Int64",
+				"j4_3": "Int64",
+				"l1_0": "UInt8",
+				"l1_1": "Int64",
+				"l2_0": "UInt8",
+				"l2_1": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"LabTrack/E3A Inherit/Started/0": {
+			"Purpose": "KeyGroups",
+			"SQL": "SELECT Key, count() AS Count FROM (SELECT p.`FacetX0` AS Key FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake`, if(ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT e1.`IDMaterialIntake`, e1.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` != {e1_0:String} ) AND `Deleted` = {e1_1:UInt8} AND `IDCustomer` = {e1_2:Int64} AND `OwnerIDUser` = {e1_3:Int64})) AS e1), 0), 1, 0) AS `FacetX0` FROM (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE (ifNull(p.`IDMaterialIntake` IN (SELECT j1.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {j1_0:Array(String)} ) AND `Deleted` = {j1_1:UInt8} AND `IDCustomer` = {j1_2:Int64})) AS j1 WHERE ifNull(j1.`IDLabQueue` IN (SELECT j2.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j2_0:UInt8} AND `IDCustomer` = {j2_1:Int64})) AS j2 WHERE ifNull(j2.`IDLabQueue` IN (SELECT j3.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j3_0:Int64} AND `Active` = {j3_1:UInt8} ) ) AND `Deleted` = {j3_2:UInt8} AND `IDCustomer` = {j3_3:Int64})) AS j3), 0)), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT j4.`IDMaterialIntake`, j4.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j4_0:String} ) AND `Deleted` = {j4_1:UInt8} AND `IDCustomer` = {j4_2:Int64} AND `OwnerIDUser` = {j4_3:Int64})) AS j4), 0))) AS p) GROUP BY Key",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j3_0": 1,
+				"j3_1": 1,
+				"j3_2": 0,
+				"j3_3": 1,
+				"j2_0": 0,
+				"j2_1": 1,
+				"j1_0": [
+					"Received",
+					"InProgress"
+				],
+				"j1_1": 0,
+				"j1_2": 1,
+				"j4_0": "Complete",
+				"j4_1": 0,
+				"j4_2": 1,
+				"j4_3": 1,
+				"e1_0": "Complete",
+				"e1_1": 0,
+				"e1_2": 1,
+				"e1_3": 1
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j3_0": "Int64",
+				"j3_1": "UInt8",
+				"j3_2": "UInt8",
+				"j3_3": "Int64",
+				"j2_0": "UInt8",
+				"j2_1": "Int64",
+				"j1_0": "Array(String)",
+				"j1_1": "UInt8",
+				"j1_2": "Int64",
+				"j4_0": "String",
+				"j4_1": "UInt8",
+				"j4_2": "Int64",
+				"j4_3": "Int64",
+				"e1_0": "String",
+				"e1_1": "UInt8",
+				"e1_2": "Int64",
+				"e1_3": "Int64"
+			},
+			"MaxRows": 2
+		},
+		"LabTrack/E3A Inherit/ToDo/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`IDLabFormType` AS Key, count() AS Count FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake` FROM (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE (ifNull(p.`IDMaterialIntake` IN (SELECT j1.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {j1_0:Array(String)} ) AND `Deleted` = {j1_1:UInt8} AND `IDCustomer` = {j1_2:Int64})) AS j1 WHERE ifNull(j1.`IDLabQueue` IN (SELECT j2.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j2_0:UInt8} AND `IDCustomer` = {j2_1:Int64})) AS j2 WHERE ifNull(j2.`IDLabQueue` IN (SELECT j3.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j3_0:Int64} AND `Active` = {j3_1:UInt8} ) ) AND `Deleted` = {j3_2:UInt8} AND `IDCustomer` = {j3_3:Int64})) AS j3), 0)), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT j4.`IDMaterialIntake`, j4.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j4_0:String} ) AND `Deleted` = {j4_1:UInt8} AND `IDCustomer` = {j4_2:Int64} AND `OwnerIDUser` = {j4_3:Int64})) AS j4), 0))) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j3_0": 1,
+				"j3_1": 1,
+				"j3_2": 0,
+				"j3_3": 1,
+				"j2_0": 0,
+				"j2_1": 1,
+				"j1_0": [
+					"Received",
+					"InProgress"
+				],
+				"j1_1": 0,
+				"j1_2": 1,
+				"j4_0": "Complete",
+				"j4_1": 0,
+				"j4_2": 1,
+				"j4_3": 1,
+				"fTopPlusOne": 51,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j3_0": "Int64",
+				"j3_1": "UInt8",
+				"j3_2": "UInt8",
+				"j3_3": "Int64",
+				"j2_0": "UInt8",
+				"j2_1": "Int64",
+				"j1_0": "Array(String)",
+				"j1_1": "UInt8",
+				"j1_2": "Int64",
+				"j4_0": "String",
+				"j4_1": "UInt8",
+				"j4_2": "Int64",
+				"j4_3": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"LabTrack/E3A Inherit/Week/0": {
+			"Purpose": "DateHistogram",
+			"SQL": "SELECT formatDateTime(B, '%Y-%m-%d 00:00:00') AS Key, Count, formatDateTime(LoV, '%Y-%m-%d %H:%i:%S') AS Lo, formatDateTime(HiV, '%Y-%m-%d %H:%i:%S') AS Hi FROM (SELECT toMonday(p.`FacetV0`) AS B, count() AS Count, min(p.`FacetV0`) AS LoV, max(p.`FacetV0`) AS HiV FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake`, l4.`ReceivedDate` AS `FacetV0` FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake` FROM (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE (ifNull(p.`IDMaterialIntake` IN (SELECT j1.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {j1_0:Array(String)} ) AND `Deleted` = {j1_1:UInt8} AND `IDCustomer` = {j1_2:Int64})) AS j1 WHERE ifNull(j1.`IDLabQueue` IN (SELECT j2.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j2_0:UInt8} AND `IDCustomer` = {j2_1:Int64})) AS j2 WHERE ifNull(j2.`IDLabQueue` IN (SELECT j3.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j3_0:Int64} AND `Active` = {j3_1:UInt8} ) ) AND `Deleted` = {j3_2:UInt8} AND `IDCustomer` = {j3_3:Int64})) AS j3), 0)), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT j4.`IDMaterialIntake`, j4.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j4_0:String} ) AND `Deleted` = {j4_1:UInt8} AND `IDCustomer` = {j4_2:Int64} AND `OwnerIDUser` = {j4_3:Int64})) AS j4), 0))) AS p ANY LEFT JOIN (SELECT `IDMaterialIntake`, `ReceivedDate` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {l4_0:UInt8} AND `IDCustomer` = {l4_1:Int64})) AS l4 ON l4.`IDMaterialIntake` = p.`IDMaterialIntake`) AS p GROUP BY B) ORDER BY isNull(B), B LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j3_0": 1,
+				"j3_1": 1,
+				"j3_2": 0,
+				"j3_3": 1,
+				"j2_0": 0,
+				"j2_1": 1,
+				"j1_0": [
+					"Received",
+					"InProgress"
+				],
+				"j1_1": 0,
+				"j1_2": 1,
+				"j4_0": "Complete",
+				"j4_1": 0,
+				"j4_2": 1,
+				"j4_3": 1,
+				"l4_0": 0,
+				"l4_1": 1,
+				"fMaxGroups": 402
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j3_0": "Int64",
+				"j3_1": "UInt8",
+				"j3_2": "UInt8",
+				"j3_3": "Int64",
+				"j2_0": "UInt8",
+				"j2_1": "Int64",
+				"j1_0": "Array(String)",
+				"j1_1": "UInt8",
+				"j1_2": "Int64",
+				"j4_0": "String",
+				"j4_1": "UInt8",
+				"j4_2": "Int64",
+				"j4_3": "Int64",
+				"l4_0": "UInt8",
+				"l4_1": "Int64",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 402
+		},
+		"LabTrack/E3A extras/AnyPath/0": {
+			"Purpose": "Count",
+			"SQL": "SELECT count() AS Total FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake` FROM (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE (ifNull(p.`IDMaterialIntake` IN (SELECT j11.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `IDLabQueue` = {j11_0:Int64} ) AND `Deleted` = {j11_1:UInt8} AND `IDCustomer` = {j11_2:Int64})) AS j11), 0) OR ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT j12.`IDMaterialIntake`, j12.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j12_0:String} ) AND `Deleted` = {j12_1:UInt8} AND `IDCustomer` = {j12_2:Int64})) AS j12), 0))) AS p",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j11_0": 1,
+				"j11_1": 0,
+				"j11_2": 1,
+				"j12_0": "Pending",
+				"j12_1": 0,
+				"j12_2": 1
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j11_0": "Int64",
+				"j11_1": "UInt8",
+				"j11_2": "Int64",
+				"j12_0": "String",
+				"j12_1": "UInt8",
+				"j12_2": "Int64"
+			},
+			"MaxRows": 1
+		},
+		"LabTrack/E3A extras/FormByQueue/0": {
+			"Purpose": "Pivot",
+			"SQL": "SELECT K1, K2, count() AS Count FROM (SELECT p.`IDLabFormType` AS K1, p.`FacetV1` AS K2 FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake`, l10.`IDLabQueue` AS `FacetV1` FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake` FROM (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE (ifNull(p.`IDMaterialIntake` IN (SELECT j1.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {j1_0:Array(String)} ) AND `Deleted` = {j1_1:UInt8} AND `IDCustomer` = {j1_2:Int64})) AS j1 WHERE ifNull(j1.`IDLabQueue` IN (SELECT j2.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j2_0:UInt8} AND `IDCustomer` = {j2_1:Int64})) AS j2 WHERE ifNull(j2.`IDLabQueue` IN (SELECT j3.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j3_0:Int64} AND `Active` = {j3_1:UInt8} ) ) AND `Deleted` = {j3_2:UInt8} AND `IDCustomer` = {j3_3:Int64})) AS j3), 0)), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT j4.`IDMaterialIntake`, j4.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j4_0:String} ) AND `Deleted` = {j4_1:UInt8} AND `IDCustomer` = {j4_2:Int64})) AS j4), 0))) AS p ANY LEFT JOIN (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {l9_0:UInt8} AND `IDCustomer` = {l9_1:Int64})) AS l9 ON l9.`IDMaterialIntake` = p.`IDMaterialIntake` ANY LEFT JOIN (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {l10_0:UInt8} AND `IDCustomer` = {l10_1:Int64})) AS l10 ON l10.`IDLabQueue` = l9.`IDLabQueue`) AS p) GROUP BY K1, K2 LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j3_0": 1,
+				"j3_1": 1,
+				"j3_2": 0,
+				"j3_3": 1,
+				"j2_0": 0,
+				"j2_1": 1,
+				"j1_0": [
+					"Received",
+					"InProgress"
+				],
+				"j1_1": 0,
+				"j1_2": 1,
+				"j4_0": "Complete",
+				"j4_1": 0,
+				"j4_2": 1,
+				"l9_0": 0,
+				"l9_1": 1,
+				"l10_0": 0,
+				"l10_1": 1,
+				"fMaxGroups": 100001
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j3_0": "Int64",
+				"j3_1": "UInt8",
+				"j3_2": "UInt8",
+				"j3_3": "Int64",
+				"j2_0": "UInt8",
+				"j2_1": "Int64",
+				"j1_0": "Array(String)",
+				"j1_1": "UInt8",
+				"j1_2": "Int64",
+				"j4_0": "String",
+				"j4_1": "UInt8",
+				"j4_2": "Int64",
+				"l9_0": "UInt8",
+				"l9_1": "Int64",
+				"l10_0": "UInt8",
+				"l10_1": "Int64",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 100001
+		},
+		"LabTrack/E3A extras/QueueEdges/0": {
+			"Purpose": "NumericBounds",
+			"SQL": "SELECT count() AS Rows, count(p.`FacetV0`) AS NonNull, min(p.`FacetV0`) AS Lo, max(p.`FacetV0`) AS Hi FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake`, l8.`IDLabQueue` AS `FacetV0` FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake` FROM (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE (ifNull(p.`IDMaterialIntake` IN (SELECT j1.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {j1_0:Array(String)} ) AND `Deleted` = {j1_1:UInt8} AND `IDCustomer` = {j1_2:Int64})) AS j1 WHERE ifNull(j1.`IDLabQueue` IN (SELECT j2.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j2_0:UInt8} AND `IDCustomer` = {j2_1:Int64})) AS j2 WHERE ifNull(j2.`IDLabQueue` IN (SELECT j3.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j3_0:Int64} AND `Active` = {j3_1:UInt8} ) ) AND `Deleted` = {j3_2:UInt8} AND `IDCustomer` = {j3_3:Int64})) AS j3), 0)), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT j4.`IDMaterialIntake`, j4.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j4_0:String} ) AND `Deleted` = {j4_1:UInt8} AND `IDCustomer` = {j4_2:Int64})) AS j4), 0))) AS p ANY LEFT JOIN (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {l7_0:UInt8} AND `IDCustomer` = {l7_1:Int64})) AS l7 ON l7.`IDMaterialIntake` = p.`IDMaterialIntake` ANY LEFT JOIN (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {l8_0:UInt8} AND `IDCustomer` = {l8_1:Int64})) AS l8 ON l8.`IDLabQueue` = l7.`IDLabQueue`) AS p",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j3_0": 1,
+				"j3_1": 1,
+				"j3_2": 0,
+				"j3_3": 1,
+				"j2_0": 0,
+				"j2_1": 1,
+				"j1_0": [
+					"Received",
+					"InProgress"
+				],
+				"j1_1": 0,
+				"j1_2": 1,
+				"j4_0": "Complete",
+				"j4_1": 0,
+				"j4_2": 1,
+				"l7_0": 0,
+				"l7_1": 1,
+				"l8_0": 0,
+				"l8_1": 1
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j3_0": "Int64",
+				"j3_1": "UInt8",
+				"j3_2": "UInt8",
+				"j3_3": "Int64",
+				"j2_0": "UInt8",
+				"j2_1": "Int64",
+				"j1_0": "Array(String)",
+				"j1_1": "UInt8",
+				"j1_2": "Int64",
+				"j4_0": "String",
+				"j4_1": "UInt8",
+				"j4_2": "Int64",
+				"l7_0": "UInt8",
+				"l7_1": "Int64",
+				"l8_0": "UInt8",
+				"l8_1": "Int64"
+			},
+			"MaxRows": 1
+		},
+		"LabTrack/E3A extras/QueueRanges/0": {
+			"Purpose": "Ranges",
+			"SQL": "SELECT Key, count() AS Count FROM (SELECT multiIf(isNull(p.`FacetV0`), -1, p.`FacetV0` < toFloat64({fR0To:String}), 0, p.`FacetV0` >= toFloat64({fR1From:String}) AND p.`FacetV0` < toFloat64({fR1To:String}), 1, p.`FacetV0` >= toFloat64({fR2From:String}), 2, -2) AS Key FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake`, l6.`IDLabQueue` AS `FacetV0` FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake` FROM (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE (ifNull(p.`IDMaterialIntake` IN (SELECT j1.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {j1_0:Array(String)} ) AND `Deleted` = {j1_1:UInt8} AND `IDCustomer` = {j1_2:Int64})) AS j1 WHERE ifNull(j1.`IDLabQueue` IN (SELECT j2.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j2_0:UInt8} AND `IDCustomer` = {j2_1:Int64})) AS j2 WHERE ifNull(j2.`IDLabQueue` IN (SELECT j3.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j3_0:Int64} AND `Active` = {j3_1:UInt8} ) ) AND `Deleted` = {j3_2:UInt8} AND `IDCustomer` = {j3_3:Int64})) AS j3), 0)), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT j4.`IDMaterialIntake`, j4.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j4_0:String} ) AND `Deleted` = {j4_1:UInt8} AND `IDCustomer` = {j4_2:Int64})) AS j4), 0))) AS p ANY LEFT JOIN (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {l5_0:UInt8} AND `IDCustomer` = {l5_1:Int64})) AS l5 ON l5.`IDMaterialIntake` = p.`IDMaterialIntake` ANY LEFT JOIN (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {l6_0:UInt8} AND `IDCustomer` = {l6_1:Int64})) AS l6 ON l6.`IDLabQueue` = l5.`IDLabQueue`) AS p) GROUP BY Key",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j3_0": 1,
+				"j3_1": 1,
+				"j3_2": 0,
+				"j3_3": 1,
+				"j2_0": 0,
+				"j2_1": 1,
+				"j1_0": [
+					"Received",
+					"InProgress"
+				],
+				"j1_1": 0,
+				"j1_2": 1,
+				"j4_0": "Complete",
+				"j4_1": 0,
+				"j4_2": 1,
+				"l5_0": 0,
+				"l5_1": 1,
+				"l6_0": 0,
+				"l6_1": 1,
+				"fR0To": "2",
+				"fR1From": "2",
+				"fR1To": "4",
+				"fR2From": "4"
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j3_0": "Int64",
+				"j3_1": "UInt8",
+				"j3_2": "UInt8",
+				"j3_3": "Int64",
+				"j2_0": "UInt8",
+				"j2_1": "Int64",
+				"j1_0": "Array(String)",
+				"j1_1": "UInt8",
+				"j1_2": "Int64",
+				"j4_0": "String",
+				"j4_1": "UInt8",
+				"j4_2": "Int64",
+				"l5_0": "UInt8",
+				"l5_1": "Int64",
+				"l6_0": "UInt8",
+				"l6_1": "Int64",
+				"fR0To": "String",
+				"fR1From": "String",
+				"fR1To": "String",
+				"fR2From": "String"
+			},
+			"MaxRows": 5
+		},
+		"LabTrack/E3B/Queue/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`FacetT0` AS Key, count() AS Count FROM (SELECT DISTINCT p.`IDMaterialIntake` AS `TK0`, u1.`IDLabFormType` AS `TK1`, p.`IDLabQueue` AS `FacetT0` FROM (SELECT `IDMaterialIntake`, `IDLabQueue`, `IDMaterialType`, `ReceivedDate` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} ) AND `Deleted` = {p_1:UInt8} AND `IDCustomer` = {p_2:Int64})) AS p INNER JOIN (SELECT `IDMaterialTypeFormRequirement`, `IDLabFormType`, `IDMaterialType` FROM `rfs_main`.`MaterialTypeFormRequirement` FINAL WHERE `_IsDeleted` = 0 AND (( `Required` = {u1_0:UInt8} ) AND `Deleted` = {u1_1:UInt8} AND `IDCustomer` = {u1_2:Int64})) AS u1 ON p.`IDMaterialType` = u1.`IDMaterialType` WHERE (ifNull(p.`IDLabQueue` IN (SELECT j5.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j5_0:UInt8} AND `IDCustomer` = {j5_1:Int64})) AS j5 WHERE ifNull(j5.`IDLabQueue` IN (SELECT j6.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j6_0:Int64} AND `Active` = {j6_1:UInt8} ) ) AND `Deleted` = {j6_2:UInt8} AND `IDCustomer` = {j6_3:Int64})) AS j6), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, u1.`IDLabFormType`) IN (SELECT j7.`IDMaterialIntake`, j7.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j7_0:String} ) AND `Deleted` = {j7_1:UInt8} AND `IDCustomer` = {j7_2:Int64})) AS j7), 0))) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"j6_0": 1,
+				"j6_1": 1,
+				"j6_2": 0,
+				"j6_3": 1,
+				"j5_0": 0,
+				"j5_1": 1,
+				"j7_0": "Complete",
+				"j7_1": 0,
+				"j7_2": 1,
+				"p_0": [
+					"Received",
+					"InProgress"
+				],
+				"p_1": 0,
+				"p_2": 1,
+				"u1_0": 1,
+				"u1_1": 0,
+				"u1_2": 1,
+				"fTopPlusOne": 51,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"j6_0": "Int64",
+				"j6_1": "UInt8",
+				"j6_2": "UInt8",
+				"j6_3": "Int64",
+				"j5_0": "UInt8",
+				"j5_1": "Int64",
+				"j7_0": "String",
+				"j7_1": "UInt8",
+				"j7_2": "Int64",
+				"p_0": "Array(String)",
+				"p_1": "UInt8",
+				"p_2": "Int64",
+				"u1_0": "UInt8",
+				"u1_1": "UInt8",
+				"u1_2": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"LabTrack/E3B/ToDo/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`FacetT0` AS Key, count() AS Count FROM (SELECT DISTINCT p.`IDMaterialIntake` AS `TK0`, u1.`IDLabFormType` AS `TK1`, u1.`IDLabFormType` AS `FacetT0` FROM (SELECT `IDMaterialIntake`, `IDLabQueue`, `IDMaterialType`, `ReceivedDate` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} ) AND `Deleted` = {p_1:UInt8} AND `IDCustomer` = {p_2:Int64})) AS p INNER JOIN (SELECT `IDMaterialTypeFormRequirement`, `IDLabFormType`, `IDMaterialType` FROM `rfs_main`.`MaterialTypeFormRequirement` FINAL WHERE `_IsDeleted` = 0 AND (( `Required` = {u1_0:UInt8} ) AND `Deleted` = {u1_1:UInt8} AND `IDCustomer` = {u1_2:Int64})) AS u1 ON p.`IDMaterialType` = u1.`IDMaterialType` WHERE (ifNull(p.`IDLabQueue` IN (SELECT j5.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j5_0:UInt8} AND `IDCustomer` = {j5_1:Int64})) AS j5 WHERE ifNull(j5.`IDLabQueue` IN (SELECT j6.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j6_0:Int64} AND `Active` = {j6_1:UInt8} ) ) AND `Deleted` = {j6_2:UInt8} AND `IDCustomer` = {j6_3:Int64})) AS j6), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, u1.`IDLabFormType`) IN (SELECT j7.`IDMaterialIntake`, j7.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j7_0:String} ) AND `Deleted` = {j7_1:UInt8} AND `IDCustomer` = {j7_2:Int64})) AS j7), 0))) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"j6_0": 1,
+				"j6_1": 1,
+				"j6_2": 0,
+				"j6_3": 1,
+				"j5_0": 0,
+				"j5_1": 1,
+				"j7_0": "Complete",
+				"j7_1": 0,
+				"j7_2": 1,
+				"p_0": [
+					"Received",
+					"InProgress"
+				],
+				"p_1": 0,
+				"p_2": 1,
+				"u1_0": 1,
+				"u1_1": 0,
+				"u1_2": 1,
+				"fTopPlusOne": 51,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"j6_0": "Int64",
+				"j6_1": "UInt8",
+				"j6_2": "UInt8",
+				"j6_3": "Int64",
+				"j5_0": "UInt8",
+				"j5_1": "Int64",
+				"j7_0": "String",
+				"j7_1": "UInt8",
+				"j7_2": "Int64",
+				"p_0": "Array(String)",
+				"p_1": "UInt8",
+				"p_2": "Int64",
+				"u1_0": "UInt8",
+				"u1_1": "UInt8",
+				"u1_2": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"LabTrack/E3B/Total/0": {
+			"Purpose": "Count",
+			"SQL": "SELECT count() AS Total FROM (SELECT DISTINCT p.`IDMaterialIntake` AS `TK0`, u1.`IDLabFormType` AS `TK1` FROM (SELECT `IDMaterialIntake`, `IDLabQueue`, `IDMaterialType`, `ReceivedDate` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} ) AND `Deleted` = {p_1:UInt8} AND `IDCustomer` = {p_2:Int64})) AS p INNER JOIN (SELECT `IDMaterialTypeFormRequirement`, `IDLabFormType`, `IDMaterialType` FROM `rfs_main`.`MaterialTypeFormRequirement` FINAL WHERE `_IsDeleted` = 0 AND (( `Required` = {u1_0:UInt8} ) AND `Deleted` = {u1_1:UInt8} AND `IDCustomer` = {u1_2:Int64})) AS u1 ON p.`IDMaterialType` = u1.`IDMaterialType` WHERE (ifNull(p.`IDLabQueue` IN (SELECT j5.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j5_0:UInt8} AND `IDCustomer` = {j5_1:Int64})) AS j5 WHERE ifNull(j5.`IDLabQueue` IN (SELECT j6.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j6_0:Int64} AND `Active` = {j6_1:UInt8} ) ) AND `Deleted` = {j6_2:UInt8} AND `IDCustomer` = {j6_3:Int64})) AS j6), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, u1.`IDLabFormType`) IN (SELECT j7.`IDMaterialIntake`, j7.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j7_0:String} ) AND `Deleted` = {j7_1:UInt8} AND `IDCustomer` = {j7_2:Int64})) AS j7), 0))) AS p",
+			"Params": {
+				"j6_0": 1,
+				"j6_1": 1,
+				"j6_2": 0,
+				"j6_3": 1,
+				"j5_0": 0,
+				"j5_1": 1,
+				"j7_0": "Complete",
+				"j7_1": 0,
+				"j7_2": 1,
+				"p_0": [
+					"Received",
+					"InProgress"
+				],
+				"p_1": 0,
+				"p_2": 1,
+				"u1_0": 1,
+				"u1_1": 0,
+				"u1_2": 1
+			},
+			"Types": {
+				"j6_0": "Int64",
+				"j6_1": "UInt8",
+				"j6_2": "UInt8",
+				"j6_3": "Int64",
+				"j5_0": "UInt8",
+				"j5_1": "Int64",
+				"j7_0": "String",
+				"j7_1": "UInt8",
+				"j7_2": "Int64",
+				"p_0": "Array(String)",
+				"p_1": "UInt8",
+				"p_2": "Int64",
+				"u1_0": "UInt8",
+				"u1_1": "UInt8",
+				"u1_2": "Int64"
+			},
+			"MaxRows": 1
+		},
+		"LabTrack/E3B/Week/0": {
+			"Purpose": "DateHistogram",
+			"SQL": "SELECT formatDateTime(B, '%Y-%m-%d 00:00:00') AS Key, Count, formatDateTime(LoV, '%Y-%m-%d %H:%i:%S') AS Lo, formatDateTime(HiV, '%Y-%m-%d %H:%i:%S') AS Hi FROM (SELECT toMonday(p.`FacetT0`) AS B, count() AS Count, min(p.`FacetT0`) AS LoV, max(p.`FacetT0`) AS HiV FROM (SELECT DISTINCT p.`IDMaterialIntake` AS `TK0`, u1.`IDLabFormType` AS `TK1`, p.`ReceivedDate` AS `FacetT0` FROM (SELECT `IDMaterialIntake`, `IDLabQueue`, `IDMaterialType`, `ReceivedDate` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {p_0:Array(String)} ) AND `Deleted` = {p_1:UInt8} AND `IDCustomer` = {p_2:Int64})) AS p INNER JOIN (SELECT `IDMaterialTypeFormRequirement`, `IDLabFormType`, `IDMaterialType` FROM `rfs_main`.`MaterialTypeFormRequirement` FINAL WHERE `_IsDeleted` = 0 AND (( `Required` = {u1_0:UInt8} ) AND `Deleted` = {u1_1:UInt8} AND `IDCustomer` = {u1_2:Int64})) AS u1 ON p.`IDMaterialType` = u1.`IDMaterialType` WHERE (ifNull(p.`IDLabQueue` IN (SELECT j5.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j5_0:UInt8} AND `IDCustomer` = {j5_1:Int64})) AS j5 WHERE ifNull(j5.`IDLabQueue` IN (SELECT j6.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j6_0:Int64} AND `Active` = {j6_1:UInt8} ) ) AND `Deleted` = {j6_2:UInt8} AND `IDCustomer` = {j6_3:Int64})) AS j6), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, u1.`IDLabFormType`) IN (SELECT j7.`IDMaterialIntake`, j7.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j7_0:String} ) AND `Deleted` = {j7_1:UInt8} AND `IDCustomer` = {j7_2:Int64})) AS j7), 0))) AS p GROUP BY B) ORDER BY isNull(B), B LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"j6_0": 1,
+				"j6_1": 1,
+				"j6_2": 0,
+				"j6_3": 1,
+				"j5_0": 0,
+				"j5_1": 1,
+				"j7_0": "Complete",
+				"j7_1": 0,
+				"j7_2": 1,
+				"p_0": [
+					"Received",
+					"InProgress"
+				],
+				"p_1": 0,
+				"p_2": 1,
+				"u1_0": 1,
+				"u1_1": 0,
+				"u1_2": 1,
+				"fMaxGroups": 402
+			},
+			"Types": {
+				"j6_0": "Int64",
+				"j6_1": "UInt8",
+				"j6_2": "UInt8",
+				"j6_3": "Int64",
+				"j5_0": "UInt8",
+				"j5_1": "Int64",
+				"j7_0": "String",
+				"j7_1": "UInt8",
+				"j7_2": "Int64",
+				"p_0": "Array(String)",
+				"p_1": "UInt8",
+				"p_2": "Int64",
+				"u1_0": "UInt8",
+				"u1_1": "UInt8",
+				"u1_2": "Int64",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 402
+		},
+		"LabTrack/Lab coverage/ByRequiredChemBio/0": {
+			"Purpose": "MultiTerms",
+			"SQL": "SELECT Key, Count, FacetDistinct FROM (SELECT Key, Count, count() OVER () AS FacetDistinct, rank() OVER (ORDER BY Count DESC) AS FacetRank, row_number() OVER (ORDER BY Count DESC, Key ASC) AS FacetRow FROM (SELECT m2.`IDLabFormType` AS Key, uniqExact(p.`IDMaterialIntake`) AS Count FROM (SELECT `IDMaterialIntake` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p INNER JOIN (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {m1_0:UInt8} AND `IDCustomer` = {m1_1:Int64})) AS m1 ON m1.`IDMaterialIntake` = p.`IDMaterialIntake` INNER JOIN (SELECT `IDLabFormType`, `Discipline` FROM `rfs_main`.`LabFormType` FINAL WHERE `_IsDeleted` = 0) AS m2 ON m2.`IDLabFormType` = m1.`IDLabFormType` WHERE isNotNull(m2.`IDLabFormType`) AND (( m2.`Discipline` = {q1_0:String} OR m2.`Discipline` = {q1_1:String} )) GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"m1_0": 0,
+				"m1_1": 1,
+				"q1_0": "Chemistry",
+				"q1_1": "Biology",
+				"fTopPlusOne": 26,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"m1_0": "UInt8",
+				"m1_1": "Int64",
+				"q1_0": "String",
+				"q1_1": "String",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"LabTrack/Lab coverage/ByRequiredChemBio/1": {
+			"Purpose": "Count",
+			"SQL": "SELECT count() AS Total FROM (SELECT `IDMaterialIntake` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64"
+			},
+			"MaxRows": 1
+		},
+		"LabTrack/Lab coverage/ByRequiredChemBio/2": {
+			"Purpose": "MultiCovered",
+			"SQL": "SELECT uniqExact(p.`IDMaterialIntake`) AS Covered FROM (SELECT `IDMaterialIntake` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p INNER JOIN (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {m1_0:UInt8} AND `IDCustomer` = {m1_1:Int64})) AS m1 ON m1.`IDMaterialIntake` = p.`IDMaterialIntake` INNER JOIN (SELECT `IDLabFormType`, `Discipline` FROM `rfs_main`.`LabFormType` FINAL WHERE `_IsDeleted` = 0) AS m2 ON m2.`IDLabFormType` = m1.`IDLabFormType` WHERE isNotNull(m2.`IDLabFormType`) AND (( m2.`Discipline` = {q1_0:String} OR m2.`Discipline` = {q1_1:String} ))",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"m1_0": 0,
+				"m1_1": 1,
+				"q1_0": "Chemistry",
+				"q1_1": "Biology"
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"m1_0": "UInt8",
+				"m1_1": "Int64",
+				"q1_0": "String",
+				"q1_1": "String"
+			},
+			"MaxRows": 1
+		},
+		"LabTrack/Lab coverage/ByRequiredForm/0": {
+			"Purpose": "MultiTerms",
+			"SQL": "SELECT Key, Count, FacetDistinct FROM (SELECT Key, Count, count() OVER () AS FacetDistinct, rank() OVER (ORDER BY Count DESC) AS FacetRank, row_number() OVER (ORDER BY Count DESC, Key ASC) AS FacetRow FROM (SELECT m2.`IDLabFormType` AS Key, uniqExact(p.`IDMaterialIntake`) AS Count FROM (SELECT `IDMaterialIntake` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p INNER JOIN (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {m1_0:UInt8} AND `IDCustomer` = {m1_1:Int64})) AS m1 ON m1.`IDMaterialIntake` = p.`IDMaterialIntake` INNER JOIN (SELECT `IDLabFormType`, `Discipline` FROM `rfs_main`.`LabFormType` FINAL WHERE `_IsDeleted` = 0) AS m2 ON m2.`IDLabFormType` = m1.`IDLabFormType` WHERE isNotNull(m2.`IDLabFormType`) GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"m1_0": 0,
+				"m1_1": 1,
+				"fTopPlusOne": 26,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"m1_0": "UInt8",
+				"m1_1": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"LabTrack/Lab coverage/ByRequiredForm/1": {
+			"Purpose": "Count",
+			"SQL": "SELECT count() AS Total FROM (SELECT `IDMaterialIntake` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64"
+			},
+			"MaxRows": 1
+		},
+		"LabTrack/Lab coverage/ByRequiredForm/2": {
+			"Purpose": "MultiCovered",
+			"SQL": "SELECT uniqExact(p.`IDMaterialIntake`) AS Covered FROM (SELECT `IDMaterialIntake` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p INNER JOIN (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {m1_0:UInt8} AND `IDCustomer` = {m1_1:Int64})) AS m1 ON m1.`IDMaterialIntake` = p.`IDMaterialIntake` INNER JOIN (SELECT `IDLabFormType`, `Discipline` FROM `rfs_main`.`LabFormType` FINAL WHERE `_IsDeleted` = 0) AS m2 ON m2.`IDLabFormType` = m1.`IDLabFormType` WHERE isNotNull(m2.`IDLabFormType`)",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"m1_0": 0,
+				"m1_1": 1
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"m1_0": "UInt8",
+				"m1_1": "Int64"
+			},
+			"MaxRows": 1
+		},
+		"LabTrack/Lab coverage/InMyQueuesByStatus/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`Status` AS Key, count() AS Count FROM (SELECT p.`IDMaterialIntake` AS `IDMaterialIntake`, p.`IDLabQueue` AS `IDLabQueue`, p.`Status` AS `Status` FROM (SELECT `IDMaterialIntake`, `IDLabQueue`, `Status` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE ifNull(p.`IDLabQueue` IN (SELECT j9.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j9_0:UInt8} AND `IDCustomer` = {j9_1:Int64})) AS j9 WHERE ifNull(j9.`IDLabQueue` IN (SELECT j10.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j10_0:Int64} AND `Active` = {j10_1:UInt8} ) ) AND `Deleted` = {j10_2:UInt8} AND `IDCustomer` = {j10_3:Int64})) AS j10), 0)), 0)) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j10_0": 1,
+				"j10_1": 1,
+				"j10_2": 0,
+				"j10_3": 1,
+				"j9_0": 0,
+				"j9_1": 1,
+				"fTopPlusOne": 51,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j10_0": "Int64",
+				"j10_1": "UInt8",
+				"j10_2": "UInt8",
+				"j10_3": "Int64",
+				"j9_0": "UInt8",
+				"j9_1": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"LabTrack/Lab coverage/ManyRequirements/0": {
+			"Purpose": "Count",
+			"SQL": "SELECT count() AS Total FROM (SELECT p.`IDMaterialIntake` AS `IDMaterialIntake` FROM (SELECT `IDMaterialIntake` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE ifNull(p.`IDMaterialIntake` IN (SELECT j8.`IDMaterialIntake` FROM (SELECT `IDMaterialIntakeRequirement`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j8_0:UInt8} AND `IDCustomer` = {j8_1:Int64})) AS j8 GROUP BY j8.`IDMaterialIntake` HAVING count() >= {q1_N:UInt64}), 0)) AS p",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"j8_0": 0,
+				"j8_1": 1,
+				"q1_N": 3
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j8_0": "UInt8",
+				"j8_1": "Int64",
+				"q1_N": "UInt64"
+			},
+			"MaxRows": 1
+		},
+		"LabTrack/Lab coverage/RequirementBands/0": {
+			"Purpose": "KeyGroups",
+			"SQL": "SELECT Key, count() AS Count FROM (SELECT multiIf(p.`FacetC0` < {fE0:Int64}, 0, p.`FacetC0` < {fE1:Int64}, 1, p.`FacetC0` < {fE2:Int64}, 2, 3) AS Key FROM (SELECT p.`IDMaterialIntake` AS `IDMaterialIntake`, ifNull(ca0.`N`, 0) AS `FacetC0` FROM (SELECT `IDMaterialIntake` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p LEFT JOIN (SELECT x1.`IDMaterialIntake` AS `K0`, count() AS `N` FROM (SELECT `IDMaterialIntakeRequirement`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {x1_0:UInt8} AND `IDCustomer` = {x1_1:Int64})) AS x1 WHERE x1.`IDMaterialIntake` IN (SELECT p2.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p2) GROUP BY `K0`) AS ca0 ON ca0.`K0` = p.`IDMaterialIntake`) AS p) GROUP BY Key",
+			"Params": {
+				"p_0": 0,
+				"p_1": 1,
+				"x1_0": 0,
+				"x1_1": 1,
+				"fE0": 1,
+				"fE1": 2,
+				"fE2": 4
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"x1_0": "UInt8",
+				"x1_1": "Int64",
+				"fE0": "Int64",
+				"fE1": "Int64",
+				"fE2": "Int64"
+			},
+			"MaxRows": 4
+		},
+		"LabTrack/E3A as tenant 2/Discipline/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`FacetV0` AS Key, count() AS Count FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake`, l3.`Discipline` AS `FacetV0` FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake` FROM (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE (ifNull(p.`IDMaterialIntake` IN (SELECT j1.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {j1_0:Array(String)} ) AND `Deleted` = {j1_1:UInt8} AND `IDCustomer` = {j1_2:Int64})) AS j1 WHERE ifNull(j1.`IDLabQueue` IN (SELECT j2.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j2_0:UInt8} AND `IDCustomer` = {j2_1:Int64})) AS j2 WHERE ifNull(j2.`IDLabQueue` IN (SELECT j3.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j3_0:Int64} AND `Active` = {j3_1:UInt8} ) ) AND `Deleted` = {j3_2:UInt8} AND `IDCustomer` = {j3_3:Int64})) AS j3), 0)), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT j4.`IDMaterialIntake`, j4.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j4_0:String} ) AND `Deleted` = {j4_1:UInt8} AND `IDCustomer` = {j4_2:Int64})) AS j4), 0))) AS p ANY LEFT JOIN (SELECT `IDLabFormType`, `Discipline` FROM `rfs_main`.`LabFormType` FINAL WHERE `_IsDeleted` = 0) AS l3 ON l3.`IDLabFormType` = p.`IDLabFormType`) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"p_0": 0,
+				"p_1": 2,
+				"j3_0": 101,
+				"j3_1": 1,
+				"j3_2": 0,
+				"j3_3": 2,
+				"j2_0": 0,
+				"j2_1": 2,
+				"j1_0": [
+					"Received",
+					"InProgress"
+				],
+				"j1_1": 0,
+				"j1_2": 2,
+				"j4_0": "Complete",
+				"j4_1": 0,
+				"j4_2": 2,
+				"fTopPlusOne": 51,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j3_0": "Int64",
+				"j3_1": "UInt8",
+				"j3_2": "UInt8",
+				"j3_3": "Int64",
+				"j2_0": "UInt8",
+				"j2_1": "Int64",
+				"j1_0": "Array(String)",
+				"j1_1": "UInt8",
+				"j1_2": "Int64",
+				"j4_0": "String",
+				"j4_1": "UInt8",
+				"j4_2": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"LabTrack/E3A as tenant 2/Queue/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`FacetV0` AS Key, count() AS Count FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake`, l2.`IDLabQueue` AS `FacetV0` FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake` FROM (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE (ifNull(p.`IDMaterialIntake` IN (SELECT j1.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {j1_0:Array(String)} ) AND `Deleted` = {j1_1:UInt8} AND `IDCustomer` = {j1_2:Int64})) AS j1 WHERE ifNull(j1.`IDLabQueue` IN (SELECT j2.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j2_0:UInt8} AND `IDCustomer` = {j2_1:Int64})) AS j2 WHERE ifNull(j2.`IDLabQueue` IN (SELECT j3.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j3_0:Int64} AND `Active` = {j3_1:UInt8} ) ) AND `Deleted` = {j3_2:UInt8} AND `IDCustomer` = {j3_3:Int64})) AS j3), 0)), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT j4.`IDMaterialIntake`, j4.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j4_0:String} ) AND `Deleted` = {j4_1:UInt8} AND `IDCustomer` = {j4_2:Int64})) AS j4), 0))) AS p ANY LEFT JOIN (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {l1_0:UInt8} AND `IDCustomer` = {l1_1:Int64})) AS l1 ON l1.`IDMaterialIntake` = p.`IDMaterialIntake` ANY LEFT JOIN (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {l2_0:UInt8} AND `IDCustomer` = {l2_1:Int64})) AS l2 ON l2.`IDLabQueue` = l1.`IDLabQueue`) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"p_0": 0,
+				"p_1": 2,
+				"j3_0": 101,
+				"j3_1": 1,
+				"j3_2": 0,
+				"j3_3": 2,
+				"j2_0": 0,
+				"j2_1": 2,
+				"j1_0": [
+					"Received",
+					"InProgress"
+				],
+				"j1_1": 0,
+				"j1_2": 2,
+				"j4_0": "Complete",
+				"j4_1": 0,
+				"j4_2": 2,
+				"l1_0": 0,
+				"l1_1": 2,
+				"l2_0": 0,
+				"l2_1": 2,
+				"fTopPlusOne": 51,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j3_0": "Int64",
+				"j3_1": "UInt8",
+				"j3_2": "UInt8",
+				"j3_3": "Int64",
+				"j2_0": "UInt8",
+				"j2_1": "Int64",
+				"j1_0": "Array(String)",
+				"j1_1": "UInt8",
+				"j1_2": "Int64",
+				"j4_0": "String",
+				"j4_1": "UInt8",
+				"j4_2": "Int64",
+				"l1_0": "UInt8",
+				"l1_1": "Int64",
+				"l2_0": "UInt8",
+				"l2_1": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"LabTrack/E3A as tenant 2/Started/0": {
+			"Purpose": "KeyGroups",
+			"SQL": "SELECT Key, count() AS Count FROM (SELECT p.`FacetX0` AS Key FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake`, if(ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT e1.`IDMaterialIntake`, e1.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` != {e1_0:String} ) AND `Deleted` = {e1_1:UInt8} AND `IDCustomer` = {e1_2:Int64} AND `OwnerIDUser` = {e1_3:Int64})) AS e1), 0), 1, 0) AS `FacetX0` FROM (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE (ifNull(p.`IDMaterialIntake` IN (SELECT j1.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {j1_0:Array(String)} ) AND `Deleted` = {j1_1:UInt8} AND `IDCustomer` = {j1_2:Int64})) AS j1 WHERE ifNull(j1.`IDLabQueue` IN (SELECT j2.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j2_0:UInt8} AND `IDCustomer` = {j2_1:Int64})) AS j2 WHERE ifNull(j2.`IDLabQueue` IN (SELECT j3.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j3_0:Int64} AND `Active` = {j3_1:UInt8} ) ) AND `Deleted` = {j3_2:UInt8} AND `IDCustomer` = {j3_3:Int64})) AS j3), 0)), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT j4.`IDMaterialIntake`, j4.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j4_0:String} ) AND `Deleted` = {j4_1:UInt8} AND `IDCustomer` = {j4_2:Int64})) AS j4), 0))) AS p) GROUP BY Key",
+			"Params": {
+				"p_0": 0,
+				"p_1": 2,
+				"j3_0": 101,
+				"j3_1": 1,
+				"j3_2": 0,
+				"j3_3": 2,
+				"j2_0": 0,
+				"j2_1": 2,
+				"j1_0": [
+					"Received",
+					"InProgress"
+				],
+				"j1_1": 0,
+				"j1_2": 2,
+				"j4_0": "Complete",
+				"j4_1": 0,
+				"j4_2": 2,
+				"e1_0": "Complete",
+				"e1_1": 0,
+				"e1_2": 2,
+				"e1_3": 101
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j3_0": "Int64",
+				"j3_1": "UInt8",
+				"j3_2": "UInt8",
+				"j3_3": "Int64",
+				"j2_0": "UInt8",
+				"j2_1": "Int64",
+				"j1_0": "Array(String)",
+				"j1_1": "UInt8",
+				"j1_2": "Int64",
+				"j4_0": "String",
+				"j4_1": "UInt8",
+				"j4_2": "Int64",
+				"e1_0": "String",
+				"e1_1": "UInt8",
+				"e1_2": "Int64",
+				"e1_3": "Int64"
+			},
+			"MaxRows": 2
+		},
+		"LabTrack/E3A as tenant 2/ToDo/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`IDLabFormType` AS Key, count() AS Count FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake` FROM (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE (ifNull(p.`IDMaterialIntake` IN (SELECT j1.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {j1_0:Array(String)} ) AND `Deleted` = {j1_1:UInt8} AND `IDCustomer` = {j1_2:Int64})) AS j1 WHERE ifNull(j1.`IDLabQueue` IN (SELECT j2.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j2_0:UInt8} AND `IDCustomer` = {j2_1:Int64})) AS j2 WHERE ifNull(j2.`IDLabQueue` IN (SELECT j3.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j3_0:Int64} AND `Active` = {j3_1:UInt8} ) ) AND `Deleted` = {j3_2:UInt8} AND `IDCustomer` = {j3_3:Int64})) AS j3), 0)), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT j4.`IDMaterialIntake`, j4.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j4_0:String} ) AND `Deleted` = {j4_1:UInt8} AND `IDCustomer` = {j4_2:Int64})) AS j4), 0))) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) ORDER BY FacetRow",
+			"Params": {
+				"p_0": 0,
+				"p_1": 2,
+				"j3_0": 101,
+				"j3_1": 1,
+				"j3_2": 0,
+				"j3_3": 2,
+				"j2_0": 0,
+				"j2_1": 2,
+				"j1_0": [
+					"Received",
+					"InProgress"
+				],
+				"j1_1": 0,
+				"j1_2": 2,
+				"j4_0": "Complete",
+				"j4_1": 0,
+				"j4_2": 2,
+				"fTopPlusOne": 51,
+				"fMaxGroups": 10000
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j3_0": "Int64",
+				"j3_1": "UInt8",
+				"j3_2": "UInt8",
+				"j3_3": "Int64",
+				"j2_0": "UInt8",
+				"j2_1": "Int64",
+				"j1_0": "Array(String)",
+				"j1_1": "UInt8",
+				"j1_2": "Int64",
+				"j4_0": "String",
+				"j4_1": "UInt8",
+				"j4_2": "Int64",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 10000
+		},
+		"LabTrack/E3A as tenant 2/Week/0": {
+			"Purpose": "DateHistogram",
+			"SQL": "SELECT formatDateTime(B, '%Y-%m-%d 00:00:00') AS Key, Count, formatDateTime(LoV, '%Y-%m-%d %H:%i:%S') AS Lo, formatDateTime(HiV, '%Y-%m-%d %H:%i:%S') AS Hi FROM (SELECT toMonday(p.`FacetV0`) AS B, count() AS Count, min(p.`FacetV0`) AS LoV, max(p.`FacetV0`) AS HiV FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake`, l4.`ReceivedDate` AS `FacetV0` FROM (SELECT p.`IDMaterialIntakeRequirement` AS `IDMaterialIntakeRequirement`, p.`IDLabFormType` AS `IDLabFormType`, p.`IDMaterialIntake` AS `IDMaterialIntake` FROM (SELECT `IDMaterialIntakeRequirement`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`MaterialIntakeRequirement` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8} AND `IDCustomer` = {p_1:Int64})) AS p WHERE (ifNull(p.`IDMaterialIntake` IN (SELECT j1.`IDMaterialIntake` FROM (SELECT `IDMaterialIntake`, `IDLabQueue` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` IN {j1_0:Array(String)} ) AND `Deleted` = {j1_1:UInt8} AND `IDCustomer` = {j1_2:Int64})) AS j1 WHERE ifNull(j1.`IDLabQueue` IN (SELECT j2.`IDLabQueue` FROM (SELECT `IDLabQueue` FROM `rfs_main`.`LabQueue` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {j2_0:UInt8} AND `IDCustomer` = {j2_1:Int64})) AS j2 WHERE ifNull(j2.`IDLabQueue` IN (SELECT j3.`IDLabQueue` FROM (SELECT `IDLabQueueMember`, `IDLabQueue` FROM `rfs_main`.`LabQueueMember` FINAL WHERE `_IsDeleted` = 0 AND (( ( `IDUser` = {j3_0:Int64} AND `Active` = {j3_1:UInt8} ) ) AND `Deleted` = {j3_2:UInt8} AND `IDCustomer` = {j3_3:Int64})) AS j3), 0)), 0)), 0) AND NOT ifNull((p.`IDMaterialIntake`, p.`IDLabFormType`) IN (SELECT j4.`IDMaterialIntake`, j4.`IDLabFormType` FROM (SELECT `IDLabForm`, `IDLabFormType`, `IDMaterialIntake` FROM `rfs_main`.`LabForm` FINAL WHERE `_IsDeleted` = 0 AND (( `Status` = {j4_0:String} ) AND `Deleted` = {j4_1:UInt8} AND `IDCustomer` = {j4_2:Int64})) AS j4), 0))) AS p ANY LEFT JOIN (SELECT `IDMaterialIntake`, `ReceivedDate` FROM `rfs_main`.`MaterialIntake` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {l4_0:UInt8} AND `IDCustomer` = {l4_1:Int64})) AS l4 ON l4.`IDMaterialIntake` = p.`IDMaterialIntake`) AS p GROUP BY B) ORDER BY isNull(B), B LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": 0,
+				"p_1": 2,
+				"j3_0": 101,
+				"j3_1": 1,
+				"j3_2": 0,
+				"j3_3": 2,
+				"j2_0": 0,
+				"j2_1": 2,
+				"j1_0": [
+					"Received",
+					"InProgress"
+				],
+				"j1_1": 0,
+				"j1_2": 2,
+				"j4_0": "Complete",
+				"j4_1": 0,
+				"j4_2": 2,
+				"l4_0": 0,
+				"l4_1": 2,
+				"fMaxGroups": 402
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"p_1": "Int64",
+				"j3_0": "Int64",
+				"j3_1": "UInt8",
+				"j3_2": "UInt8",
+				"j3_3": "Int64",
+				"j2_0": "UInt8",
+				"j2_1": "Int64",
+				"j1_0": "Array(String)",
+				"j1_1": "UInt8",
+				"j1_2": "Int64",
+				"j4_0": "String",
+				"j4_1": "UInt8",
+				"j4_2": "Int64",
+				"l4_0": "UInt8",
+				"l4_1": "Int64",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 402
+		},
+		"Bookstore/Sale/#Total/0": {
+			"Purpose": "Count",
+			"SQL": "SELECT count() AS Total FROM (SELECT `IDBookStoreSale` FROM `rfs_main`.`BookStoreSale` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8})) AS p",
+			"Params": {
+				"p_0": 0
+			},
+			"Types": {
+				"p_0": "UInt8"
+			},
+			"MaxRows": 1
+		},
+		"Bookstore/Sale/AmountEdges/0": {
+			"Purpose": "NumericBounds",
+			"SQL": "SELECT count() AS Rows, count(p.`TotalAmount`) AS NonNull, min(p.`TotalAmount`) AS Lo, max(p.`TotalAmount`) AS Hi FROM (SELECT `IDBookStoreSale`, `TotalAmount` FROM `rfs_main`.`BookStoreSale` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8})) AS p",
+			"Params": {
+				"p_0": 0
+			},
+			"Types": {
+				"p_0": "UInt8"
+			},
+			"MaxRows": 1
+		},
+		"Bookstore/Sale/AmountNice/0": {
+			"Purpose": "NumericBounds",
+			"SQL": "SELECT count() AS Rows, count(p.`TotalAmount`) AS NonNull, min(p.`TotalAmount`) AS Lo, max(p.`TotalAmount`) AS Hi FROM (SELECT `IDBookStoreSale`, `TotalAmount` FROM `rfs_main`.`BookStoreSale` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8})) AS p",
+			"Params": {
+				"p_0": 0
+			},
+			"Types": {
+				"p_0": "UInt8"
+			},
+			"MaxRows": 1
+		},
+		"Bookstore/Sale/AmountRanges/0": {
+			"Purpose": "Ranges",
+			"SQL": "SELECT Key, count() AS Count FROM (SELECT multiIf(isNull(p.`TotalAmount`), -1, p.`TotalAmount` < toFloat64({fR0To:String}), 0, p.`TotalAmount` >= toFloat64({fR1From:String}) AND p.`TotalAmount` < toFloat64({fR1To:String}), 1, p.`TotalAmount` >= toFloat64({fR2From:String}), 2, -2) AS Key FROM (SELECT `IDBookStoreSale`, `TotalAmount` FROM `rfs_main`.`BookStoreSale` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8})) AS p) GROUP BY Key",
+			"Params": {
+				"p_0": 0,
+				"fR0To": "50",
+				"fR1From": "50",
+				"fR1To": "200",
+				"fR2From": "200"
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"fR0To": "String",
+				"fR1From": "String",
+				"fR1To": "String",
+				"fR2From": "String"
+			},
+			"MaxRows": 5
+		},
+		"Bookstore/Sale/AmountStats/0": {
+			"Purpose": "Stats",
+			"SQL": "SELECT count() AS Rows, count(p.`TotalAmount`) AS NonNull, min(p.`TotalAmount`) AS Min, max(p.`TotalAmount`) AS Max, sum(toInt64(if(p.`TotalAmount` < 0, -floor(-p.`TotalAmount` * {fFactor:Int64} + 0.5), floor(p.`TotalAmount` * {fFactor:Int64} + 0.5)))) AS SumUnits FROM (SELECT `IDBookStoreSale`, `TotalAmount` FROM `rfs_main`.`BookStoreSale` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8})) AS p",
+			"Params": {
+				"p_0": 0,
+				"fFactor": 100
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"fFactor": "Int64"
+			},
+			"MaxRows": 1
+		},
+		"Bookstore/Sale/DateStats/0": {
+			"Purpose": "Stats",
+			"SQL": "SELECT count() AS Rows, count(p.`SaleDate`) AS NonNull, formatDateTime(min(p.`SaleDate`), '%Y-%m-%d %H:%i:%S') AS Min, formatDateTime(max(p.`SaleDate`), '%Y-%m-%d %H:%i:%S') AS Max, NULL AS SumUnits FROM (SELECT `IDBookStoreSale`, `SaleDate` FROM `rfs_main`.`BookStoreSale` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8})) AS p",
+			"Params": {
+				"p_0": 0
+			},
+			"Types": {
+				"p_0": "UInt8"
+			},
+			"MaxRows": 1
+		},
+		"Bookstore/Sale/Month/0": {
+			"Purpose": "DateHistogram",
+			"SQL": "SELECT formatDateTime(B, '%Y-%m-%d 00:00:00') AS Key, Count, formatDateTime(LoV, '%Y-%m-%d %H:%i:%S') AS Lo, formatDateTime(HiV, '%Y-%m-%d %H:%i:%S') AS Hi FROM (SELECT toStartOfMonth(p.`SaleDate`) AS B, count() AS Count, min(p.`SaleDate`) AS LoV, max(p.`SaleDate`) AS HiV FROM (SELECT `IDBookStoreSale`, `SaleDate` FROM `rfs_main`.`BookStoreSale` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8})) AS p GROUP BY B) ORDER BY isNull(B), B LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": 0,
+				"fMaxGroups": 402
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 402
+		},
+		"Bookstore/Sale/Pay/0": {
+			"Purpose": "Terms",
+			"SQL": "SELECT Key, Count, FacetTotal, FacetMissing, FacetDistinct FROM (SELECT Key, Count, sum(Count) OVER () AS FacetTotal, sumIf(Count, isNull(Key)) OVER () AS FacetMissing, countIf(isNotNull(Key)) OVER () AS FacetDistinct, rank() OVER (ORDER BY isNull(Key) ASC, Count DESC) AS FacetRank, row_number() OVER (ORDER BY isNull(Key) ASC, Count DESC, Key ASC) AS FacetRow FROM (SELECT p.`PaymentMethod` AS Key, count() AS Count FROM (SELECT `IDBookStoreSale`, `PaymentMethod` FROM `rfs_main`.`BookStoreSale` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8})) AS p GROUP BY Key)) WHERE (FacetRank <= {fTopPlusOne:UInt32} AND FacetRow <= {fMaxGroups:UInt32}) OR Key IN {fSelected:Array(String)} ORDER BY FacetRow",
+			"Params": {
+				"p_0": 0,
+				"fTopPlusOne": 4,
+				"fMaxGroups": 10000,
+				"fSelected": [
+					"Cash"
+				]
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"fTopPlusOne": "UInt32",
+				"fMaxGroups": "UInt32",
+				"fSelected": "Array(String)"
+			},
+			"MaxRows": 10001
+		},
+		"Bookstore/Sale/PayByAmount/0": {
+			"Purpose": "Pivot",
+			"SQL": "SELECT K1, K2, count() AS Count FROM (SELECT p.`PaymentMethod` AS K1, multiIf(isNull(p.`TotalAmount`), -1, p.`TotalAmount` < toFloat64({fD1R0To:String}), 0, p.`TotalAmount` >= toFloat64({fD1R1From:String}), 1, -2) AS K2 FROM (SELECT `IDBookStoreSale`, `PaymentMethod`, `TotalAmount` FROM `rfs_main`.`BookStoreSale` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8})) AS p) GROUP BY K1, K2 LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": 0,
+				"fD1R0To": "50",
+				"fD1R1From": "50",
+				"fMaxGroups": 100001
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"fD1R0To": "String",
+				"fD1R1From": "String",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 100001
+		},
+		"Bookstore/Sale/PayByYear/0": {
+			"Purpose": "Pivot",
+			"SQL": "SELECT K1, K2, count() AS Count FROM (SELECT p.`PaymentMethod` AS K1, formatDateTime(toStartOfYear(p.`SaleDate`), '%Y-%m-%d 00:00:00') AS K2 FROM (SELECT `IDBookStoreSale`, `PaymentMethod`, `SaleDate` FROM `rfs_main`.`BookStoreSale` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8})) AS p) GROUP BY K1, K2 LIMIT {fMaxGroups:UInt32}",
+			"Params": {
+				"p_0": 0,
+				"fMaxGroups": 100001
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"fMaxGroups": "UInt32"
+			},
+			"MaxRows": 100001
+		},
+		"Bookstore/Sale/PayDistinct/0": {
+			"Purpose": "DistinctCount",
+			"SQL": "SELECT count() AS Rows, count(p.`PaymentMethod`) AS NonNull, uniqExact(p.`PaymentMethod`) AS Distinct FROM (SELECT `IDBookStoreSale`, `PaymentMethod` FROM `rfs_main`.`BookStoreSale` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8})) AS p",
+			"Params": {
+				"p_0": 0
+			},
+			"Types": {
+				"p_0": "UInt8"
+			},
+			"MaxRows": 1
+		},
+		"Bookstore/Sale/PayMissing/0": {
+			"Purpose": "Missing",
+			"SQL": "SELECT count() AS Rows, count(p.`PaymentMethod`) AS NonNull FROM (SELECT `IDBookStoreSale`, `PaymentMethod` FROM `rfs_main`.`BookStoreSale` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8})) AS p",
+			"Params": {
+				"p_0": 0
+			},
+			"Types": {
+				"p_0": "UInt8"
+			},
+			"MaxRows": 1
+		},
+		"Bookstore/Sale/StoreStats/0": {
+			"Purpose": "Stats",
+			"SQL": "SELECT count() AS Rows, count(p.`IDBookStore`) AS NonNull, min(p.`IDBookStore`) AS Min, max(p.`IDBookStore`) AS Max, sum(p.`IDBookStore`) AS SumUnits FROM (SELECT `IDBookStoreSale`, `IDBookStore` FROM `rfs_main`.`BookStoreSale` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8})) AS p",
+			"Params": {
+				"p_0": 0
+			},
+			"Types": {
+				"p_0": "UInt8"
+			},
+			"MaxRows": 1
+		},
+		"Bookstore/Sale/AmountNice/phase2": {
+			"Purpose": "NumericHistogram",
+			"SQL": "SELECT Key, count() AS Count FROM (SELECT least(intDiv(toInt64(if(p.`TotalAmount` < 0, -floor(-p.`TotalAmount` * {fFactor:Int64} + 0.5), floor(p.`TotalAmount` * {fFactor:Int64} + 0.5))) - {fLoUnits:Int64}, {fWidthUnits:Int64}), {fLastIndex:Int64}) AS FacetCand, multiIf(p.`TotalAmount` < ({fLoUnits:Int64} + FacetCand * {fWidthUnits:Int64}) / {fFactor:Int64}, FacetCand - 1, FacetCand < {fLastIndex:Int64} AND p.`TotalAmount` >= ({fLoUnits:Int64} + (FacetCand + 1) * {fWidthUnits:Int64}) / {fFactor:Int64}, FacetCand + 1, FacetCand) AS Key FROM (SELECT `IDBookStoreSale`, `TotalAmount` FROM `rfs_main`.`BookStoreSale` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8})) AS p WHERE isNotNull(p.`TotalAmount`)) GROUP BY Key",
+			"Params": {
+				"p_0": 0,
+				"fFactor": 100,
+				"fLoUnits": 0,
+				"fWidthUnits": 5000,
+				"fLastIndex": 9
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"fFactor": "Int64",
+				"fLoUnits": "Int64",
+				"fWidthUnits": "Int64",
+				"fLastIndex": "Int64"
+			},
+			"MaxRows": 11
+		},
+		"Bookstore/Sale/AmountEdges/phase2": {
+			"Purpose": "NumericHistogram",
+			"SQL": "SELECT Key, count() AS Count FROM (SELECT multiIf(p.`TotalAmount` >= toFloat64({fE0:String}) AND p.`TotalAmount` < toFloat64({fE1:String}), 0, p.`TotalAmount` >= toFloat64({fE1:String}) AND p.`TotalAmount` < toFloat64({fE2:String}), 1, p.`TotalAmount` >= toFloat64({fE2:String}), 2, NULL) AS Key FROM (SELECT `IDBookStoreSale`, `TotalAmount` FROM `rfs_main`.`BookStoreSale` FINAL WHERE `_IsDeleted` = 0 AND (`Deleted` = {p_0:UInt8})) AS p WHERE isNotNull(p.`TotalAmount`)) GROUP BY Key",
+			"Params": {
+				"p_0": 0,
+				"fE0": "0",
+				"fE1": "50",
+				"fE2": "200"
+			},
+			"Types": {
+				"p_0": "UInt8",
+				"fE0": "String",
+				"fE1": "String",
+				"fE2": "String"
+			},
+			"MaxRows": 4
+		}
+	}
+}

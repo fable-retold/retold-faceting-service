@@ -18,6 +18,14 @@
  * GenVector, the generation Version, the 304 short-circuit, Hit / Stale serves with a single-flight
  * background refresh) and a Store stage; notify() / notifyByFilter() for raw writers; shutdown().
  *
+ * Milestone 5 (internal-contracts Part IV): installStores() registers the ClickHouse store from
+ * Stores.ClickHouse (feature-not-boot: a store that is down or misconfigured leaves every facet Live),
+ * subscribes Freshness and the Materializer to the intake, puts the ClickHouse engine before Live in the
+ * Router (per-Agg routing, same-request fallback, breaker) and starts materializing; envelopes carry
+ * per-facet Engine / Exact / AsOf / LagMS and a Store block; store answers are never cached (digest
+ * Version); Describe / status report the store; storeAdmin() and the guarded admin routes trigger
+ * rebuilds and reconciles.
+ *
  * @author Steven Velozo <steven@velozo.com>
  */
 const libFableServiceProviderBase = require('fable-serviceproviderbase');
@@ -63,6 +71,16 @@ const libRetoldFacetingResultCache = require('./cache/Retold-Faceting-ResultCach
 const libRetoldFacetingChangeIntake = require('./change/Retold-Faceting-ChangeIntake.js');
 const libRetoldFacetingReadYourWrites = require('./change/Retold-Faceting-ReadYourWrites.js');
 const libRetoldFacetingSSE = require('./routes/Retold-Faceting-SSE.js');
+// M5 (internal-contracts §53.3): skeletons registered (inert until installStores(), §54.2); the wiring
+// connects them into the pipeline (Router, envelope, Describe, shutdown).
+const libRetoldFacetingMirrorSpec = require('./persistence/Retold-Faceting-MirrorSpec.js');
+const libRetoldFacetingFreshness = require('./persistence/Retold-Faceting-Freshness.js');
+const libRetoldFacetingMaterializeSourceInProcess = require('./persistence/MaterializeSource-InProcess.js');
+const libRetoldFacetingStoreClickHouse = require('./store/clickhouse/Retold-Faceting-StoreClickHouse.js');
+const libRetoldFacetingMaterializer = require('./persistence/Retold-Faceting-Materializer.js');
+const libRetoldFacetingRebuilder = require('./persistence/Retold-Faceting-Rebuilder.js');
+const libRetoldFacetingReconciler = require('./persistence/Retold-Faceting-Reconciler.js');
+const libRetoldFacetingEngineClickHouse = require('./engine/Retold-Faceting-EngineClickHouse.js');
 const libRetoldFacetingUtil = require('./Retold-Faceting-Util.js');
 
 // Every sub-service, in registration order: [ serviceType, class ].
@@ -98,6 +116,15 @@ const SUB_SERVICES = (
 		[ 'RetoldFacetingResultCache', libRetoldFacetingResultCache ],
 		[ 'RetoldFacetingChangeIntake', libRetoldFacetingChangeIntake ],
 		[ 'RetoldFacetingReadYourWrites', libRetoldFacetingReadYourWrites ],
+		// M5 (internal-contracts §53.3)
+		[ 'RetoldFacetingMirrorSpec', libRetoldFacetingMirrorSpec ],
+		[ 'RetoldFacetingFreshness', libRetoldFacetingFreshness ],
+		[ 'RetoldFacetingMaterializeSourceInProcess', libRetoldFacetingMaterializeSourceInProcess ],
+		[ 'RetoldFacetingStoreClickHouse', libRetoldFacetingStoreClickHouse ],
+		[ 'RetoldFacetingMaterializer', libRetoldFacetingMaterializer ],
+		[ 'RetoldFacetingRebuilder', libRetoldFacetingRebuilder ],
+		[ 'RetoldFacetingReconciler', libRetoldFacetingReconciler ],
+		[ 'RetoldFacetingEngineClickHouse', libRetoldFacetingEngineClickHouse ],
 		[ 'RetoldFacetingRouter', libRetoldFacetingRouter ],
 		[ 'RetoldFacetingRoutes', libRetoldFacetingRoutes ],
 		[ 'RetoldFacetingSSE', libRetoldFacetingSSE ]
@@ -105,6 +132,10 @@ const SUB_SERVICES = (
 
 // The Agg Key of the envelope Total (internal-contracts §5.1); the Planner owns it.
 const TOTAL_KEY = libRetoldFacetingPlanner.TOTAL_KEY;
+
+// The store refusal reason classes that reflect its (global) freshness: shown to a client as the neutral
+// 'Freshness' unless Stores.ClickHouse.ExposeFreshness.
+const FRESHNESS_REASON_CLASSES = Object.freeze([ 'State', 'Unverified', 'NotExact', 'Lagging', 'NoChangeSource', 'Breaker' ]);
 
 // M4 (internal-contracts §44.10): the marker on a service server whose close() runs the faceting
 // shutdown first (wrapped once per server object).
@@ -115,7 +146,15 @@ const SHUTDOWN_MARKER = Symbol.for('RetoldFaceting.Shutdown');
 const CACHE_STATUSES = Object.freeze([ 'Off', 'Bypass', 'Miss', 'Hit', 'Stale', 'NotModified', 'Refresh' ]);
 
 // Post-execution Bypass reasons a single-flight joiner never inherits (it computes its own answer).
-const UNSHARED_REASONS = Object.freeze([ 'Errors', 'ScopeChanged' ]);
+// M5: 'Store' — an answer a store gave under the leader's freshness admission (a joiner may ask Exact).
+const UNSHARED_REASONS = Object.freeze([ 'Errors', 'ScopeChanged', 'Store' ]);
+
+// M5 (internal-contracts §60.5): storeAdmin actions, and the admin route's reconcile levels.
+const ADMIN_ACTIONS = Object.freeze([ 'Rebuild', 'Sweep', 'Bisect', 'Scrub', 'Verify' ]);
+const ADMIN_LEVELS = Object.freeze([ 'Sweep', 'Bisect', 'Scrub', 'Verify' ]);
+
+// M5 (internal-contracts §54.2): the store names this milestone can register (one engine each).
+const STORE_ENGINES = Object.freeze({ ClickHouse: 'RetoldFacetingEngineClickHouse' });
 
 // The If-None-Match request header (read once into pContext.IfNoneMatch) and the MinSeq header (02 §10).
 const IF_NONE_MATCH_HEADER = 'if-none-match';
@@ -139,6 +178,12 @@ class RetoldFacetingService extends libFableServiceProviderBase
 		this._ServicesRegistered = false;
 		this._Attached = false;
 		this._RequestCounter = 0;
+		// M5 (internal-contracts §54.2): what installStores() did ({ Configured, Available, Reason }).
+		this._StoreInstall = { Configured: false, Available: false, Reason: null };
+		// M5: Materialize 'All' (tests, the demo): re-declared from the catalog at every install.
+		this._MaterializeAll = false;
+		// M5: storeAdmin calls in flight ('<Store>:<Entity>:<Action>').
+		this._AdminInFlight = new Set();
 	}
 
 	/**
@@ -219,6 +264,9 @@ class RetoldFacetingService extends libFableServiceProviderBase
 				// M4 (internal-contracts §44.10): the change intake on every facetable entity's route-bound
 				// controller, then the subscriptions (Generations, ReadYourWrites, SSE).
 				this.installChangeCapture();
+				// M5 (internal-contracts §54.2): the stores (never fails attach: a store that is down or
+				// misconfigured is logged and retried while Live answers).
+				this.installStores();
 				// D-31: a host model reload rebuilds the graph, the catalog and the definitions (same sources;
 				// the previous catalog stays on failure); M4: the intake then wraps the new controllers, every
 				// cached answer goes (its ModelVersion changed) and open change streams are told.
@@ -341,6 +389,20 @@ class RetoldFacetingService extends libFableServiceProviderBase
 	afterModelReload()
 	{
 		this.installChangeCapture();
+		// M5 (internal-contracts §54.2 step 5): re-install the stores (idempotent), then recompile the
+		// mirror specs (additive ALTER or a rebuild per entity, §55.4).
+		this.installStores();
+		if (this.fable.RetoldFacetingMaterializer && this._StoreInstall.Configured)
+		{
+			try
+			{
+				this.fable.RetoldFacetingMaterializer.reload();
+			}
+			catch (pReloadError)
+			{
+				this.fable.log.error(`RetoldFaceting: the materializer reload failed: ${pReloadError.message}`);
+			}
+		}
 		if (this.fable.RetoldFacetingResultCache)
 		{
 			this.fable.RetoldFacetingResultCache.clear();
@@ -390,13 +452,69 @@ class RetoldFacetingService extends libFableServiceProviderBase
 	}
 
 	/**
-	 * Stop every M4 activity (internal-contracts §44.10): end open change streams (closed { Reason:
-	 * 'Shutdown' }), clear the notify settle timers and the cache's in-flight bookkeeping.  The intake
-	 * wrappers stay (harmless).  Idempotent; never throws.
+	 * Stop every M4 / M5 activity (internal-contracts §44.10, §54.2 step 6): first the materializer
+	 * (drain ≤ Materializer.DrainOnStopMS, final flush, clean-shutdown flags; its entities go Absent so
+	 * nothing is served from mirrors no longer maintained), then end open change streams (closed {
+	 * Reason: 'Shutdown' }), clear the notify settle timers and the cache's in-flight bookkeeping, and
+	 * drop the ClickHouse client's keep-alive sockets.  The intake wrappers stay (harmless).  Idempotent;
+	 * never throws.
 	 *
 	 * @param {() => void} [fCallback]
 	 */
 	shutdown(fCallback)
+	{
+		let tmpMaterializer = this.fable.RetoldFacetingMaterializer;
+		let fAfterStores = () =>
+		{
+			this.shutdownM4();
+			if (this.fable.RetoldFacetingStoreClickHouse && (typeof(this.fable.RetoldFacetingStoreClickHouse.close) === 'function'))
+			{
+				try
+				{
+					this.fable.RetoldFacetingStoreClickHouse.close();
+				}
+				catch (pCloseError)
+				{
+					this.fable.log.warn(`RetoldFaceting shutdown: the ClickHouse client failed to close: ${pCloseError.message}`);
+				}
+			}
+			if (typeof(fCallback) === 'function')
+			{
+				return fCallback();
+			}
+		};
+		if (!tmpMaterializer || (typeof(tmpMaterializer.started) !== 'function') || !tmpMaterializer.started())
+		{
+			return fAfterStores();
+		}
+		let tmpCalledBack = false;
+		try
+		{
+			tmpMaterializer.stop(
+				() =>
+				{
+					if (!tmpCalledBack)
+					{
+						tmpCalledBack = true;
+						return fAfterStores();
+					}
+				});
+		}
+		catch (pStopError)
+		{
+			this.fable.log.warn(`RetoldFaceting shutdown: the materializer failed to stop: ${pStopError.message}`);
+			if (!tmpCalledBack)
+			{
+				tmpCalledBack = true;
+				return fAfterStores();
+			}
+		}
+	}
+
+	/**
+	 * The M4 shutdown steps (SSE streams, intake timers, the result cache).  Never throws.
+	 */
+	shutdownM4()
 	{
 		let fStep = (pName, fStop) =>
 		{
@@ -421,10 +539,342 @@ class RetoldFacetingService extends libFableServiceProviderBase
 		{
 			fStep('ResultCache', () => { this.fable.RetoldFacetingResultCache.shutdown(); });
 		}
-		if (typeof(fCallback) === 'function')
+	}
+
+	// ------------------------------------------------------------ M5: stores (internal-contracts §54.2, §60.5)
+
+	/**
+	 * Register the stores from the options (internal-contracts §54.2; public, idempotent, also after
+	 * every model reload).  Stores.ClickHouse an object → StoreClickHouse.configure (never throws: a
+	 * missing URL or a bad database name is 'Misconfigured', logged without secrets), the intake
+	 * subscribers 'Freshness' then 'Materializer' (after the M4 two), the ClickHouse engine registered
+	 * with the Router BEFORE Live, then Materializer.start — which never fails attach: a store that is
+	 * down is retried every RetryConnectMS (unref'd) while every facet answers Live.  Materializer.Enabled
+	 * false → the store is not used (Reason 'NoMaterializer').  Materialize 'All' declares every facetable
+	 * entity (tests and the demo).
+	 *
+	 * @param {(pError?: Error) => void} [fCallback] - called when Materializer.start called back (never an error)
+	 * @return {{ Configured: boolean, Available: boolean, Reason: string|null }}
+	 */
+	installStores(fCallback)
+	{
+		let fDone = (typeof(fCallback) === 'function') ? fCallback : () => {};
+		this.registerServices();
+		let tmpSection = (this.options.Stores && libRetoldFacetingUtil.isPlainObject(this.options.Stores.ClickHouse)) ? this.options.Stores.ClickHouse : null;
+		let tmpRouter = this.fable.RetoldFacetingRouter;
+		let tmpEngine = this.fable[STORE_ENGINES.ClickHouse];
+		if (!tmpSection)
 		{
-			return fCallback();
+			if (tmpRouter && tmpEngine && (typeof(tmpRouter.unregister) === 'function'))
+			{
+				tmpRouter.unregister(tmpEngine);
+			}
+			this._StoreInstall = { Configured: false, Available: false, Reason: null };
+			fDone();
+			return Object.assign({}, this._StoreInstall);
 		}
+		if (this.options.Materializer && (this.options.Materializer.Enabled === false))
+		{
+			// A reader-only process (polling the state rows) is a seam (§70): without a materializer
+			// nothing proves a mirror current, so the store is not used.
+			if (this._StoreInstall.Reason !== 'NoMaterializer')
+			{
+				this.fable.log.info('RetoldFaceting: Stores.ClickHouse is configured but Materializer.Enabled is false; the store is not used (every facet answers Live).');
+			}
+			this._StoreInstall = { Configured: true, Available: false, Reason: 'NoMaterializer' };
+			fDone();
+			return Object.assign({}, this._StoreInstall);
+		}
+		// Materialize 'All': every facetable entity of the catalog (re-declared after a model reload).
+		if ((this.options.Materialize === 'All') || this._MaterializeAll)
+		{
+			this._MaterializeAll = true;
+			let tmpMirrorSpec = this.fable.RetoldFacetingMirrorSpec;
+			this.options.Materialize = (tmpMirrorSpec && (typeof(tmpMirrorSpec.declareAll) === 'function'))
+				? tmpMirrorSpec.declareAll([ 'ClickHouse' ], { Catalog: this.fable.RetoldFacetingCatalog, Host: this.Host, Registry: this.fable.RetoldFacetingDefinitionRegistry, Options: this.options })
+				: {};
+		}
+		let tmpStore = this.fable.RetoldFacetingStoreClickHouse;
+		let tmpConfigured = { Configured: false, Available: false, Reason: 'NoStore' };
+		try
+		{
+			tmpConfigured = tmpStore.configure(tmpSection);
+		}
+		catch (pConfigureError)
+		{
+			// configure never throws by contract; a bug here must still not fail attach.
+			this.fable.log.error(`RetoldFaceting: the ClickHouse store could not be configured: ${pConfigureError.message}`);
+			tmpConfigured = { Configured: true, Available: false, Reason: 'Misconfigured' };
+		}
+		let tmpIntake = this.fable.RetoldFacetingChangeIntake;
+		let tmpFreshness = this.fable.RetoldFacetingFreshness;
+		let tmpMaterializer = this.fable.RetoldFacetingMaterializer;
+		if (tmpIntake && tmpFreshness && tmpMaterializer)
+		{
+			// After the M4 two ('Generations', 'ReadYourWrites'): a write is never judged applied before it is observed.
+			tmpIntake.subscribe('Freshness', (pEvent) => { tmpFreshness.observe(pEvent); });
+			tmpIntake.subscribe('Materializer', (pEvent) => { tmpMaterializer.onChange(pEvent); });
+		}
+		if (tmpRouter && tmpEngine)
+		{
+			tmpRouter.register(tmpEngine, { Store: true });
+		}
+		this._StoreInstall = { Configured: true, Available: false, Reason: tmpConfigured.Reason || null };
+		if (!tmpMaterializer || (typeof(tmpMaterializer.start) !== 'function'))
+		{
+			fDone();
+			return Object.assign({}, this._StoreInstall);
+		}
+		try
+		{
+			tmpMaterializer.start(
+				() =>
+				{
+					return fDone();
+				});
+		}
+		catch (pStartError)
+		{
+			this.fable.log.error(`RetoldFaceting: the materializer failed to start (facets answer Live): ${pStartError.message}`);
+			fDone();
+		}
+		return Object.assign({}, this._StoreInstall);
+	}
+
+	/**
+	 * Is a store engine registered (a Query gets a Store block and per-Agg routing)?
+	 *
+	 * @return {boolean}
+	 */
+	storeRegistered()
+	{
+		return !!(this._StoreInstall && this._StoreInstall.Configured && (this._StoreInstall.Reason !== 'NoMaterializer'));
+	}
+
+	/**
+	 * The store's availability for Describe / the envelope: { Configured, Available, Reason }.
+	 *
+	 * @return {{ Configured: boolean, Available: boolean, Reason: string|null }}
+	 */
+	storeAvailability()
+	{
+		let tmpInstall = this._StoreInstall || { Configured: false };
+		if (!tmpInstall.Configured)
+		{
+			return { Configured: false, Available: false, Reason: null };
+		}
+		if (tmpInstall.Reason === 'NoMaterializer')
+		{
+			return { Configured: true, Available: false, Reason: 'NoMaterializer' };
+		}
+		let tmpEngine = this.fable[STORE_ENGINES.ClickHouse];
+		let tmpReady = (tmpEngine && (typeof(tmpEngine.storeReady) === 'function')) ? tmpEngine.storeReady() : { Ready: false, Reason: 'StoreUnavailable' };
+		if (tmpReady.Ready)
+		{
+			return { Configured: true, Available: true, Reason: null };
+		}
+		let tmpStatus = this.fable.RetoldFacetingStoreClickHouse ? this.fable.RetoldFacetingStoreClickHouse.status() : null;
+		let tmpMaterializer = this.fable.RetoldFacetingMaterializer;
+		let tmpMaterialized = (tmpMaterializer && (typeof(tmpMaterializer.status) === 'function')) ? tmpMaterializer.status() : null;
+		let tmpStoreState = (tmpMaterialized && tmpMaterialized.Stores && tmpMaterialized.Stores.ClickHouse) ? tmpMaterialized.Stores.ClickHouse : null;
+		let tmpReason = (tmpStatus && !tmpStatus.Available && tmpStatus.Reason) ? tmpStatus.Reason
+			: ((tmpStoreState && tmpStoreState.Reason) ? tmpStoreState.Reason : (tmpReady.Reason || 'StoreUnavailable'));
+		return { Configured: true, Available: false, Reason: tmpReason };
+	}
+
+	/**
+	 * Why storeAdmin() refuses an action now (internal-contracts §60.5), or null: unknown action / Level
+	 * → 400; unknown store or an entity it does not materialize → 404 FACET_UNKNOWN_ENTITY; store or
+	 * materializer unavailable → 503 FACET_ENGINE_UNAVAILABLE; the same action in flight for (store,
+	 * entity) → 429 { Limit: 'Admin.InFlight' }; a rebuild within Admin.RebuildCooldownMS of the last
+	 * completed one → 429 { Limit: 'Admin.RebuildCooldownMS' }.
+	 *
+	 * @param {string} pAction
+	 * @param {string} pStore
+	 * @param {string} pEntity
+	 * @return {Error|null}
+	 */
+	storeAdminRefusal(pAction, pStore, pEntity)
+	{
+		if (ADMIN_ACTIONS.indexOf(pAction) < 0)
+		{
+			return libFacetErrors.create('FACET_REQUEST_INVALID', `An admin action is one of ${ADMIN_ACTIONS.join(' | ')}.`, { Field: 'Action' });
+		}
+		if ((typeof(pStore) !== 'string') || !libRetoldFacetingUtil.hasOwn(STORE_ENGINES, pStore) || !this.storeRegistered())
+		{
+			return libFacetErrors.create('FACET_UNKNOWN_ENTITY', 'Unknown store.', { Store: libRetoldFacetingUtil.logSafe(String(pStore)).substring(0, 64) });
+		}
+		let tmpMaterializer = this.fable.RetoldFacetingMaterializer;
+		if (!tmpMaterializer || !tmpMaterializer.started())
+		{
+			return libFacetErrors.create('FACET_ENGINE_UNAVAILABLE', 'The store is not materializing.', { Store: pStore });
+		}
+		if ((typeof(pEntity) !== 'string') || !tmpMaterializer.loop(pStore, pEntity))
+		{
+			return libFacetErrors.create('FACET_UNKNOWN_ENTITY', 'The store does not materialize this entity.', { Store: pStore });
+		}
+		let tmpStatus = tmpMaterializer.status();
+		if (!tmpStatus.Stores[pStore] || !tmpStatus.Stores[pStore].Available)
+		{
+			return libFacetErrors.create('FACET_ENGINE_UNAVAILABLE', 'The store is unavailable.', { Store: pStore });
+		}
+		let tmpRebuilder = this.fable.RetoldFacetingRebuilder;
+		let tmpReconciler = this.fable.RetoldFacetingReconciler;
+		let tmpBusy = this._AdminInFlight.has(`${pStore}:${pEntity}:${pAction}`);
+		if (pAction === 'Rebuild')
+		{
+			tmpBusy = tmpBusy || !!(tmpRebuilder && tmpRebuilder.status(pStore, pEntity));
+		}
+		else if (tmpReconciler && (typeof(tmpReconciler.isRunning) === 'function'))
+		{
+			tmpBusy = tmpBusy || tmpReconciler.isRunning(pStore, pEntity, pAction);
+		}
+		if (tmpBusy)
+		{
+			return libFacetErrors.create('FACET_RATE_LIMITED', 'This action is already running for the entity.', { Limit: 'Admin.InFlight' });
+		}
+		if (pAction === 'Rebuild')
+		{
+			let tmpCooldown = (this.options.Admin && Number.isFinite(this.options.Admin.RebuildCooldownMS)) ? this.options.Admin.RebuildCooldownMS : 600000;
+			let tmpLast = tmpRebuilder ? tmpRebuilder.lastCompleted(pStore, pEntity) : null;
+			// Between rebuilds: a first-enable build (the boot backfill, a wipe recovery) never blocks one.
+			if (tmpLast && (tmpLast.FirstEnable !== true) && (tmpLast.Reason !== libRetoldFacetingRebuilder.BACKFILL_REASON) && (typeof(tmpLast.AtMS) === 'number') && ((Date.now() - tmpLast.AtMS) < tmpCooldown))
+			{
+				return libFacetErrors.create('FACET_RATE_LIMITED', 'The entity was rebuilt recently.', { Limit: 'Admin.RebuildCooldownMS', RetryAfterMS: Math.max(0, tmpCooldown - (Date.now() - tmpLast.AtMS)) });
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * The in-process admin trigger (internal-contracts §60.5): pAction ∈ Rebuild | Sweep | Bisect | Scrub
+	 * | Verify on (store, entity) → the Rebuilder / Reconciler call (Rebuild Reason 'Admin'; Scrub takes
+	 * pOptions.Full).  Refusals per storeAdminRefusal; the Rebuilder's / Reconciler's own errors pass
+	 * through unchanged.  Never throws.
+	 *
+	 * @param {string} pAction
+	 * @param {string} pStore
+	 * @param {string} pEntity
+	 * @param {Record<string, any>} [pOptions]
+	 * @param {(pError?: Error|null, pResult?: Record<string, any>) => void} fCallback
+	 */
+	storeAdmin(pAction, pStore, pEntity, pOptions, fCallback)
+	{
+		let fDone = (typeof(fCallback) === 'function') ? fCallback : ((typeof(pOptions) === 'function') ? pOptions : () => {});
+		let tmpOptions = libRetoldFacetingUtil.isPlainObject(pOptions) ? pOptions : {};
+		let tmpRefusal = this.storeAdminRefusal(pAction, pStore, pEntity);
+		if (tmpRefusal)
+		{
+			return fDone(tmpRefusal);
+		}
+		let tmpKey = `${pStore}:${pEntity}:${pAction}`;
+		this._AdminInFlight.add(tmpKey);
+		let tmpCalledBack = false;
+		let fFinish = (pError, pResult) =>
+		{
+			if (tmpCalledBack)
+			{
+				return;
+			}
+			tmpCalledBack = true;
+			this._AdminInFlight.delete(tmpKey);
+			return fDone(pError || null, pResult);
+		};
+		let tmpRebuilder = this.fable.RetoldFacetingRebuilder;
+		let tmpReconciler = this.fable.RetoldFacetingReconciler;
+		this.fable.log.info(`RetoldFaceting admin: ${pAction} ${pStore}.${libRetoldFacetingUtil.logSafe(pEntity)}.`);
+		try
+		{
+			switch (pAction)
+			{
+				case 'Rebuild':
+					return tmpRebuilder.rebuild(pStore, pEntity, { Reason: 'Admin' }, fFinish);
+				case 'Sweep':
+					return tmpReconciler.sweep(pStore, pEntity, tmpOptions, fFinish);
+				case 'Bisect':
+					return tmpReconciler.bisect(pStore, pEntity, tmpOptions, fFinish);
+				case 'Scrub':
+					return tmpReconciler.scrub(pStore, pEntity, Object.assign({}, tmpOptions, { Full: (tmpOptions.Full !== false) }), fFinish);
+				default:
+					return tmpReconciler.verify(pStore, pEntity, fFinish);
+			}
+		}
+		catch (pAdminError)
+		{
+			this.fable.log.error(`RetoldFaceting admin ${pAction} failed: ${pAdminError.message}`);
+			return fFinish(libFacetErrors.create('FACET_INTERNAL'));
+		}
+	}
+
+	/**
+	 * An admin route request (internal-contracts §60.5; mounted only with Admin.Routes): resolve the
+	 * principal (the M1 401 rules), then Admin.authorize(pRequest, pPrincipal) must return exactly true
+	 * (a host function; absent or anything else → 403 FACET_FORBIDDEN without Detail), then the
+	 * storeAdmin refusals; a started action calls back { Started: true, Action, Store, Entity } at once
+	 * (202) and runs on (its outcome is logged).
+	 *
+	 * @param {string} pRoute - 'Rebuild' | 'Reconcile'
+	 * @param {any} pRequest - restify request (params Store, Entity; body { Level } for Reconcile)
+	 * @param {(pError?: Error|null, pResult?: Record<string, any>) => void} fCallback
+	 */
+	adminRequest(pRoute, pRequest, fCallback)
+	{
+		if (!this._Attached || !this.Host)
+		{
+			return fCallback(libFacetErrors.create('FACET_INTERNAL', 'The faceting service is not attached to a host.'));
+		}
+		let tmpRequest = ((typeof(pRequest) === 'object') && (pRequest !== null)) ? pRequest : { params: {}, headers: {}, query: {} };
+		let tmpParams = tmpRequest.params || {};
+		let tmpContext = this.newContext(null, tmpRequest, {});
+		this.fable.RetoldFacetingPrincipalResolver.resolve(tmpContext,
+			(pPrincipalError, pPrincipal) =>
+			{
+				if (pPrincipalError)
+				{
+					return fCallback(pPrincipalError);
+				}
+				let tmpAuthorize = (this.options.Admin && (typeof(this.options.Admin.authorize) === 'function')) ? this.options.Admin.authorize : null;
+				let tmpAllowed = false;
+				try
+				{
+					tmpAllowed = !!tmpAuthorize && (tmpAuthorize(tmpRequest, pPrincipal) === true);
+				}
+				catch (pAuthorizeError)
+				{
+					this.fable.log.warn(`RetoldFaceting admin: Admin.authorize threw: ${pAuthorizeError.message}`);
+					tmpAllowed = false;
+				}
+				if (!tmpAllowed)
+				{
+					return fCallback(libFacetErrors.create('FACET_FORBIDDEN'));
+				}
+				let tmpBody = libRetoldFacetingUtil.isPlainObject(tmpRequest.body) ? tmpRequest.body : {};
+				let tmpAction = 'Rebuild';
+				if (pRoute === 'Reconcile')
+				{
+					tmpAction = (ADMIN_LEVELS.indexOf(tmpBody.Level) >= 0) ? tmpBody.Level : null;
+					if (!tmpAction)
+					{
+						return fCallback(libFacetErrors.create('FACET_REQUEST_INVALID', `Level is one of ${ADMIN_LEVELS.join(' | ')}.`, { Field: 'Level' }));
+					}
+				}
+				let tmpStore = (typeof(tmpParams.Store) === 'string') ? tmpParams.Store : '';
+				let tmpEntity = (typeof(tmpParams.Entity) === 'string') ? tmpParams.Entity : '';
+				let tmpRefusal = this.storeAdminRefusal(tmpAction, tmpStore, tmpEntity);
+				if (tmpRefusal)
+				{
+					return fCallback(tmpRefusal);
+				}
+				this.storeAdmin(tmpAction, tmpStore, tmpEntity, (tmpAction === 'Scrub') ? { Full: true } : {},
+					(pError) =>
+					{
+						if (pError)
+						{
+							this.fable.log.warn(`RetoldFaceting admin ${tmpAction} ${tmpStore}.${libRetoldFacetingUtil.logSafe(tmpEntity)} failed: ${pError.message}`);
+						}
+					});
+				return fCallback(null, { Started: true, Action: tmpAction, Store: tmpStore, Entity: tmpEntity });
+			});
 	}
 
 	/**
@@ -686,6 +1136,10 @@ class RetoldFacetingService extends libFableServiceProviderBase
 				let tmpEnvelope = JSON.parse(pResult.Body);
 				tmpEnvelope.Version = pResult.Meta.Version;
 				tmpEnvelope.ElapsedMS = Date.now() - pStart;
+				if (pContext.Store)
+				{
+					tmpEnvelope.Store = this.cachedStoreBlock(tmpEnvelope);
+				}
 				pContext.Cache.Coalesced = true;
 				// The leader's post-execution verdict holds for the shared answer (Staged / TooLarge).
 				if (tmpLeaderCache && tmpLeaderCache.Reason)
@@ -938,6 +1392,11 @@ class RetoldFacetingService extends libFableServiceProviderBase
 			return fNext(null, pPlan, null);
 		}
 		let tmpPrecheck = tmpCacheKey.precheck(pContext, pPlan);
+		if (tmpPrecheck.Cacheable && (typeof(pContext.PreferEngine) === 'string') && (pContext.PreferEngine !== 'Live'))
+		{
+			// M5: an in-process engine preference (tests) is never looked up or stored, like ForceEngine.
+			tmpPrecheck = { Cacheable: false, Reason: 'ForceEngine' };
+		}
 		if (!tmpPrecheck.Cacheable)
 		{
 			return fNext(null, pPlan, this.cacheBypass(pContext, tmpPrecheck.Reason, null));
@@ -1149,6 +1608,10 @@ class RetoldFacetingService extends libFableServiceProviderBase
 		fMark(tmpEnvelope);
 		let tmpFacets = (tmpEnvelope.Facets && (typeof(tmpEnvelope.Facets) === 'object')) ? tmpEnvelope.Facets : {};
 		Object.keys(tmpFacets).forEach((pKey) => { if (tmpFacets[pKey] && (typeof(tmpFacets[pKey]) === 'object')) { fMark(tmpFacets[pKey]); } });
+		if (pContext.Store)
+		{
+			tmpEnvelope.Store = this.cachedStoreBlock(tmpEnvelope);
+		}
 		pContext.Cache.Status = pLookup.Status;
 		pContext.Cache.Entry = tmpEntry;
 		pContext.Cache.LagMS = tmpLagMS;
@@ -1252,7 +1715,8 @@ class RetoldFacetingService extends libFableServiceProviderBase
 		let tmpEntity = pContext.Entity;
 		let tmpBody = pContext.RequestBody;
 		let tmpRequest = this.refreshRequest(pContext.Request);
-		let tmpInternal = Object.assign({}, pContext.InternalOptions || {}, { CacheRefresh: true });
+		// M5: the refresh exists to store an entry, and only a Live answer is ever stored (§62.4): it asks Live.
+		let tmpInternal = Object.assign({}, pContext.InternalOptions || {}, { CacheRefresh: true, PreferEngine: 'Live' });
 		return this.fable.RetoldFacetingResultCache.refresh(pContext.Cache.Key,
 			(fDone) =>
 			{
@@ -1307,7 +1771,8 @@ class RetoldFacetingService extends libFableServiceProviderBase
 		{
 			// Keyed at the Cache stage: stored when still cacheable, and the form single-flight joiners
 			// get (never built for an answer no joiner may take).
-			tmpBody = JSON.stringify(Object.assign({}, pEnvelope, { Version: null, ElapsedMS: 0 }));
+			// (M5: without the Store block — a served entry is a Live answer and gets its own, cachedStoreBlock.)
+			tmpBody = JSON.stringify(Object.assign({}, pEnvelope, { Version: null, ElapsedMS: 0, Store: undefined }));
 		}
 		if (tmpCache.Cacheable && (tmpBody !== null))
 		{
@@ -1491,6 +1956,17 @@ class RetoldFacetingService extends libFableServiceProviderBase
 				Limits: this.options.Limits,
 				StorageTimeZone: this.options.Time.StorageTimeZone
 			};
+		// M5 (internal-contracts §62.3): each facet's Engine / Exact / AsOf / LagMS from the engine that
+		// answered its Agg (a store's freshness was read before its statements ran).
+		let tmpEngineFields = {};
+		let fEngineFields = (pKey) =>
+		{
+			if (!libRetoldFacetingUtil.hasOwn(tmpEngineFields, pKey))
+			{
+				tmpEngineFields[pKey] = this.engineFields(pContext, pExecution, pKey);
+			}
+			return tmpEngineFields[pKey];
+		};
 
 		let tmpFacets = {};
 		let tmpErrors = {};
@@ -1519,9 +1995,11 @@ class RetoldFacetingService extends libFableServiceProviderBase
 			let tmpOwned = (tmpAgg.Disjunctive && Array.isArray(tmpAgg.Disjunctive.Owned) ? tmpAgg.Disjunctive.Owned : [])
 				.map((pId) => { return tmpConjunctsById[pId]; })
 				.filter((pConjunct) => { return !!pConjunct; });
+			let tmpFields = fEngineFields(tmpKey);
 			try
 			{
-				tmpFacets[tmpKey] = libFacetEnvelope.buildFacetResult(tmpAgg, tmpRaw, Object.assign({}, tmpPostBase, { OwnedConjuncts: tmpOwned, DisplayName: tmpAgg.DisplayName }));
+				tmpFacets[tmpKey] = libFacetEnvelope.buildFacetResult(tmpAgg, tmpRaw, Object.assign({}, tmpPostBase, { Engine: tmpFields.Engine, AsOf: tmpFields.AsOf, Exact: tmpFields.Exact, OwnedConjuncts: tmpOwned, DisplayName: tmpAgg.DisplayName }));
+				tmpFacets[tmpKey].LagMS = tmpFields.LagMS;
 			}
 			catch (pBuildError)
 			{
@@ -1559,6 +2037,7 @@ class RetoldFacetingService extends libFableServiceProviderBase
 		this.fable.RetoldFacetingLabelResolver.resolve(pContext, tmpLabelWork,
 			() =>
 			{
+				let tmpSummary = this.envelopeEngineFields(pContext, pExecution, tmpRequest, tmpFacets, (tmpTotal === null) ? null : fEngineFields(TOTAL_KEY));
 				let tmpEnvelope = libFacetEnvelope.buildEnvelope(
 					{
 						Records: tmpRecords ? tmpRecords.Records : undefined,
@@ -1569,9 +2048,10 @@ class RetoldFacetingService extends libFableServiceProviderBase
 						Entity: pContext.Entity,
 						Version: null,
 						ModelVersion: this.fable.RetoldFacetingCatalog.modelVersion(),
-						Engine: pExecution.Engine,
-						Exact: (pExecution.Exact !== false),
-						AsOf: pExecution.AsOf || pContext.Now,
+						Engine: tmpSummary.Engine,
+						Exact: tmpSummary.Exact,
+						AsOf: tmpSummary.AsOf,
+						LagMS: tmpSummary.LagMS,
 						ElapsedMS: Date.now() - pStart,
 						Total: (tmpTotal === null) ? undefined : tmpTotal,
 						IncludesDeleted: (pContext.FilterAST.IncludesDeleted === true),
@@ -1580,6 +2060,16 @@ class RetoldFacetingService extends libFableServiceProviderBase
 						Errors: tmpErrors,
 						Warnings: pContext.Warnings.concat(Array.isArray(tmpRequest.Warnings) ? tmpRequest.Warnings : [])
 					});
+				if (tmpSummary.LagMS === null)
+				{
+					// A store answer whose lag is unknown (an entity still building, under PreferEngine).
+					tmpEnvelope.LagMS = null;
+				}
+				// M5 (internal-contracts §62.3): the Store block, only when a store is registered.
+				if (pContext.Store)
+				{
+					tmpEnvelope.Store = this.storeBlock(pContext);
+				}
 				let tmpFailure = libFacetEnvelope.requestFailure(tmpEnvelope, tmpRequest.Total !== false);
 				if (tmpFailure)
 				{
@@ -1592,14 +2082,15 @@ class RetoldFacetingService extends libFableServiceProviderBase
 				tmpEnvelope.Version = tmpVersion;
 				let tmpCaptures = pExecution.Captures || {};
 				let tmpRepaired = Object.keys(tmpCaptures).some((pEntity) => { return !!(tmpCaptures[pEntity] && tmpCaptures[pEntity].Repaired); });
-				return fCallback(null, tmpEnvelope,
+				let tmpMeta =
 					{
 						Version: tmpVersion,
-						Engine: pExecution.Engine,
+						Engine: tmpEnvelope.Engine,
 						ScopeRepaired: tmpRepaired,
 						// Every SQL statement the request ran (facets, staged key sets, label reads, the Records
-						// keys and hydration); Labels counts the label reads among them.
-						Statements: pContext.Counters.Statements || 0,
+						// keys and hydration; M5: and the store's statements, also in Store.Statements); Labels
+						// counts the label reads among them.
+						Statements: (pContext.Counters.Statements || 0) + (pContext.Counters.StoreStatements || 0),
 						Labels: pContext.Counters.Labels || 0,
 						Relations: pContext.Counters.Relations,
 						BehaviorRuns: pContext.Counters.BehaviorRuns,
@@ -1614,7 +2105,255 @@ class RetoldFacetingService extends libFableServiceProviderBase
 						Seq: pContext.SeqAtCompute || null,
 						Freshness: this.freshnessMeta(pContext),
 						ProbeRuns: pContext.Cache ? (pContext.Cache.ProbeRuns || 0) : 0
-					});
+					};
+				if (pContext.Store)
+				{
+					// M5 (internal-contracts §53.5): in-process only; full reasons.
+					tmpMeta.Store = this.storeMeta(pContext, pExecution);
+				}
+				return fCallback(null, tmpEnvelope, tmpMeta);
+			});
+	}
+
+	/**
+	 * One facet's (or the Total's) Engine / Exact / AsOf / LagMS (internal-contracts §62.3): Live →
+	 * Exact, LagMS 0, AsOf the request clock; a store → its freshness for the Agg's DepSet read before
+	 * its statements ran (AsOf = the request clock when LagMS is 0; LagMS null when unbounded).  An
+	 * execution without per-Agg engines (one engine answered everything: M4, ForceEngine) keeps the
+	 * execution-level fields.
+	 *
+	 * @param {Record<string, any>} pContext
+	 * @param {Record<string, any>} pExecution
+	 * @param {string} pKey - an Agg Key ('#Total' for the Total)
+	 * @return {{ Engine: string, Exact: boolean, AsOf: string, LagMS: number|null }}
+	 */
+	engineFields(pContext, pExecution, pKey)
+	{
+		let tmpEngines = (pExecution.Engines && (typeof(pExecution.Engines) === 'object')) ? pExecution.Engines : null;
+		if (!tmpEngines)
+		{
+			return { Engine: pExecution.Engine, Exact: (pExecution.Exact !== false), AsOf: pExecution.AsOf || pContext.Now, LagMS: 0 };
+		}
+		let tmpEngine = libRetoldFacetingUtil.hasOwn(tmpEngines, pKey) ? tmpEngines[pKey] : 'Live';
+		let tmpFreshness = (pExecution.Freshness && libRetoldFacetingUtil.hasOwn(pExecution.Freshness, pKey)) ? pExecution.Freshness[pKey] : null;
+		if ((tmpEngine === 'Live') || !tmpFreshness)
+		{
+			return { Engine: tmpEngine, Exact: true, AsOf: pContext.Now, LagMS: 0 };
+		}
+		let tmpLag = ((typeof(tmpFreshness.LagMS) === 'number') && Number.isFinite(tmpFreshness.LagMS)) ? Math.max(0, Math.round(tmpFreshness.LagMS)) : null;
+		if (!this.storeExposeFreshness())
+		{
+			// The store's lag is global across tenants (another tenant's write makes it lag): on a host
+			// that does not expose freshness only a coarse Exact goes out — no LagMS, no AsOf of it.
+			let tmpExact = (tmpFreshness.Exact === true);
+			return { Engine: tmpEngine, Exact: tmpExact, AsOf: tmpExact ? pContext.Now : null, LagMS: tmpExact ? 0 : null };
+		}
+		return (
+			{
+				Engine: tmpEngine,
+				Exact: (tmpFreshness.Exact === true),
+				AsOf: (tmpLag === 0) ? pContext.Now : (tmpFreshness.AsOf || pContext.Now),
+				LagMS: tmpLag
+			});
+	}
+
+	/**
+	 * The envelope-level Engine / Exact / AsOf / LagMS (internal-contracts §62.3): Engine = the Total's
+	 * engine when the Total was computed, else the first facet's in request order; Exact = every facet
+	 * and the Total Exact; LagMS = the max (null when any is unbounded); AsOf = the oldest.
+	 *
+	 * @param {Record<string, any>} pContext
+	 * @param {Record<string, any>} pExecution
+	 * @param {Record<string, any>} pRequest - the NormalizedRequest
+	 * @param {Record<string, any>} pFacets - the built FacetResults
+	 * @param {Record<string, any>|null} pTotalFields - engineFields of the Total (null: no Total)
+	 * @return {{ Engine: string, Exact: boolean, AsOf: string, LagMS: number|null }}
+	 */
+	envelopeEngineFields(pContext, pExecution, pRequest, pFacets, pTotalFields)
+	{
+		if (!pExecution.Engines || (typeof(pExecution.Engines) !== 'object'))
+		{
+			return { Engine: pExecution.Engine, Exact: (pExecution.Exact !== false), AsOf: pExecution.AsOf || pContext.Now, LagMS: 0 };
+		}
+		let tmpParts = [];
+		if (pTotalFields)
+		{
+			tmpParts.push(pTotalFields);
+		}
+		(Array.isArray(pRequest.Facets) ? pRequest.Facets : []).forEach(
+			(pSpec) =>
+			{
+				let tmpFacet = pFacets[pSpec.Key];
+				if (tmpFacet && (typeof(tmpFacet) === 'object'))
+				{
+					tmpParts.push({ Engine: tmpFacet.Engine, Exact: (tmpFacet.Exact !== false), AsOf: tmpFacet.AsOf, LagMS: tmpFacet.LagMS });
+				}
+			});
+		if (tmpParts.length < 1)
+		{
+			return { Engine: 'Live', Exact: true, AsOf: pContext.Now, LagMS: 0 };
+		}
+		let tmpSummary = { Engine: tmpParts[0].Engine || 'Live', Exact: true, AsOf: tmpParts[0].AsOf || pContext.Now, LagMS: 0 };
+		for (let i = 0; i < tmpParts.length; i++)
+		{
+			tmpSummary.Exact = tmpSummary.Exact && (tmpParts[i].Exact !== false);
+			if ((tmpParts[i].LagMS === null) || (tmpSummary.LagMS === null))
+			{
+				tmpSummary.LagMS = null;
+			}
+			else if (tmpParts[i].LagMS > tmpSummary.LagMS)
+			{
+				tmpSummary.LagMS = tmpParts[i].LagMS;
+			}
+			if ((typeof(tmpParts[i].AsOf) === 'string') && (Date.parse(tmpParts[i].AsOf) < Date.parse(tmpSummary.AsOf)))
+			{
+				tmpSummary.AsOf = tmpParts[i].AsOf;
+			}
+		}
+		return tmpSummary;
+	}
+
+	/**
+	 * Does the envelope's Store block carry full reasons (Stores.ClickHouse.ExposeReasons, the demo) or
+	 * only their classes?
+	 *
+	 * @return {boolean}
+	 */
+	storeExposeReasons()
+	{
+		let tmpStore = this.fable.RetoldFacetingStoreClickHouse;
+		let tmpResolved = (tmpStore && (typeof(tmpStore.resolvedOptions) === 'function')) ? tmpStore.resolvedOptions() : null;
+		if (tmpResolved && (typeof(tmpResolved.ExposeReasons) === 'boolean'))
+		{
+			return tmpResolved.ExposeReasons;
+		}
+		let tmpSection = (this.options.Stores && libRetoldFacetingUtil.isPlainObject(this.options.Stores.ClickHouse)) ? this.options.Stores.ClickHouse : {};
+		return (tmpSection.ExposeReasons === true);
+	}
+
+	/**
+	 * Does the envelope carry the store's freshness (per-facet LagMS / AsOf, the freshness refusal
+	 * reasons) — Stores.ClickHouse.ExposeFreshness, 'Auto' = only on a host without a scope policy (the
+	 * store's lag is global: on a multi-tenant host it is a signal of other tenants' write activity)?
+	 *
+	 * @return {boolean}
+	 */
+	storeExposeFreshness()
+	{
+		let tmpStore = this.fable.RetoldFacetingStoreClickHouse;
+		let tmpResolved = (tmpStore && (typeof(tmpStore.resolvedOptions) === 'function')) ? tmpStore.resolvedOptions() : null;
+		if (tmpResolved && (typeof(tmpResolved.ExposeFreshness) === 'boolean'))
+		{
+			return tmpResolved.ExposeFreshness;
+		}
+		let tmpSection = (this.options.Stores && libRetoldFacetingUtil.isPlainObject(this.options.Stores.ClickHouse)) ? this.options.Stores.ClickHouse : {};
+		if ((tmpSection.ExposeFreshness === true) || (tmpSection.ExposeFreshness === false))
+		{
+			return tmpSection.ExposeFreshness;
+		}
+		return !libOptions.hasScopePolicy(this.options);
+	}
+
+	/**
+	 * A refusal reason as a client may see it: the full §65 reason with ExposeReasons, else its class; a
+	 * freshness reason (State / Unverified / NotExact / Lagging / NoChangeSource / Breaker: they reflect
+	 * the store's global lag, i.e. other tenants' writes) as the neutral 'Freshness' unless
+	 * ExposeFreshness.
+	 *
+	 * @param {string|null} pReason
+	 * @return {string|null}
+	 */
+	clientStoreReason(pReason)
+	{
+		if (typeof(pReason) !== 'string')
+		{
+			return null;
+		}
+		let tmpClass = pReason.split(':')[0];
+		if ((FRESHNESS_REASON_CLASSES.indexOf(tmpClass) >= 0) && !this.storeExposeFreshness())
+		{
+			return 'Freshness';
+		}
+		return this.storeExposeReasons() ? pReason : tmpClass;
+	}
+
+	/**
+	 * The envelope Store block (internal-contracts §62.3): { Name, Available, Facets: { Key: { Engine,
+	 * Reason } } ('#Total' included), Fallback: null | { Reason } }.  A Reason is the full §65 reason
+	 * with Stores.ClickHouse.ExposeReasons, else its class (entity and column names of other tables stay
+	 * in the logs and pMeta.Store); a freshness reason is 'Freshness' unless ExposeFreshness.
+	 *
+	 * @param {Record<string, any>} pContext
+	 * @return {Record<string, any>}
+	 */
+	storeBlock(pContext)
+	{
+		let tmpState = pContext.Store || {};
+		let tmpDecisions = tmpState.Decisions || {};
+		let tmpFacets = {};
+		Object.keys(tmpDecisions).forEach(
+			(pKey) =>
+			{
+				let tmpDecision = tmpDecisions[pKey] || {};
+				tmpFacets[pKey] = { Engine: tmpDecision.Engine || 'Live', Reason: this.clientStoreReason(tmpDecision.Reason) };
+			});
+		return (
+			{
+				Name: tmpState.Name || 'ClickHouse',
+				Available: this.storeAvailability().Available,
+				Facets: tmpFacets,
+				Fallback: tmpState.Fallback ? { Reason: tmpState.Fallback.Reason } : null
+			});
+	}
+
+	/**
+	 * The Store block of an answer served from the result cache (or shared by a single-flight leader):
+	 * entries only ever hold Live answers (§62.4), so every facet and the Total say Live.
+	 *
+	 * @param {Record<string, any>} pEnvelope
+	 * @return {Record<string, any>}
+	 */
+	cachedStoreBlock(pEnvelope)
+	{
+		let tmpFacets = {};
+		Object.keys((pEnvelope && pEnvelope.Facets) ? pEnvelope.Facets : {}).forEach((pKey) => { tmpFacets[pKey] = { Engine: 'Live', Reason: null }; });
+		if (pEnvelope && (typeof(pEnvelope.Total) === 'number'))
+		{
+			tmpFacets[TOTAL_KEY] = { Engine: 'Live', Reason: null };
+		}
+		return { Name: 'ClickHouse', Available: this.storeAvailability().Available, Facets: tmpFacets, Fallback: null };
+	}
+
+	/**
+	 * pMeta.Store (internal-contracts §53.5): { Used: [ AggKey … ], Refused: { AggKey: Reason }, Fallback,
+	 * Statements, ElapsedMS } — full reasons, in-process only.
+	 *
+	 * @param {Record<string, any>} pContext
+	 * @param {Record<string, any>} pExecution
+	 * @return {Record<string, any>}
+	 */
+	storeMeta(pContext, pExecution)
+	{
+		let tmpState = pContext.Store || {};
+		let tmpDecisions = tmpState.Decisions || {};
+		let tmpRefused = {};
+		Object.keys(tmpDecisions).forEach(
+			(pKey) =>
+			{
+				if ((tmpDecisions[pKey].Engine === 'Live') && (typeof(tmpDecisions[pKey].Reason) === 'string'))
+				{
+					tmpRefused[pKey] = tmpDecisions[pKey].Reason;
+				}
+			});
+		return (
+			{
+				Used: Array.isArray(tmpState.Used) ? tmpState.Used.slice() : [],
+				Refused: tmpRefused,
+				Fallback: tmpState.Fallback || null,
+				Statements: tmpState.Statements || 0,
+				ElapsedMS: tmpState.ElapsedMS || 0,
+				Prefer: tmpState.Prefer || 'Auto',
+				Engines: (pExecution && pExecution.Engines) ? Object.assign({}, pExecution.Engines) : {}
 			});
 	}
 
@@ -1643,6 +2382,12 @@ class RetoldFacetingService extends libFableServiceProviderBase
 			tmpReason = 'ScopeChanged';
 			this.fable.log.warn(`RetoldFaceting request ${pContext.RequestID}: the scope of ${libRetoldFacetingUtil.logSafe(tmpDrift.Entity)} changed between the cache probe and the execution; the answer is not cached or shared.`);
 		}
+		else if (this.storeAnswered(pExecution))
+		{
+			// M5 (internal-contracts §62.4): a store answer is never stored, shared or given a generation
+			// Version (binding an ApplyToken into entries is a seam, §70).
+			tmpReason = 'Store';
+		}
 		else if (pEnvelope && pEnvelope.Errors && (Object.keys(pEnvelope.Errors).length > 0))
 		{
 			tmpReason = 'Errors';
@@ -1661,6 +2406,22 @@ class RetoldFacetingService extends libFableServiceProviderBase
 			}
 			this.fable.RetoldFacetingResultCache.note('Bypass', tmpReason);
 		}
+	}
+
+	/**
+	 * Did a store answer any facet (or the Total) of this execution?
+	 *
+	 * @param {Record<string, any>} pExecution
+	 * @return {boolean}
+	 */
+	storeAnswered(pExecution)
+	{
+		let tmpEngines = (pExecution && pExecution.Engines && (typeof(pExecution.Engines) === 'object')) ? pExecution.Engines : null;
+		if (!tmpEngines)
+		{
+			return !!pExecution && (typeof(pExecution.Engine) === 'string') && libRetoldFacetingUtil.hasOwn(STORE_ENGINES, pExecution.Engine);
+		}
+		return Object.keys(tmpEngines).some((pKey) => { return tmpEngines[pKey] !== 'Live'; });
 	}
 
 	/**
@@ -2177,6 +2938,8 @@ class RetoldFacetingService extends libFableServiceProviderBase
 			});
 		let tmpHeaders = (pRequest && pRequest.headers && (typeof(pRequest.headers) === 'object')) ? pRequest.headers : {};
 		let tmpIfNoneMatch = tmpHeaders[IF_NONE_MATCH_HEADER];
+		let tmpMode = ([ 'Records', 'Count', 'Keys' ].indexOf(pMode) >= 0) ? pMode : 'Query';
+		let tmpForceEngine = (typeof(tmpInternal.ForceEngine) === 'string') ? tmpInternal.ForceEngine : null;
 		// What a background refresh repeats (in-process options only; ForceEngine is never cached).
 		let tmpRepeat = {};
 		if ((typeof(tmpInternal.Now) === 'string') || (typeof(tmpInternal.Now) === 'number'))
@@ -2201,10 +2964,13 @@ class RetoldFacetingService extends libFableServiceProviderBase
 				Dialect: null,
 				Now: new Date(tmpClock).toISOString(),
 				Deadline: tmpNow + this.options.Limits.TimeoutMS,
-				ForceEngine: (typeof(tmpInternal.ForceEngine) === 'string') ? tmpInternal.ForceEngine : null,
+				ForceEngine: tmpForceEngine,
+				// M5 (internal-contracts §53.5): 'ClickHouse' routes every capable Agg to the store without the
+				// freshness admission (tests, O3); 'Live' keeps every Agg on Live.  In-process only.
+				PreferEngine: (typeof(tmpInternal.PreferEngine) === 'string') ? tmpInternal.PreferEngine : null,
 				PlanForm: tmpPlanForm,
 				Bind: null,
-				Mode: ([ 'Records', 'Count', 'Keys' ].indexOf(pMode) >= 0) ? pMode : 'Query',
+				Mode: tmpMode,
 				Plan: null,
 				Cubes: [],
 				RecordsResult: null,
@@ -2228,7 +2994,12 @@ class RetoldFacetingService extends libFableServiceProviderBase
 				// the Cache stage makes the answer uncacheable, 'ModelReload').
 				ModelVersion: this.fable.RetoldFacetingCatalog ? this.fable.RetoldFacetingCatalog.modelVersion() : null,
 				// Armed by the Cache stage of a cacheable request: every execution scope capture (§42.8).
-				ScopeLog: null
+				ScopeLog: null,
+				// M5 (internal-contracts §53.5): the store routing of a Query once a store is registered (the
+				// Router fills Prefer / Decisions / Fallback / Statements); null otherwise.
+				Store: (this.storeRegistered() && (tmpMode === 'Query') && !tmpForceEngine)
+					? { Name: 'ClickHouse', Prefer: 'Auto', Decisions: {}, Fallback: null, Statements: 0 }
+					: null
 			});
 	}
 
@@ -2270,7 +3041,7 @@ class RetoldFacetingService extends libFableServiceProviderBase
 						TimeoutMS: tmpLimits.TimeoutMS
 					},
 				Freshness: { DefaultMode: this.options.Freshness.DefaultMode, MaxLagMS: this.options.Freshness.MaxLagMS, ReadYourWritesMS: this.options.Freshness.ReadYourWritesMS },
-				Engines: { Live: { Available: this._Attached, Dialect: (tmpProfile && tmpProfile.Name) ? tmpProfile.Name : null } },
+				Engines: { Live: { Available: this._Attached, Dialect: (tmpProfile && tmpProfile.Name) ? tmpProfile.Name : null }, ClickHouse: this.describeStoreEngine(fCanRead, this.describeStoreDetail(tmpContext)) },
 				// M4 (internal-contracts §44.9): whether answers are cached (and 304 without executing), the
 				// change source, and the change stream a client subscribes to.
 				Cache: { Enabled: this.cacheEnabled() },
@@ -2299,18 +3070,167 @@ class RetoldFacetingService extends libFableServiceProviderBase
 				throw libFacetErrors.create('FACET_UNKNOWN_ENTITY');
 			}
 			tmpDescribe.Entity = pEntity;
-			tmpDescribe.Entities[pEntity] = fOpaque(pEntity, tmpBlock);
+			tmpDescribe.Entities[pEntity] = this.describeEntityStore(pEntity, fOpaque(pEntity, tmpBlock), this.describeStoreDetail(tmpContext));
 			return tmpDescribe;
 		}
+		let tmpDetail = this.describeStoreDetail(tmpContext);
 		for (let i = 0; i < tmpEntities.length; i++)
 		{
 			let tmpBlock = fCanRead(tmpEntities[i]) ? tmpCatalog.describe(tmpEntities[i], pPrincipal, fCanRead) : null;
 			if (tmpBlock)
 			{
-				tmpDescribe.Entities[tmpEntities[i]] = fOpaque(tmpEntities[i], tmpBlock);
+				tmpDescribe.Entities[tmpEntities[i]] = this.describeEntityStore(tmpEntities[i], fOpaque(tmpEntities[i], tmpBlock), tmpDetail);
 			}
 		}
 		return tmpDescribe;
+	}
+
+	/**
+	 * Describe's Engines.ClickHouse (internal-contracts §62.5): { Configured, Available, Reason, Entities:
+	 * { E: { State, LagMS, Exact } } } over the mirrored entities the principal can read; { Available:
+	 * false, Configured: false } without a store section.
+	 *
+	 * @param {(pEntity: string) => boolean} fCanRead
+	 * @return {Record<string, any>}
+	 */
+	describeStoreEngine(fCanRead, pDetail)
+	{
+		let tmpAvailability = this.storeAvailability();
+		if (!tmpAvailability.Configured)
+		{
+			return { Available: false, Configured: false };
+		}
+		if (pDetail !== true)
+		{
+			// Per-entity State / LagMS (other tenants' write activity) and the infrastructure reason
+			// (Unreachable, AuthenticationFailed, SchemaError, …) go to admins and freshness-exposing hosts only.
+			return { Configured: true, Available: tmpAvailability.Available };
+		}
+		let tmpEntities = {};
+		let tmpMirrorSpec = this.fable.RetoldFacetingMirrorSpec;
+		let tmpFreshness = this.fable.RetoldFacetingFreshness;
+		let tmpMirrored = (tmpMirrorSpec && (typeof(tmpMirrorSpec.entities) === 'function')) ? tmpMirrorSpec.entities('ClickHouse') : [];
+		let tmpNow = Date.now();
+		(Array.isArray(tmpMirrored) ? tmpMirrored : []).forEach(
+			(pEntity) =>
+			{
+				if (!fCanRead(pEntity) || !tmpFreshness)
+				{
+					return;
+				}
+				let tmpEntity = tmpFreshness.entityFreshness('ClickHouse', pEntity, tmpNow);
+				tmpEntities[pEntity] = { State: tmpEntity.State, LagMS: Number.isFinite(tmpEntity.LagMS) ? tmpEntity.LagMS : null, Exact: (tmpEntity.Exact === true) };
+			});
+		return { Configured: true, Available: tmpAvailability.Available, Reason: tmpAvailability.Reason, Entities: tmpEntities };
+	}
+
+	/**
+	 * Add the store view to an entity's Describe block (internal-contracts §62.5), only when a store is
+	 * configured: Store.ClickHouse = { Materialized, State, Reason: null | 'NotDeclared' | 'Disabled' |
+	 * 'LossyColumn:<C>', Watermark }, and Engines [ 'Live', 'ClickHouse' ] on every facet descriptor whose
+	 * entities (and, for an entity's own column facet, that column) are mirrored.
+	 *
+	 * @param {string} pEntity
+	 * @param {Record<string, any>} pBlock - the Catalog's Describe block
+	 * @return {Record<string, any>} pBlock
+	 */
+	describeEntityStore(pEntity, pBlock, pDetail)
+	{
+		if (!this.storeAvailability().Configured || !pBlock)
+		{
+			return pBlock;
+		}
+		let tmpDetail = (pDetail === true);
+		let tmpMirrorSpec = this.fable.RetoldFacetingMirrorSpec;
+		let fSpec = (pTarget) =>
+		{
+			return (tmpMirrorSpec && (typeof(tmpMirrorSpec.spec) === 'function')) ? tmpMirrorSpec.spec('ClickHouse', pTarget) : null;
+		};
+		let tmpSpec = fSpec(pEntity);
+		let tmpReason = null;
+		let tmpState = 'Absent';
+		if (!tmpSpec)
+		{
+			let tmpDisabled = (tmpMirrorSpec && (typeof(tmpMirrorSpec.disabled) === 'function')) ? tmpMirrorSpec.disabled() : [];
+			tmpReason = (Array.isArray(tmpDisabled) && tmpDisabled.some((pEntry) => { return pEntry && (pEntry.Entity === pEntity) && ((pEntry.Store === 'ClickHouse') || !pEntry.Store); })) ? 'Disabled' : 'NotDeclared';
+		}
+		else
+		{
+			let tmpFreshness = this.fable.RetoldFacetingFreshness;
+			tmpState = tmpFreshness ? tmpFreshness.entityFreshness('ClickHouse', pEntity, Date.now()).State : 'Absent';
+			let tmpMaterializer = this.fable.RetoldFacetingMaterializer;
+			let tmpInfo = (tmpMaterializer && (typeof(tmpMaterializer.entityInfo) === 'function')) ? tmpMaterializer.entityInfo('ClickHouse', pEntity) : null;
+			let tmpLossy = (tmpInfo && tmpInfo.Lossy && (typeof(tmpInfo.Lossy) === 'object')) ? tmpInfo.Lossy : {};
+			let tmpLossyColumn = Object.keys(tmpLossy).sort().find((pColumn) => { return tmpLossy[pColumn] === 'Value'; });
+			if (tmpLossyColumn)
+			{
+				// The column name says another tenant holds such a value: the class only, unless detailed.
+				tmpReason = (tmpDetail && this.storeExposeReasons()) ? `LossyColumn:${tmpLossyColumn}` : 'LossyColumn';
+			}
+		}
+		pBlock.Store = { ClickHouse: { Materialized: !!tmpSpec, Reason: tmpReason, Watermark: (tmpSpec && tmpSpec.Watermark) ? tmpSpec.Watermark : null } };
+		if (tmpDetail)
+		{
+			pBlock.Store.ClickHouse.State = tmpState;
+		}
+		let tmpRegistry = this.fable.RetoldFacetingDefinitionRegistry;
+		(Array.isArray(pBlock.Facets) ? pBlock.Facets : []).forEach(
+			(pDescriptor) =>
+			{
+				let tmpMirrored = false;
+				if ((pDescriptor.Auto === true) && !Array.isArray(pDescriptor.Path) && (typeof(pDescriptor.Field) === 'string'))
+				{
+					tmpMirrored = !!tmpSpec && Array.isArray(tmpSpec.ColumnNames) && (tmpSpec.ColumnNames.indexOf(pDescriptor.Field) >= 0);
+				}
+				else if (tmpRegistry && (typeof(tmpRegistry.resolveFacet) === 'function'))
+				{
+					let tmpFacet = null;
+					try
+					{
+						tmpFacet = tmpRegistry.resolveFacet(pDescriptor.Facet);
+					}
+					catch (pResolveError)
+					{
+						tmpFacet = null;
+					}
+					let tmpEntities = (tmpFacet && Array.isArray(tmpFacet.Entities)) ? tmpFacet.Entities : [];
+					tmpMirrored = (tmpEntities.length > 0) && tmpEntities.every((pTarget) => { return !!fSpec(pTarget); });
+				}
+				if (tmpMirrored)
+				{
+					pDescriptor.Engines = [ 'Live', 'ClickHouse' ];
+				}
+			});
+		return pBlock;
+	}
+
+	/**
+	 * May this Describe see the store's per-entity state (State, LagMS, Exact) and infrastructure
+	 * reasons?  On a host that exposes freshness, everyone; otherwise only a principal that passes
+	 * Admin.authorize(pRequest, pPrincipal) === true.
+	 *
+	 * @param {Record<string, any>} pContext
+	 * @return {boolean}
+	 */
+	describeStoreDetail(pContext)
+	{
+		if (this.storeExposeFreshness())
+		{
+			return true;
+		}
+		let tmpAuthorize = (this.options.Admin && (typeof(this.options.Admin.authorize) === 'function')) ? this.options.Admin.authorize : null;
+		if (!tmpAuthorize || !pContext || !pContext.Request || !pContext.Principal)
+		{
+			return false;
+		}
+		try
+		{
+			return tmpAuthorize(pContext.Request, pContext.Principal) === true;
+		}
+		catch (pError)
+		{
+			return false;
+		}
 	}
 
 	/**
@@ -2384,13 +3304,17 @@ class RetoldFacetingService extends libFableServiceProviderBase
 				Role: this.options.Role,
 				Attached: this._Attached,
 				ModelVersion: this.fable.RetoldFacetingCatalog ? this.fable.RetoldFacetingCatalog.modelVersion() : null,
-				Engines: { Live: { Available: this._Attached } },
+				Engines: { Live: { Available: this._Attached }, ClickHouse: this.storeAvailability() },
 				// M4 (internal-contracts §44.9): counters only, never tenant data.
 				Cache: Object.assign({ Enabled: this.cacheEnabled() }, fStats(this.fable.RetoldFacetingResultCache) || {}),
 				Generations: fStats(this.fable.RetoldFacetingGenerations),
 				Changes: fStats(this.fable.RetoldFacetingChangeIntake),
 				SSE: fStats(this.fable.RetoldFacetingSSE),
-				ReadYourWrites: fStats(this.fable.RetoldFacetingReadYourWrites)
+				ReadYourWrites: fStats(this.fable.RetoldFacetingReadYourWrites),
+				// M5 (internal-contracts §62.5)
+				Stores: (this.fable.RetoldFacetingMaterializer && this._StoreInstall.Configured) ? this.fable.RetoldFacetingMaterializer.status() : { Stores: {} },
+				Freshness: fStats(this.fable.RetoldFacetingFreshness),
+				StoreClickHouse: this.fable.RetoldFacetingStoreClickHouse ? this.fable.RetoldFacetingStoreClickHouse.status() : null
 			});
 	}
 

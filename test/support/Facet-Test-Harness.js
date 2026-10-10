@@ -14,7 +14,10 @@
  * Ports: the server binds an EPHEMERAL port by default (the OS picks a free one; baseURL is read
  * back once it listens), so overlapping runs never collide.  Port (19100–19199, one per test file)
  * still names the run, and FixedPort: true binds exactly that port (debug scripts).  Host (optional)
- * binds that address only (e.g. '127.0.0.1'; default: every interface, as Orator does), and
+ * binds that address only (e.g. '127.0.0.1'); the default is 127.0.0.1 for an ephemeral port (every
+ * request goes to 127.0.0.1: a wildcard bind could get the port number another process holds on
+ * 127.0.0.1 — e.g. a running demo's domain servers — and loopback requests would reach THAT server)
+ * and every interface for a FixedPort (as Orator does), and
  * BeforeListen(pHarness) (optional) runs after the test session shim is installed and before the
  * server listens, so a host can add its own restify pre() handlers with no window (the demo's
  * loopback guard).
@@ -34,6 +37,19 @@
  * every list, count and facet route).  In-process calls build a synthetic request carrying the same
  * UserSession.  No Tenant and no User → the anonymous default session.  In-process calls also take
  * pOptions.Now (pin the request clock: $Now / $Today) and pOptions.PlanForm ({ Cube, Staged }).
+ *
+ * Store: 'ClickHouse' (M5, internal-contracts §62.6; needs the ClickHouse gate, else fDone gets an error
+ * whose .Skip === true): a fresh rfs_<pid>_<n> database in Faceting.Stores.ClickHouse, StoreOptions
+ *   { Materialize: 'All' (default) | { Entity: <declaration> }, Reconcile: { … } (AutoStart false unless
+ *     given), Store: { …extra Stores.ClickHouse keys, e.g. URL / RetryConnectMS / ExposeReasons },
+ *     Quiesce: false (do not wait for the backfill: a store that is down on purpose), QuiesceTimeoutMS,
+ *     Database: a fixed name instead of rfs_<pid>_<n> (the demo's rfs_demo_<domain>; kept by stop()),
+ *     DropFirst: true (drop that fixed database before attach, so the backfill starts empty) }
+ * then, after attach, Materializer.quiesce (the backfill is done).  Members: store (StoreClickHouse),
+ * materializer, quiesce(fCallback), storeQuery(E, body, options, cb) (in-process, PreferEngine
+ * 'ClickHouse'), compareStore(E, body, options, cb) → { Store, Live, Reference, StoreNormalized,
+ * LiveNormalized, ReferenceNormalized, Engines, StoreMeta } (O3 in one call; Now pinned to the domain's
+ * TestNow unless given); stop() also drops the database.
  *
  * MeadowEndpoints: 'Installed' (default; the umbrella's meadow-endpoints, 4.0.21 today) or 'Monorepo'
  * (modules/meadow/meadow-endpoints, 4.1.x): the version the harness's endpoints are built with (an
@@ -496,7 +512,7 @@ const start = (pOptions, fDone) =>
 	{
 		tmpInput.Fixture = tmpInput.Domain;
 	}
-	let tmpOptions = Object.assign({ Fixture: 'Bookstore', Provider: 'SQLite', Definitions: 'Auto', Seed: null, Scale: 'Small', Faceting: {}, TenancyBehavior: 'Auto', TenancyEntities: null, LogLevel: 'fatal', FixedPort: false, Host: null, BeforeListen: null, MeadowEndpoints: 'Installed' }, tmpInput);
+	let tmpOptions = Object.assign({ Fixture: 'Bookstore', Provider: 'SQLite', Definitions: 'Auto', Seed: null, Scale: 'Small', Faceting: {}, TenancyBehavior: 'Auto', TenancyEntities: null, LogLevel: 'fatal', FixedPort: false, Host: null, BeforeListen: null, MeadowEndpoints: 'Installed', Store: null, StoreOptions: {} }, tmpInput);
 	if ((typeof(tmpOptions.Port) !== 'number') || (tmpOptions.Port < 19100) || (tmpOptions.Port > 19199))
 	{
 		throw new Error('Facet-Test-Harness.start needs a unique Port in 19100-19199 (internal-contracts §14.4).');
@@ -582,6 +598,34 @@ const start = (pOptions, fDone) =>
 	else
 	{
 		delete tmpFacetingOptions.Definitions;
+	}
+	// M5 (internal-contracts §62.6): the ClickHouse store on a fresh database.
+	let tmpStoreSupport = null;
+	let tmpStoreDatabase = null;
+	let tmpStoreOptions = ((typeof(tmpOptions.StoreOptions) === 'object') && (tmpOptions.StoreOptions !== null)) ? tmpOptions.StoreOptions : {};
+	if ((tmpOptions.Store !== null) && (typeof(tmpOptions.Store) !== 'undefined') && (tmpOptions.Store !== false))
+	{
+		if (tmpOptions.Store !== 'ClickHouse')
+		{
+			throw new Error('Facet-Test-Harness.start: Store must be \'ClickHouse\'.');
+		}
+		tmpStoreSupport = require('./Facet-ClickHouse-Support.js');
+		let tmpGate = tmpStoreSupport.available();
+		if (!tmpGate.Available)
+		{
+			let tmpSkip = new Error(`Facet-Test-Harness: the ClickHouse store is unavailable: ${tmpGate.Reason}`);
+			tmpSkip.Skip = true;
+			tmpHarness.stop = (fStopDone) => { tmpHarness._Stopped = true; return fStopDone(); };
+			setImmediate(() => { fDone(tmpSkip); });
+			return tmpHarness;
+		}
+		// A fixed name (the demo) or a fresh rfs_<pid>_<n> (tests; dropped by stop()).
+		tmpStoreDatabase = ((typeof(tmpStoreOptions.Database) === 'string') && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(tmpStoreOptions.Database)) ? tmpStoreOptions.Database : tmpStoreSupport.freshDatabase();
+		tmpHarness.storeDatabaseFixed = (tmpStoreDatabase === tmpStoreOptions.Database);
+		tmpFacetingOptions.Stores = Object.assign({}, tmpFacetingOptions.Stores || {}, { ClickHouse: tmpStoreSupport.storeOptions(tmpStoreDatabase, tmpStoreOptions.Store || {}) });
+		tmpFacetingOptions.Materialize = tmpStoreOptions.Materialize || 'All';
+		tmpFacetingOptions.Reconcile = libOptions.deepMerge(libOptions.deepMerge({ AutoStart: false }, tmpFacetingOptions.Reconcile || {}), tmpStoreOptions.Reconcile || {});
+		tmpHarness.storeDatabase = tmpStoreDatabase;
 	}
 	tmpHarness.facetingOptions = tmpFacetingOptions;
 
@@ -708,106 +752,152 @@ const start = (pOptions, fDone) =>
 		return null;
 	};
 
-	libProviders.connect(tmpOptions.Provider, tmpFable, tmpOptions,
-		(pConnectError, pConnection) =>
+	let fEnsureStore = (fNext) =>
+	{
+		if (!tmpStoreSupport)
 		{
-			if (pConnectError)
+			return fNext();
+		}
+		return tmpStoreSupport.ensure(
+			(pEnsureError) =>
 			{
-				return fDone(pConnectError);
-			}
-			tmpHarness.connection = pConnection;
-			tmpHarness.db = pConnection.db || null;
-			libProviders.seed(pConnection, tmpSeedModule, { Fixture: tmpOptions.Fixture, Seed: tmpOptions.Seed, Scale: tmpOptions.Scale },
-				(pSeedError, pSeedResult) =>
+				if (pEnsureError || !tmpHarness.storeDatabaseFixed || (tmpStoreOptions.DropFirst !== true))
 				{
-					if (pSeedError)
+					return fNext(pEnsureError || null);
+				}
+				require('./Facet-Docker-ClickHouse.js').query(tmpStoreSupport.connectionInfo(), `DROP DATABASE IF EXISTS \`${tmpStoreDatabase}\` SYNC`, (pDropError) => { return fNext(pDropError || null); });
+			});
+	};
+	/**
+	 * After attach (M5): the store members, then wait for the backfill (unless StoreOptions.Quiesce false).
+	 *
+	 * @param {(pError?: Error) => void} fNext
+	 */
+	let fStoreReady = (fNext) =>
+	{
+		if (!tmpStoreSupport)
+		{
+			return fNext();
+		}
+		tmpHarness.store = tmpFable.RetoldFacetingStoreClickHouse;
+		tmpHarness.materializer = tmpFable.RetoldFacetingMaterializer;
+		if (tmpStoreOptions.Quiesce === false)
+		{
+			return fNext();
+		}
+		tmpHarness.quiesce((pQuiesceError) => { return fNext(pQuiesceError || null); }, (typeof(tmpStoreOptions.QuiesceTimeoutMS) === 'number') ? tmpStoreOptions.QuiesceTimeoutMS : 90000);
+	};
+
+	fEnsureStore(
+		(pEnsureError) =>
+		{
+			if (pEnsureError)
+			{
+				return fDone(pEnsureError);
+			}
+			libProviders.connect(tmpOptions.Provider, tmpFable, tmpOptions,
+				(pConnectError, pConnection) =>
+				{
+					if (pConnectError)
 					{
-						return fDone(pSeedError);
+						return fDone(pConnectError);
 					}
-					tmpHarness.seed = pSeedResult;
-					tmpHarness.model = tmpHarness.seed.Model;
-					tmpHarness.principals = tmpHarness.seed.Principals || {};
-					tmpHarness.traps = tmpHarness.seed.Traps || {};
-
-					let tmpStorageProvider = pConnection.StorageProvider || tmpOptions.Provider;
-					tmpFable.serviceManager.addServiceType('RetoldDataService', libRetoldDataService);
-					tmpFable.serviceManager.instantiateServiceProvider('RetoldDataService', { StorageProvider: tmpStorageProvider, FullMeadowSchemaFilename: false });
-					tmpHarness.rds = tmpFable.RetoldDataService;
-
-					// Test-only session shim (runs before routing, for list AND facet routes).
-					tmpFable.OratorServiceServer.pre(
-						(pRequest, pResponse, fNext) =>
+					tmpHarness.connection = pConnection;
+					tmpHarness.db = pConnection.db || null;
+					libProviders.seed(pConnection, tmpSeedModule, { Fixture: tmpOptions.Fixture, Seed: tmpOptions.Seed, Scale: tmpOptions.Scale },
+						(pSeedError, pSeedResult) =>
 						{
-							let tmpTenantHeader = pRequest.headers ? pRequest.headers[TENANT_HEADER] : null;
-							let tmpUserHeader = pRequest.headers ? pRequest.headers[USER_HEADER] : null;
-							if (tmpTenantHeader || tmpUserHeader)
+							if (pSeedError)
 							{
-								pRequest.UserSession = sessionFor(
-									{
-										Tenant: tmpTenantHeader ? parseInt(tmpTenantHeader, 10) : undefined,
-										User: tmpUserHeader ? parseInt(tmpUserHeader, 10) : undefined
-									});
+								return fDone(pSeedError);
 							}
-							return fNext();
-						});
+							tmpHarness.seed = pSeedResult;
+							tmpHarness.model = tmpHarness.seed.Model;
+							tmpHarness.principals = tmpHarness.seed.Principals || {};
+							tmpHarness.traps = tmpHarness.seed.Traps || {};
 
-					// Host hooks: a bind address, then the host's own pre() handlers, both before listen.
-					if ((typeof(tmpOptions.Host) === 'string') && (tmpOptions.Host.length > 0))
-					{
-						bindHost(tmpFable.OratorServiceServer, tmpOptions.Host);
-					}
-					if (typeof(tmpOptions.BeforeListen) === 'function')
-					{
-						try
-						{
-							tmpOptions.BeforeListen(tmpHarness);
-						}
-						catch (pHookError)
-						{
-							return fDone(pHookError);
-						}
-					}
+							let tmpStorageProvider = pConnection.StorageProvider || tmpOptions.Provider;
+							tmpFable.serviceManager.addServiceType('RetoldDataService', libRetoldDataService);
+							tmpFable.serviceManager.instantiateServiceProvider('RetoldDataService', { StorageProvider: tmpStorageProvider, FullMeadowSchemaFilename: false });
+							tmpHarness.rds = tmpFable.RetoldDataService;
 
-					fSelectEndpoints();
-					tmpHarness.rds.initializeService(
-						(pInitError) =>
-						{
-							if (pInitError)
-							{
-								fRestoreEndpoints();
-								return fDone(pInitError);
-							}
-							// The port the server really listens on (ephemeral by default).
-							let tmpRestify = tmpFable.OratorServiceServer ? tmpFable.OratorServiceServer.server : null;
-							let tmpAddress = (tmpRestify && (typeof(tmpRestify.address) === 'function')) ? tmpRestify.address() : null;
-							if (tmpAddress && (typeof(tmpAddress.port) === 'number'))
-							{
-								tmpHarness.port = tmpAddress.port;
-								tmpHarness.baseURL = `http://127.0.0.1:${tmpAddress.port}`;
-							}
-							let tmpModelName = tmpIsDomain ? tmpOptions.Fixture : 'Bookstore';
-							tmpHarness.rds.loadModel(tmpModelName, tmpHarness.model, tmpStorageProvider,
-								(pLoadError) =>
+							// Test-only session shim (runs before routing, for list AND facet routes).
+							tmpFable.OratorServiceServer.pre(
+								(pRequest, pResponse, fNext) =>
 								{
-									fRestoreEndpoints();
-									if (pLoadError)
+									let tmpTenantHeader = pRequest.headers ? pRequest.headers[TENANT_HEADER] : null;
+									let tmpUserHeader = pRequest.headers ? pRequest.headers[USER_HEADER] : null;
+									if (tmpTenantHeader || tmpUserHeader)
 									{
-										return fDone(pLoadError);
-									}
-									let tmpTenancyError = fInstallTenancy();
-									if (tmpTenancyError)
-									{
-										return fDone(tmpTenancyError);
-									}
-									libRetoldFacetingService.installOnRetoldDataService(tmpHarness.rds, tmpFacetingOptions,
-										(pInstallError, pService) =>
-										{
-											if (pInstallError)
+										pRequest.UserSession = sessionFor(
 											{
-												return fDone(pInstallError);
+												Tenant: tmpTenantHeader ? parseInt(tmpTenantHeader, 10) : undefined,
+												User: tmpUserHeader ? parseInt(tmpUserHeader, 10) : undefined
+											});
+									}
+									return fNext();
+								});
+
+							// Host hooks: a bind address, then the host's own pre() handlers, both before listen.
+							let tmpBindAddress = ((typeof(tmpOptions.Host) === 'string') && (tmpOptions.Host.length > 0)) ? tmpOptions.Host
+								: ((tmpOptions.FixedPort === true) ? null : '127.0.0.1');
+							if (tmpBindAddress)
+							{
+								bindHost(tmpFable.OratorServiceServer, tmpBindAddress);
+							}
+							if (typeof(tmpOptions.BeforeListen) === 'function')
+							{
+								try
+								{
+									tmpOptions.BeforeListen(tmpHarness);
+								}
+								catch (pHookError)
+								{
+									return fDone(pHookError);
+								}
+							}
+
+							fSelectEndpoints();
+							tmpHarness.rds.initializeService(
+								(pInitError) =>
+								{
+									if (pInitError)
+									{
+										fRestoreEndpoints();
+										return fDone(pInitError);
+									}
+									// The port the server really listens on (ephemeral by default).
+									let tmpRestify = tmpFable.OratorServiceServer ? tmpFable.OratorServiceServer.server : null;
+									let tmpAddress = (tmpRestify && (typeof(tmpRestify.address) === 'function')) ? tmpRestify.address() : null;
+									if (tmpAddress && (typeof(tmpAddress.port) === 'number'))
+									{
+										tmpHarness.port = tmpAddress.port;
+										tmpHarness.baseURL = `http://127.0.0.1:${tmpAddress.port}`;
+									}
+									let tmpModelName = tmpIsDomain ? tmpOptions.Fixture : 'Bookstore';
+									tmpHarness.rds.loadModel(tmpModelName, tmpHarness.model, tmpStorageProvider,
+										(pLoadError) =>
+										{
+											fRestoreEndpoints();
+											if (pLoadError)
+											{
+												return fDone(pLoadError);
 											}
-											tmpHarness.faceting = pService || tmpFable.RetoldFacetingService;
-											return fDone();
+											let tmpTenancyError = fInstallTenancy();
+											if (tmpTenancyError)
+											{
+												return fDone(tmpTenancyError);
+											}
+											libRetoldFacetingService.installOnRetoldDataService(tmpHarness.rds, tmpFacetingOptions,
+												(pInstallError, pService) =>
+												{
+													if (pInstallError)
+													{
+														return fDone(pInstallError);
+													}
+													tmpHarness.faceting = pService || tmpFable.RetoldFacetingService;
+													return fStoreReady((pStoreError) => { return fDone(pStoreError || undefined); });
+												});
 										});
 								});
 						});
@@ -821,13 +911,66 @@ const start = (pOptions, fDone) =>
 	 */
 	tmpHarness.stop = (fStopDone) =>
 	{
-		let fRelease = () =>
+		let fReleaseStore = () =>
 		{
-			if (!tmpHarness.connection)
+			if (!tmpStoreSupport || !tmpStoreDatabase || tmpHarness.storeDatabaseFixed)
 			{
 				return fStopDone();
 			}
-			return libProviders.release(tmpHarness.connection, () => { return fStopDone(); });
+			return tmpStoreSupport.release(tmpStoreDatabase, () => { return fStopDone(); });
+		};
+		/**
+		 * The materializer's timers (lease heartbeat, coalesced state writes, health check) must not
+		 * outlive the harness: a fixed database (the demo) gets a graceful shutdown (CleanShutdown, the
+		 * lease released); a test database about to be dropped is simply abandoned (crash: nothing
+		 * written, every timer cleared, the client's sockets closed).
+		 *
+		 * @param {() => void} fNext
+		 */
+		let fQuietStore = (fNext) =>
+		{
+			let tmpMaterializer = (tmpStoreSupport && tmpHarness.fable) ? tmpHarness.fable.RetoldFacetingMaterializer : null;
+			if (!tmpMaterializer)
+			{
+				return fNext();
+			}
+			if (tmpHarness.storeDatabaseFixed && tmpHarness.faceting && (typeof(tmpHarness.faceting.shutdown) === 'function'))
+			{
+				return tmpHarness.faceting.shutdown(() => { return fNext(); });
+			}
+			try
+			{
+				tmpMaterializer.crash();
+			}
+			catch (pCrashError)
+			{
+				// stopping anyway
+			}
+			let tmpStore = tmpHarness.fable.RetoldFacetingStoreClickHouse;
+			try
+			{
+				if (tmpStore && (typeof(tmpStore.close) === 'function'))
+				{
+					tmpStore.close();
+				}
+			}
+			catch (pCloseError)
+			{
+				// stopping anyway
+			}
+			return fNext();
+		};
+		let fRelease = () =>
+		{
+			fQuietStore(
+				() =>
+				{
+					if (!tmpHarness.connection)
+					{
+						return fReleaseStore();
+					}
+					return libProviders.release(tmpHarness.connection, () => { return fReleaseStore(); });
+				});
 		};
 		if (tmpHarness._Stopped)
 		{
@@ -1054,6 +1197,91 @@ const start = (pOptions, fDone) =>
 								ReferenceNormalized: libFacetEnvelope.normalizeForComparison(pReferenceEnvelope),
 								LiveMeta: pLiveMeta,
 								ReferenceMeta: pReferenceMeta
+							});
+					});
+			});
+	};
+
+	/**
+	 * M5 (internal-contracts §62.6): wait until the store's materializer has no pending, in-flight,
+	 * buffered or building work and its last flush was acknowledged.
+	 *
+	 * @param {(pError?: Error) => void} fCallback
+	 * @param {number} [pTimeoutMS] - default 30000
+	 */
+	tmpHarness.quiesce = (fCallback, pTimeoutMS) =>
+	{
+		let tmpMaterializer = tmpHarness.fable ? tmpHarness.fable.RetoldFacetingMaterializer : null;
+		if (!tmpMaterializer)
+		{
+			return fCallback(new Error('Facet-Test-Harness.quiesce: no materializer.'));
+		}
+		return tmpMaterializer.quiesce('ClickHouse', null, (typeof(pTimeoutMS) === 'number') ? pTimeoutMS : 30000, (pError) => { setImmediate(() => { fCallback(pError || null); }); });
+	};
+
+	/**
+	 * M5: the request in-process with PreferEngine 'ClickHouse' (every Agg the store is capable of goes to
+	 * the store, without the freshness admission), honoring pOptions.Now / PlanForm.
+	 */
+	tmpHarness.storeQuery = (pEntity, pBody, pRequestOptions, fCallback) =>
+	{
+		return fInProcess(pEntity, pBody, pRequestOptions, internalOptions(pRequestOptions, { PreferEngine: 'ClickHouse' }), fCallback);
+	};
+
+	/**
+	 * M5 (O3 in one call): the same body as the same principal with the same pinned clock (pOptions.Now,
+	 * default the domain's TestNow) on the store (PreferEngine 'ClickHouse'), on Live (PreferEngine
+	 * 'Live') and through the Reference.  Engines: { Key: 'ClickHouse' | 'Live' } from the store
+	 * answer's Store block; StoreMeta: its pMeta.Store (full reasons).
+	 *
+	 * @param {string} pEntity
+	 * @param {Record<string, any>} pBody
+	 * @param {Record<string, any>} pRequestOptions
+	 * @param {(pError?: Error, pResult?: Record<string, any>) => void} fCallback
+	 */
+	tmpHarness.compareStore = (pEntity, pBody, pRequestOptions, fCallback) =>
+	{
+		let tmpRequestOptions = Object.assign({}, pRequestOptions || {});
+		if ((typeof(tmpRequestOptions.Now) !== 'string') && (typeof(tmpRequestOptions.Now) !== 'number'))
+		{
+			tmpRequestOptions.Now = tmpHarness.traps.TestNow || new Date().toISOString();
+		}
+		fInProcess(pEntity, pBody, tmpRequestOptions, internalOptions(tmpRequestOptions, { PreferEngine: 'ClickHouse' }),
+			(pStoreError, pStoreEnvelope, pStoreMeta) =>
+			{
+				if (pStoreError)
+				{
+					return fCallback(pStoreError);
+				}
+				fInProcess(pEntity, pBody, tmpRequestOptions, internalOptions(tmpRequestOptions, { PreferEngine: 'Live' }),
+					(pLiveError, pLiveEnvelope, pLiveMeta) =>
+					{
+						if (pLiveError)
+						{
+							return fCallback(pLiveError);
+						}
+						fInProcess(pEntity, pBody, tmpRequestOptions, internalOptions(tmpRequestOptions, { ForceEngine: 'Reference' }),
+							(pReferenceError, pReferenceEnvelope) =>
+							{
+								if (pReferenceError)
+								{
+									return fCallback(pReferenceError);
+								}
+								let tmpEngines = {};
+								let tmpBlock = (pStoreEnvelope && pStoreEnvelope.Store && pStoreEnvelope.Store.Facets) ? pStoreEnvelope.Store.Facets : {};
+								Object.keys(tmpBlock).forEach((pKey) => { tmpEngines[pKey] = tmpBlock[pKey].Engine; });
+								return fCallback(null,
+									{
+										Store: pStoreEnvelope,
+										Live: pLiveEnvelope,
+										Reference: pReferenceEnvelope,
+										StoreNormalized: libFacetEnvelope.normalizeForComparison(pStoreEnvelope),
+										LiveNormalized: libFacetEnvelope.normalizeForComparison(pLiveEnvelope),
+										ReferenceNormalized: libFacetEnvelope.normalizeForComparison(pReferenceEnvelope),
+										Engines: tmpEngines,
+										StoreMeta: (pStoreMeta && pStoreMeta.Store) ? pStoreMeta.Store : null,
+										LiveMeta: pLiveMeta
+									});
 							});
 					});
 			});

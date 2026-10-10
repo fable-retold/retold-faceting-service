@@ -45,7 +45,9 @@ const KEY_VERSION = 1;
 const UNCACHEABLE_REASONS = Object.freeze(
 	[
 		'Mode', 'ForceEngine', 'PlanErrors', 'NoChangeSource', 'ModelReload', 'TooManyEntities', 'ProbeError', 'Opaque', 'RecordsPostOperation', 'NotCacheable',
-		'Errors', 'Staged', 'ScopeChanged', 'TooLarge'
+		'Errors', 'Staged', 'ScopeChanged', 'TooLarge',
+		// M5 (internal-contracts §62.4): any facet answered by a store (digest Version, never stored or shared)
+		'Store'
 	]);
 
 // The probe reasons, in the precedence cacheability() reports them.

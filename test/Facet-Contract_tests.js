@@ -348,6 +348,8 @@ suite
 								TimeoutMS: 10000,
 								// M4 (internal-contracts §44.2): the normalized Freshness.
 								Freshness: { Mode: 'Exact', MaxLagMS: 5000, MinSeq: null },
+								// M5 (internal-contracts §62.2): the request Engine.
+								Engine: 'Auto',
 								Warnings: []
 							});
 					});
@@ -642,6 +644,14 @@ suite
 						Expect(libFacetRequest.normalizeRequest('BookStoreSale', base({}), { Freshness: { DefaultMode: 'Fast', MaxLagMS: 250, MaxAgeMS: 1000 } }).Freshness).to.deep.equal({ Mode: 'Fast', MaxLagMS: 250, MinSeq: null });
 						expectFacetError(() => { libFacetRequest.normalizeRequest('BookStoreSale', base({ Freshness: { MaxLagMS: 1001 } }), { Freshness: { MaxAgeMS: 1000 } }); }, 'FACET_REQUEST_INVALID', { Field: 'Freshness.MaxLagMS', Max: 1000 });
 						Expect(libFacetRequest.FRESHNESS_MODES).to.deep.equal([ 'Exact', 'Bounded', 'Fast' ]);
+						// M5 (internal-contracts §62.2): Engine 'Auto' (default) | 'Live', every mode, anything else 400.
+						Expect(libFacetRequest.REQUEST_ENGINES).to.deep.equal([ 'Auto', 'Live' ]);
+						Expect(normalize(base({ Engine: 'Live' })).Engine).to.equal('Live');
+						Expect(normalize(base({ Engine: null })).Engine).to.equal('Auto');
+						Expect(libFacetRequest.normalizeRequest('BookStoreSale', { Engine: 'Live' }, { Mode: 'Count' }).Engine).to.equal('Live');
+						expectFacetError(() => { normalize(base({ Engine: 'ClickHouse' })); }, 'FACET_REQUEST_INVALID', { Field: 'Engine' });
+						expectFacetError(() => { normalize(base({ Engine: 'live' })); }, 'FACET_REQUEST_INVALID', { Field: 'Engine' });
+						expectFacetError(() => { libFacetRequest.normalizeRequest('BookStoreSale', { Engine: 7 }, { Mode: 'Keys' }); }, 'FACET_REQUEST_INVALID', { Field: 'Engine' });
 					});
 
 				test('L1 limits: depth, string bytes, array length, clause count, body size',

@@ -3,7 +3,9 @@
  * Faceting-Demo-Server -- `npm start` (DEMO-SPEC §2.1).
  *
  *   1. read the environment: DEMO_PORT (19300; 19300-19310 only), DEMO_HOST (127.0.0.1), DEMO_SCALE
- *      (Small | Medium), DEMO_PG=1 (PostgreSQL in rfs-test-postgres; needs TZ=UTC and docker), DEMO_LOG_LEVEL
+ *      (Small | Medium), DEMO_PG=1 (PostgreSQL in rfs-test-postgres; needs TZ=UTC and docker), DEMO_LOG_LEVEL,
+ *      DEMO_CLICKHOUSE=1 (M5: every domain also materialized into the ClickHouse store in rfs-test-clickhouse;
+ *      needs docker; the pages get the engine toggle: Auto / Live / Store (Fast) and "Live vs Store")
  *   2. boot the three domains (Faceting-Demo-Domains.start): seed, bind 127.0.0.1 + loopback guard before listen, renumber
  *   3. start the front server (Faceting-Demo-Front.create(...).listen(DEMO_PORT, DEMO_HOST))
  *   4. print the banner: the URL, each domain (fixture, provider, entities, live row counts, definitions),
@@ -44,7 +46,7 @@ const timeZoneIsUTC = () =>
  * The demo options from an environment (throws a readable Error on a bad value).
  *
  * @param {Record<string, string|undefined>} pEnvironment - process.env
- * @return {{ Port: number, Host: string, Scale: string, Provider: string, LogLevel: string }}
+ * @return {{ Port: number, Host: string, Scale: string, Provider: string, LogLevel: string, Store: string|null }}
  */
 const optionsFromEnvironment = (pEnvironment) =>
 {
@@ -74,7 +76,21 @@ const optionsFromEnvironment = (pEnvironment) =>
 	{
 		tmpProvider = 'PostgreSQL';
 	}
-	return { Port: tmpPort, Host: tmpHost, Scale: tmpScale, Provider: tmpProvider, LogLevel: tmpLogLevel };
+	// M5: DEMO_CLICKHOUSE=1 adds the ClickHouse store (anything else: exactly the M4 demo).
+	let tmpStore = (tmpEnvironment.DEMO_CLICKHOUSE === '1') ? 'ClickHouse' : null;
+	return { Port: tmpPort, Host: tmpHost, Scale: tmpScale, Provider: tmpProvider, LogLevel: tmpLogLevel, Store: tmpStore };
+};
+
+/**
+ * Prepare the process for the ClickHouse store (DEMO_CLICKHOUSE=1): turn the harness gate on (the dedicated
+ * rfs-test-clickhouse container, started if needed), unless RFS_TEST_CLICKHOUSE_URL names another server.
+ */
+const prepareClickHouse = () =>
+{
+	if ((process.env.RFS_TEST_CLICKHOUSE !== '1') && !process.env.RFS_TEST_CLICKHOUSE_URL)
+	{
+		process.env.RFS_TEST_CLICKHOUSE = '1';
+	}
 };
 
 /**
@@ -115,7 +131,9 @@ const statusOf = (pDemo) =>
 			Provider: pDemo.Options.Provider,
 			Scale: pDemo.Options.Scale,
 			StartedAt: pDemo.StartedAt,
-			Milestone: 'retold-faceting-service M4',
+			Milestone: pDemo.Options.Store ? 'retold-faceting-service M5' : 'retold-faceting-service M4',
+			// M5: 'ClickHouse' with DEMO_CLICKHOUSE=1 (each domain's Store block says how current it is), else null.
+			Store: pDemo.Options.Store || null,
 			Personas: libPersonas.PERSONAS.map((pPersona) => { return pPersona.Key; }),
 			Domains: tmpDomains
 		});
@@ -124,12 +142,12 @@ const statusOf = (pDemo) =>
 /**
  * Boot the domains and the front server (no banner, no signals): the smoke test calls this in-process.
  *
- * @param {{ Port?: number, Host?: string, Scale?: string, Provider?: string, LogLevel?: string, DistRoot?: string, onDomain?: Function }} pOptions
+ * @param {{ Port?: number, Host?: string, Scale?: string, Provider?: string, LogLevel?: string, Store?: string|null, DistRoot?: string, onDomain?: Function }} pOptions
  * @param {(pError?: Error, pDemo?: { URL: string, Front: import('node:http').Server, Domains: Record<string, any>, Status: () => Record<string, any>, Options: Record<string, any>, stop: (fDone: () => void) => void }) => void} fCallback
  */
 const startDemo = (pOptions, fCallback) =>
 {
-	let tmpOptions = Object.assign({ Port: DEFAULT_PORT, Host: DEFAULT_HOST, Scale: 'Small', Provider: 'SQLite', LogLevel: 'error', DistRoot: DIST_ROOT }, pOptions || {});
+	let tmpOptions = Object.assign({ Port: DEFAULT_PORT, Host: DEFAULT_HOST, Scale: 'Small', Provider: 'SQLite', LogLevel: 'error', Store: null, DistRoot: DIST_ROOT }, pOptions || {});
 	if (!Number.isInteger(tmpOptions.Port) || (tmpOptions.Port < PORT_RANGE[0]) || (tmpOptions.Port > PORT_RANGE[1]))
 	{
 		return setImmediate(() => { fCallback(new Error(`The demo port must be in ${PORT_RANGE[0]}-${PORT_RANGE[1]} (got ${tmpOptions.Port}).`)); });
@@ -141,6 +159,10 @@ const startDemo = (pOptions, fCallback) =>
 		{
 			return setImmediate(() => { fCallback(tmpPGError); });
 		}
+	}
+	if (tmpOptions.Store === 'ClickHouse')
+	{
+		prepareClickHouse();
 	}
 	let tmpDemo = (
 		{
@@ -175,7 +197,7 @@ const startDemo = (pOptions, fCallback) =>
 		}
 	};
 
-	libDomains.start({ Provider: tmpOptions.Provider, Scale: tmpOptions.Scale, LogLevel: tmpOptions.LogLevel, onDomain: tmpOptions.onDomain },
+	libDomains.start({ Provider: tmpOptions.Provider, Scale: tmpOptions.Scale, LogLevel: tmpOptions.LogLevel, Store: tmpOptions.Store, FrontPort: tmpOptions.Port, onDomain: tmpOptions.onDomain },
 		(pDomainsError, pDomains) =>
 		{
 			if (pDomainsError)
@@ -235,6 +257,11 @@ const bannerText = (pDemo) =>
 			let tmpHarness = pDemo.Domains[pDomain];
 			tmpLines.push(`  ${tmpPad(pDomain, 14)}${tmpPad(`${tmpDomain.Provider} ${tmpDomain.Scale}`, 14)}${tmpCountText}  (tenant ${tmpFirstTenant}, live rows)`);
 			tmpLines.push(`  ${tmpPad('', 14)}${tmpPad('', 14)}definitions ${tmpPlural(tmpDefinitions.Facets, 'facet')} / ${tmpPlural(tmpDefinitions.Scopes, 'scope')} (${tmpDefinitions.Disabled} disabled, ${tmpPlural(tmpDefinitions.Warnings, 'warning')}) · ${tmpDomain.ModelVersion} · upstream ${tmpHarness.baseURL.replace(/^http:\/\//, '')}, ${tmpDomain.LoopbackOnly ? 'loopback only' : 'ALL INTERFACES'}, guard ${tmpDomain.LoopbackGuard ? 'on' : 'OFF'}`);
+			if (tmpDomain.Store)
+			{
+				let tmpLive = Object.keys(tmpDomain.Store.Entities).filter((pEntity) => { return tmpDomain.Store.Entities[pEntity].State === 'Live'; }).length;
+				tmpLines.push(`  ${tmpPad('', 14)}${tmpPad('', 14)}ClickHouse ${tmpDomain.Store.Database}: ${tmpDomain.Store.Available ? 'available' : `unavailable (${tmpDomain.Store.Reason})`}, ${tmpLive} of ${Object.keys(tmpDomain.Store.Entities).length} entities Live`);
+			}
 		});
 	let tmpPersonas = libPersonas.PERSONAS.map(
 		(pPersona) =>
@@ -295,7 +322,7 @@ const main = () =>
 		console.error(`Faceting demo: ${pError.message}`);
 		process.exit(1);
 	}
-	console.log(`Faceting demo: booting ProjectTrack, LabTrack and Bookstore (${tmpOptions.Provider}, ${tmpOptions.Scale}) ...`);
+	console.log(`Faceting demo: booting ProjectTrack, LabTrack and Bookstore (${tmpOptions.Provider}, ${tmpOptions.Scale}${tmpOptions.Store ? `, ${tmpOptions.Store} store` : ''}) ...`);
 	startDemo(tmpOptions,
 		(pError, pDemo) =>
 		{
@@ -336,6 +363,7 @@ module.exports = (
 		DEFAULT_HOST: DEFAULT_HOST,
 		DIST_ROOT: DIST_ROOT,
 		optionsFromEnvironment: optionsFromEnvironment,
+		prepareClickHouse: prepareClickHouse,
 		statusOf: statusOf,
 		bannerText: bannerText,
 		quietKnownWarnings: quietKnownWarnings,

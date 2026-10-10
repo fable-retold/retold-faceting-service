@@ -477,6 +477,52 @@ class PictApplicationFacetingDemo extends libPictApplication
 	}
 
 	/**
+	 * M5 head toggle target (DEMO_CLICKHOUSE=1): which engine the page's Queries ask for — 'Auto' (the server routes
+	 * each facet: the store when it is fresh enough for the page's Freshness), 'Live' (Engine: 'Live') or 'Fast'
+	 * (Freshness Fast: the store whenever it can answer) — then refetch the page's groups.
+	 *
+	 * @param {string} pMode
+	 */
+	setEngineMode(pMode)
+	{
+		let tmpFacet = this.pict.providers.Facet;
+		tmpFacet.setEngineMode(pMode);
+		this.pict.AppData.FacetDemo.EngineCompare = null;
+		let tmpDemo = this.pict.AppData.FacetDemo;
+		let tmpPageView = this.pict.views['FacetDemo-Page'];
+		let tmpPage = tmpPageView.pageDefinition(tmpDemo.ActivePage);
+		tmpPageView.renderHead();
+		if (tmpPage)
+		{
+			tmpPage.Groups.forEach((pGroupHash) => { tmpFacet.refresh(pGroupHash, () => { tmpPageView.renderHead(); }); });
+		}
+	}
+
+	/**
+	 * M5 head button target: the page's first group answered by Live and by the store (Freshness Fast) side by side
+	 * (FacetDemo.EngineCompare; the head shows the verdict, the inspector both exchanges).
+	 */
+	compareEngines()
+	{
+		let tmpDemo = this.pict.AppData.FacetDemo;
+		let tmpPageView = this.pict.views['FacetDemo-Page'];
+		let tmpPage = tmpPageView.pageDefinition(tmpDemo.ActivePage);
+		if (!tmpPage)
+		{
+			return;
+		}
+		let tmpGroupHash = tmpPageView.visibleGroups(tmpPage)[0];
+		tmpDemo.EngineCompare = { Page: tmpPage.Hash, GroupHash: tmpGroupHash, Pending: true, Result: null, Error: null };
+		tmpPageView.renderHead();
+		this.pict.providers.Facet.compareEngines(tmpGroupHash,
+			(pError, pResult) =>
+			{
+				tmpDemo.EngineCompare = { Page: tmpPage.Hash, GroupHash: tmpGroupHash, Pending: false, Result: pResult || null, Error: pError ? pError.message : null };
+				tmpPageView.renderHead();
+			});
+	}
+
+	/**
 	 * Navigate (used by the nav links).
 	 *
 	 * @param {string} pRoute
