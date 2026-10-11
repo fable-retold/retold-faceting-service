@@ -152,7 +152,9 @@ const DEFAULTS = (
 			{
 				Strategy: 'Auto',
 				RequireAction: false,
-				EntitlementCacheMS: 10000,
+				// RAFS host only: 0 resolves the action set on every request, as RAFS's own gate does; a positive
+				// value caches it per persona in this process (internal-contracts §77.3).
+				EntitlementCacheMS: 0,
 				PrivilegedActions: [],
 				PlatformActionsFromRoles: false
 			},

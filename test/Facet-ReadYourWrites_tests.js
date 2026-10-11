@@ -78,7 +78,8 @@ const changeEvent = (pPrincipal, pN, pOverrides) =>
 			ChangedColumns: [ 'Status', 'UpdateDate', 'UpdatingIDUser' ],
 			KeyImages: {},
 			Filter: null,
-			Actor: { PrincipalKey: pPrincipal ? libRetoldFacetingUtil.principalKey(pPrincipal) : null, UserID: pPrincipal ? pPrincipal.IDUser : 0, Verb: 'Update' },
+			// §71.2 (Part V): the intake keys the Actor by the principal's IDENTITY (no role set).
+			Actor: { PrincipalKey: pPrincipal ? libRetoldFacetingUtil.principalIdentityKey(pPrincipal) : null, UserID: pPrincipal ? pPrincipal.IDUser : 0, Verb: 'Update' },
 			Timestamp: Date.now(),
 			Epoch: EPOCH,
 			Seq: `${EPOCH}:${pN}`
@@ -174,15 +175,20 @@ suite
 							}, 80);
 					});
 
-				test('another principal is never upgraded by someone else\'s write (other user, other tenant, other roles, anonymous)',
+				test('another principal is never upgraded by someone else\'s write (other user, other tenant, anonymous); the same identity with another role set is (§71.2)',
 					() =>
 					{
 						let tmpTracker = tracker();
 						tmpTracker.onChange(changeEvent(principal(1, 1), 9));
+						// Part V (§71.2, §76.4): read-your-writes is keyed by Util.principalIdentityKey, so the same
+						// session's reads match its write whatever their RoleSetHash (an entitlements host resolves
+						// the action set for reads only).
+						Expect(libRetoldFacetingUtil.principalIdentityKey(principal(1, 1, { RoleSetHash: 'r:admin' }))).to.equal(libRetoldFacetingUtil.principalIdentityKey(principal(1, 1)));
+						Expect(libRetoldFacetingUtil.principalKey(principal(1, 1, { RoleSetHash: 'r:admin' }))).to.not.equal(libRetoldFacetingUtil.principalKey(principal(1, 1)));
+						Expect(tmpTracker.effectiveFreshness(principal(1, 1, { RoleSetHash: 'r:admin' }), BOUNDED).Upgrade).to.equal('ReadYourWrites');
 						[
 							principal(2, 1),
 							principal(1, 2),
-							principal(1, 1, { RoleSetHash: 'r:admin' }),
 							principal(1, 1, { Kind: 'Anonymous' }),
 							principal(1, 1, { ScopeValues: { IDCustomer: 1, OwnerIDUser: 1 } })
 						].forEach(
@@ -192,7 +198,7 @@ suite
 								Expect(tmpTracker.lastWrite(pOther)).to.equal(null);
 							});
 						Expect(tmpTracker.effectiveFreshness(null, BOUNDED)).to.include({ Mode: 'Bounded', Upgrade: null });
-						Expect(tmpTracker.stats().Upgrades.ReadYourWrites).to.equal(0);
+						Expect(tmpTracker.stats().Upgrades.ReadYourWrites).to.equal(1);
 					});
 
 				test('MinSeq upgrades to Exact for its own epoch, a foreign epoch and a future Seq; Exact with MinSeq stays unflagged',

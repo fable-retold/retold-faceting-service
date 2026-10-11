@@ -21,6 +21,8 @@ Each facet is computed *disjunctively* (a facet ignores its own clauses, so a se
 
 ## Status
 
+**Part V (the retold-application-foundation-server host): implemented and green.** The two foundation installers, the `RetoldFacetingHostApplicationServer` host, and the capture compatibility with RAFS's tenancy fence are in place. On a real RAFS app booted in-process, with users logged in through RAFS's own authentication, the motivating queries answer with Live == Reference and every bucket round-trips; tenants stay isolated in facets, labels, Records, Keys, SSE and ETags; and the store answers equal Live. See [Hosting inside retold-application-foundation-server](#hosting-inside-retold-application-foundation-server) and `docs/internal-contracts.md` Part V.
+
 **Milestone 5 (the ClickHouse store): implemented, reviewed and green** (`npm test`: 1194 passing, 266 pending — the gated halves, no docker needed; `npm run test:pg`: 1394 passing; `npm run test:ch`: 1308 passing; both gates at once: 1542 passing, none pending; `debug/m5-smoke.js` green; the demo smoke 583 checks, 453 with `DEMO_CLICKHOUSE=1`, and the browser check 208, with and without the store). The binding text is `docs/internal-contracts.md` Part IV (§53–§70, the as-built decisions in §68, the review fixes in §68 #61–#93). On top of Milestone 4:
 
 - **An optional materialized store** (`Stores.ClickHouse`, `Materialize`): every declared entity is mirrored row for row into `ReplacingMergeTree` tables (`rfs_<InstanceID>` unless `Database` is given), kept current by a materializer subscribed to the change intake — a fresh, trusted DAL read of the changed IDs per cycle (latest read wins, one INSERT per flush carrying rows and tombstones, a keymap so tenant / owner / FK moves leave no ghost), a shadow table + `EXCHANGE TABLES` for rebuilds under writes, and Sweep / Bisect / Scrub reconciliation for writes no hint reported. Feature-not-boot: a store that is down or misconfigured leaves the service answering Live, and is retried.
@@ -157,6 +159,81 @@ A definitions file (design `01 §4`) declares what the auto catalog cannot deriv
 }
 ```
 
+## Hosting inside retold-application-foundation-server
+
+A retold-application-foundation-server (RAFS) app installs the service from its own hook arrays. RAFS runs every entry of `hookInstallers()` after its tenancy, entitlements and membership steps, and every entry of `routeInstallers()` before it serves static assets and listens, so the two installers below see a fully wired app and the facet routes are mounted before the server listens:
+
+```javascript
+const libRetoldApplicationServer = require('retold-application-foundation-server');
+const libRetoldFacetingService = require('retold-faceting-service');
+
+class LabServer extends libRetoldApplicationServer
+{
+	hookInstallers()
+	{
+		return super.hookInstallers().concat([ libRetoldFacetingService.foundationHookInstaller(this, this.options.Faceting) ]);
+	}
+
+	routeInstallers()
+	{
+		// LAST: after every route installer that registers meadow-endpoints in this.Endpoints.
+		return super.routeInstallers().concat([ libRetoldFacetingService.foundationRouteInstaller(this, this.options.Faceting) ]);
+	}
+}
+```
+
+The hook installer registers and binds the service on the app's fable (in-process queries work from that point) and hooks the Orator server's close, so `fable.Orator.stopService` shuts the service down first (SSE streams end with a closed event, the store stops) even if the routes never mount. The route installer captures endpoints registered since then (and any change in what tenancy guards) and mounts `/1.0/Facet/*` on the app's Orator server. Each installer calls back its step exactly once, on a later tick. Any refusal fails the boot with `FACET_INTERNAL`; a misconfigured install never boots as a silent no-op. Put the hook installer in `hookInstallers()`, never in `seedSteps()` or `preSchemaSteps()`: the boot refuses a bind that ran before RAFS installed tenancy or membership. This package never depends on RAFS: it duck-types the server object (`fable`, `DAL`, `Endpoints`, `MeadowModel.Tables`, `tenancyConfig()`).
+
+**Options.** The installers use the first plain object of: the explicit second argument, then `this.options.Faceting`, then the manifest's `Options.Faceting` (an app built with `fromManifest` reads `retold-app.json`), then `{}`. That object is used whole; sources are never merged. Pass the same object to both installers (or omit it from the route installer): options handed to the route installer that differ from the running ones fail the boot, naming the differing keys. Its shape is the same `RetoldFaceting` options as on a retold-data-service; on RAFS `SSE.RevalidateMS` defaults to 60 s (open streams re-read their session instead of reconnecting). The RAFS-specific keys are:
+
+```javascript
+Faceting:
+{
+	Role: 'Embedded',                        // the only role on RAFS
+	InstanceID: 'labtrack',
+	RoutePrefix: '/1.0/Facet',               // its first segment after the entitlements APIPrefix must not be an entity (boot refusal)
+	Definitions: { Path: `${__dirname}/facets/` },
+	Catalog:
+		{
+			GlobalEntities: [ 'LabFormType' ],   // tenancy-excluded and late-mounted tables are facetable only when listed here;
+			                                     // naming a global root / identity table (e.g. Customer, User) refuses the boot
+			NeverFacet: [ 'AuditLog' ]
+		},
+	Scope:
+		{
+			Guard: 'Strict',                     // the only value accepted while the app has tenancy ('Repair' and 'Off' refuse the boot)
+			// No Policy: the policy is read from the app's own tenancyConfig() (Column, PersonalScopes, Exclude,
+			// DeniedPrefixes). A Policy object is a boot refusal. Required: { Entity: [ … ] } adds predicates that
+			// the app's own behaviors append.
+			UnsetValues: [ 0, '', null ]         // a tenant-0 session is 401 on every facet route; an owner-0 session wherever the entity is owner-scoped
+		},
+	Authorization:
+		{
+			Strategy: 'Auto',                    // with entitlementsConfig(): '<Entity>.read' through Retold-Entitlements; a
+			                                     // (pEntity, pPrincipal) => boolean function can only narrow that ('None' refuses the boot)
+			RequireAction: false,                // a string: an extra action every facet request needs
+			EntitlementCacheMS: 0                // 0 (default): the action set is read on every request, like RAFS's own gate; a positive
+			                                     // value caches it per persona in this process only (warned at boot)
+		},
+	Cache: { Enabled: false },               // opt in only when every writer of the faceted tables runs in this process
+	ChangeCapture: { NotifyManaged: [] },    // entities whose DAL-direct writers call notify() themselves
+	Admin: { Routes: false }                 // true mounts the store admin routes; without your own Admin.authorize only the
+	                                         // Membership platform principal (SystemRole 'root') passes
+	// Stores / Materialize exactly as on a retold-data-service
+}
+```
+
+What the service takes from the app, without changing RAFS:
+
+- **Tenancy**, enforced by the app's own behaviors. Every facet, Records, Count and Keys read runs the entity's own `Reads-QueryConfiguration` on its route-bound controller, so RAFS's tenancy guard and its `PersonalScopes` owner scope apply exactly as on the list. The ScopeGuard then asserts that the guard appended the tenant (and owner) predicate. RAFS wraps the prior filter in a bare outer group before it appends the scope. The capture recognizes that wrap, and it swaps faceting's SQLite NULL form (`IS` + null) for one the fence admits while the guard runs. A guard that was dropped or rewritten fails the facet (`Strict`), never answered unscoped and never filled in by faceting.
+- **Which entities are facetable.** Entities RAFS installed tenancy on are facetable, including ones an app hook guards between the two installers. Tables in `NoAutoCRUDTables` have no route and are never facetable (an array, which RAFS ignores and mounts anyway, still hides them from faceting). Entities hidden by `DeniedPrefixes` are never facetable, matched against the route meadow-endpoints really mounted. Tenancy-excluded entities and endpoints mounted after the tenancy step are facetable only when listed in `Catalog.GlobalEntities`. An unguarded late mount that carries the tenancy column is never facetable and gets a boot warning. The root and identity tables (the table keyed by the tenancy column, `Customer`, `User`, and the Membership, Entitlements and Auth.Local tables) are never facetable while they are global. Unknown, hidden and unreadable entities all get the same 404.
+- **The session.** The principal is built from `pRequest.UserSession`, using the app's own tenancy `getValue` functions. With entitlements on, the persona is the one RAFS's entitlements pre-handler writes; a session that no HTTP request enriched (an in-process caller) is enriched with RAFS's own `Entitlements.resolveIDUser` first. An app with authentication but no `tenancyConfig()` has no pre-handler that resolves sessions, so the facet routes resolve the cookie or bearer session through RAFS's own `OratorAuthentication` (a boot warning explains that RAFS's own lists are not gated in that shape). A tenant switch through Retold-Membership re-scopes the next request. Anonymous sessions get 401 on any app that authenticates or has tenancy, and tenant-0 sessions get 401, before any SQL runs; an owner-0 session (no persona) gets 401 only on an owner-scoped entity, and such an entity is denied as a hop or label target.
+- **Entitlements.** A facet on an entity needs `<Entity>.read`. Entities in `ExcludeEntities` only need an authenticated session, and a `UserAction` deny wins. Without the grant, a root entity is 404, a declared facet's hop is 403, and label keys stay unlabeled. The action set is resolved per request, for the persona and tenant RAFS's gate uses, and its `RoleSetHash` keeps cache entries of different role sets apart. Every write to a role table in the process (RAFS's CRUD routes, `grantRole`, `provisionDefaultRoles`, app code) drops any cached action sets of its tenant and revalidates that tenant's open change streams, so a revoked user's stream closes at once.
+- **Change capture.** Writes through RAFS's own CRUD routes bump only their tenant's generations and SSE streams. Membership, Entitlements, Profile, RecordLevel and Comms write their tables DAL-direct, so answers that depend on those tables are never cached unless `ChangeCapture.NotifyManaged` names them. Read-your-writes is keyed by the principal's identity, so the role set does not matter.
+- **What the boot refuses** (`FACET_INTERNAL`, the app does not start): `Scope.Guard` other than `'Strict'` with tenancy, a `Scope.Policy` object, header-asserted sessions (`MeadowEndpointsSessionDataSource: 'Header'`), an entitlements config without `IdentityUserField`, `IdentityAccountField` or `TenantField`, `Authorization.Strategy: 'None'` with entitlements, a `RoutePrefix` whose first segment names an entity, a global root / identity table in `GlobalEntities`, a hook installer that ran before tenancy or membership, and route-installer options that differ from the hook installer's.
+
+`test/Facet-Host-RAFS_tests.js` covers all of this on a real RAFS app booted in-process. It runs the motivating queries as logged-in users of two tenants, on SQLite, PostgreSQL and the ClickHouse store. Run `node debug/rafs-smoke.js` to print Describe, E1 and E3A for two users over HTTP on port 19194.
+
 ## Design
 
 The architecture (fold algebra, API, engines, security, persistence, roadmap) lives in the design set `retold-faceting-service-design/design/` (`00-overview.md` is the entry point). The binding interfaces between this package's internal services are in [docs/internal-contracts.md](docs/internal-contracts.md).
@@ -231,6 +308,10 @@ The ClickHouse client (`source/store/clickhouse/ClickHouse-Client.js`: HTTP, `{n
 
 **ClickHouse 24.8 parses Float64 text inexactly**: a `{p:Float64}` query parameter and JSONEachRow / CSV / Values input of values such as `5.94` or `7.56` land one ulp off. Only `toFloat64(<String>)` under `precise_float_parsing = 1` is exact, so the store inserts decimals through it and the fold compiler binds every Float64 value as text (`toFloat64({p:String})`, IN lists as `has(arrayMap(…))`); code that talks to the store directly must do the same (`docs/internal-contracts.md` §68 #22, #49).
 
+### retold-application-foundation-server
+
+The RAFS host suite (`test/Facet-Host-RAFS_tests.js`, contract: `docs/internal-contracts.md` Part V) runs inside `npm test` whenever the private RAFS package resolves. It needs no docker and no install step: it uses `RFS_TEST_RAFS_PATH`, or else the monorepo checkout at `modules/private/retold-application-foundation-server`. When neither resolves, the whole RAFS part is one pending test whose title says where it looked. `test/support/Facet-RAFS-Harness.js` boots a real RAFS app in-process: LabTrack or ProjectTrack, a probe table per tenancy coverage class, and the Kit identity tables. Users either log in through `POST /1.0/Authenticate` with Auth.Local, Entitlements and Membership, or get the header sessions RAFS's own tenancy tests use. The PostgreSQL rows run under `npm run test:pg`, and the ClickHouse rows (`Store: 'ClickHouse'`) under `npm run test:ch`.
+
 ### Smoke runs
 
 To see the service answer, boot a seeded harness and print sample envelopes:
@@ -241,6 +322,8 @@ node debug/m2-smoke.js     # ProjectTrack (19191) + LabTrack: the three motivati
 node debug/m4-smoke.js     # ProjectTrack (19192), cache on: miss, hit, 304, a CRUD write, its SSE event, miss, hit
 node debug/m5-smoke.js     # ProjectTrack (19193) + LabTrack with the ClickHouse store (rfs-test-clickhouse): E1 / E2 / E3A / E3B
                            # answered by ClickHouse and equal to Live, a write, Exact → Live while the store lags, Fast's LagMS → 0
+node debug/rafs-smoke.js   # a real retold-application-foundation-server app (19194): Describe, E3A and E1 for two
+                           # logged-in users in two tenants, equal to the Reference; anonymous and tenant 0 → 401
 ```
 
 ## Demo

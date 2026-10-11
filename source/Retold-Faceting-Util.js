@@ -193,6 +193,26 @@ const principalKey = (pPrincipal) =>
 	return `pk:${libCrypto.createHash('sha256').update(tmpMaterial, 'utf8').digest('hex').slice(0, 16)}`;
 };
 
+/**
+ * The identity of a principal WITHOUT its role set (internal-contracts §71.2, §76.4):
+ * principalKey({ …p, RoleSetHash: '' }).  Read-your-writes and the change intake's Actor.PrincipalKey
+ * use it, so a write (whose synchronous principal carries no action set) and the same session's reads
+ * (which do, on an entitlements host) match whatever their role set.  Identical to principalKey on a
+ * host whose RoleSetHash is always ''.  principalKey (with RoleSetHash) stays for SSE revalidation,
+ * the cache's By and logs.
+ *
+ * @param {Record<string, any>} pPrincipal
+ * @return {string|null} null when pPrincipal is not an object
+ */
+const principalIdentityKey = (pPrincipal) =>
+{
+	if ((typeof(pPrincipal) !== 'object') || (pPrincipal === null) || Array.isArray(pPrincipal))
+	{
+		return null;
+	}
+	return principalKey(Object.assign({}, pPrincipal, { RoleSetHash: '' }));
+};
+
 module.exports = (
 	{
 		NODE_EPOCH_PATTERN: NODE_EPOCH_PATTERN,
@@ -200,6 +220,7 @@ module.exports = (
 		parseSeq: parseSeq,
 		formatSeq: formatSeq,
 		principalKey: principalKey,
+		principalIdentityKey: principalIdentityKey,
 		isPlainObject: libFacetUtil.isPlainObject,
 		hasOwn: libFacetUtil.hasOwn,
 		isPresent: libFacetUtil.isPresent,

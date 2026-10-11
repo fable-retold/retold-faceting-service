@@ -313,6 +313,18 @@ class RetoldFacetingHostBase extends libFableServiceProviderBase
 	}
 
 	/**
+	 * Does the host authenticate its users?  When true, an anonymous principal is 401 on every facet
+	 * route unless the root entity is in Catalog.AllowAnonymous, even without a scope policy (06 §5.1
+	 * rule 5).  The plain retold-data-service host leaves authentication to its scope policy (false).
+	 *
+	 * @return {boolean}
+	 */
+	authenticationRequired()
+	{
+		return false;
+	}
+
+	/**
 	 * The SQL dialect an entity's DAL speaks.
 	 *
 	 * @param {string} pEntity

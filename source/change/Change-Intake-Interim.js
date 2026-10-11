@@ -885,7 +885,8 @@ class ChangeIntakeInterim
 		try
 		{
 			let tmpPrincipal = tmpHost.buildPrincipal(tmpSession, pRequest);
-			tmpActor.PrincipalKey = libRetoldFacetingUtil.principalKey(tmpPrincipal);
+			// §71.2: the identity key (no role set), as read-your-writes looks reads up.
+			tmpActor.PrincipalKey = libRetoldFacetingUtil.principalIdentityKey(tmpPrincipal);
 			let tmpUserID = libRetoldFacetingUtil.normalizeScopeValue(tmpPrincipal ? tmpPrincipal.IDUser : null);
 			tmpActor.UserID = (tmpUserID === null) ? 0 : tmpUserID;
 		}

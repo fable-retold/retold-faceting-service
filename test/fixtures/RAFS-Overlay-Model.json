@@ -1,0 +1,4219 @@
+{
+	"Description": "RAFS host-test overlay (internal-contracts Part V §80.3), merged by test/support/Facet-RAFS-Harness.js into a CLONE of the fixture model (the fixture files are never edited). Identity: the Kit identity shape (login account, persona join, entitlement role tables). Probes: one table per tenancy coverage class of §75.2, per fixture (anchored on two fixture entities so each probe can be a root, a hop and a label target).",
+	"Identity": {
+		"Tables": {
+			"RFSAccount": {
+				"TableName": "RFSAccount",
+				"Domain": "Default",
+				"Columns": [
+					{
+						"Column": "IDRFSAccount",
+						"DataType": "ID"
+					},
+					{
+						"Column": "GUIDRFSAccount",
+						"DataType": "GUID",
+						"Size": "36"
+					},
+					{
+						"Column": "CreateDate",
+						"DataType": "DateTime"
+					},
+					{
+						"Column": "CreatingIDUser",
+						"DataType": "Numeric",
+						"Size": "int"
+					},
+					{
+						"Column": "UpdateDate",
+						"DataType": "DateTime"
+					},
+					{
+						"Column": "UpdatingIDUser",
+						"DataType": "Numeric",
+						"Size": "int"
+					},
+					{
+						"Column": "LoginID",
+						"DataType": "String",
+						"Size": "128"
+					},
+					{
+						"Column": "Password",
+						"DataType": "String",
+						"Size": "255"
+					},
+					{
+						"Column": "SystemRole",
+						"DataType": "String",
+						"Size": "32"
+					},
+					{
+						"Column": "DisplayName",
+						"DataType": "String",
+						"Size": "128"
+					},
+					{
+						"Column": "ShortName",
+						"DataType": "String",
+						"Size": "16"
+					},
+					{
+						"Column": "Email",
+						"DataType": "String",
+						"Size": "255"
+					},
+					{
+						"Column": "Phone",
+						"DataType": "String",
+						"Size": "32"
+					}
+				],
+				"Indices": [],
+				"Description": "Login principal (Auth.Local.UserTable): one global account per human, no tenant column. NoAutoCRUD.",
+				"MeadowSchema": {
+					"Scope": "RFSAccount",
+					"DefaultIdentifier": "IDRFSAccount",
+					"Domain": "Default",
+					"Schema": [
+						{
+							"Column": "IDRFSAccount",
+							"Type": "AutoIdentity",
+							"Size": "Default"
+						},
+						{
+							"Column": "GUIDRFSAccount",
+							"Type": "AutoGUID",
+							"Size": "36"
+						},
+						{
+							"Column": "CreateDate",
+							"Type": "CreateDate",
+							"Size": "Default"
+						},
+						{
+							"Column": "CreatingIDUser",
+							"Type": "CreateIDUser",
+							"Size": "int"
+						},
+						{
+							"Column": "UpdateDate",
+							"Type": "UpdateDate",
+							"Size": "Default"
+						},
+						{
+							"Column": "UpdatingIDUser",
+							"Type": "UpdateIDUser",
+							"Size": "int"
+						},
+						{
+							"Column": "LoginID",
+							"Type": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "Password",
+							"Type": "String",
+							"Size": "255"
+						},
+						{
+							"Column": "SystemRole",
+							"Type": "String",
+							"Size": "32"
+						},
+						{
+							"Column": "DisplayName",
+							"Type": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "ShortName",
+							"Type": "String",
+							"Size": "16"
+						},
+						{
+							"Column": "Email",
+							"Type": "String",
+							"Size": "255"
+						},
+						{
+							"Column": "Phone",
+							"Type": "String",
+							"Size": "32"
+						}
+					],
+					"DefaultObject": {
+						"IDRFSAccount": 0,
+						"GUIDRFSAccount": "0x0000000000000000",
+						"CreateDate": null,
+						"CreatingIDUser": 0,
+						"UpdateDate": null,
+						"UpdatingIDUser": 0,
+						"LoginID": "",
+						"Password": "",
+						"SystemRole": "",
+						"DisplayName": "",
+						"ShortName": "",
+						"Email": "",
+						"Phone": ""
+					},
+					"JsonSchema": {
+						"title": "RFSAccount",
+						"type": "object",
+						"properties": {
+							"IDRFSAccount": {
+								"type": "integer",
+								"size": "Default"
+							},
+							"GUIDRFSAccount": {
+								"type": "string",
+								"size": "36"
+							},
+							"CreateDate": {
+								"type": "string",
+								"size": "Default"
+							},
+							"CreatingIDUser": {
+								"type": "integer",
+								"size": "int"
+							},
+							"UpdateDate": {
+								"type": "string",
+								"size": "Default"
+							},
+							"UpdatingIDUser": {
+								"type": "integer",
+								"size": "int"
+							},
+							"LoginID": {
+								"type": "string",
+								"size": "128"
+							},
+							"Password": {
+								"type": "string",
+								"size": "255"
+							},
+							"SystemRole": {
+								"type": "string",
+								"size": "32"
+							},
+							"DisplayName": {
+								"type": "string",
+								"size": "128"
+							},
+							"ShortName": {
+								"type": "string",
+								"size": "16"
+							},
+							"Email": {
+								"type": "string",
+								"size": "255"
+							},
+							"Phone": {
+								"type": "string",
+								"size": "32"
+							}
+						},
+						"required": [
+							"IDRFSAccount"
+						]
+					},
+					"Authorization": {}
+				},
+				"Authorization": {}
+			},
+			"RFSMembership": {
+				"TableName": "RFSMembership",
+				"Domain": "Default",
+				"Columns": [
+					{
+						"Column": "IDRFSMembership",
+						"DataType": "ID"
+					},
+					{
+						"Column": "GUIDRFSMembership",
+						"DataType": "GUID",
+						"Size": "36"
+					},
+					{
+						"Column": "CreateDate",
+						"DataType": "DateTime"
+					},
+					{
+						"Column": "CreatingIDUser",
+						"DataType": "Numeric",
+						"Size": "int"
+					},
+					{
+						"Column": "UpdateDate",
+						"DataType": "DateTime"
+					},
+					{
+						"Column": "UpdatingIDUser",
+						"DataType": "Numeric",
+						"Size": "int"
+					},
+					{
+						"Column": "Deleted",
+						"DataType": "Boolean"
+					},
+					{
+						"Column": "DeleteDate",
+						"DataType": "DateTime"
+					},
+					{
+						"Column": "DeletingIDUser",
+						"DataType": "Numeric",
+						"Size": "int"
+					},
+					{
+						"Column": "IDRFSAccount",
+						"DataType": "Numeric",
+						"Size": "int",
+						"Join": "IDRFSAccount"
+					},
+					{
+						"Column": "IDUser",
+						"DataType": "Numeric",
+						"Size": "int",
+						"Join": "IDUser"
+					},
+					{
+						"Column": "DisplayName",
+						"DataType": "String",
+						"Size": "128"
+					},
+					{
+						"Column": "ShortName",
+						"DataType": "String",
+						"Size": "16"
+					},
+					{
+						"Column": "Role",
+						"DataType": "String",
+						"Size": "64"
+					},
+					{
+						"Column": "Active",
+						"DataType": "Boolean"
+					},
+					{
+						"Column": "IDCustomer",
+						"DataType": "Numeric",
+						"Size": "int",
+						"Join": "IDCustomer"
+					}
+				],
+				"Indices": [],
+				"Description": "Account x tenant persona join (Auth.Local.MembershipTable, entitlements IdentityTable, membership PersonaTable): IDUser is the fixture persona. NoAutoCRUD.",
+				"MeadowSchema": {
+					"Scope": "RFSMembership",
+					"DefaultIdentifier": "IDRFSMembership",
+					"Domain": "Default",
+					"Schema": [
+						{
+							"Column": "IDRFSMembership",
+							"Type": "AutoIdentity",
+							"Size": "Default"
+						},
+						{
+							"Column": "GUIDRFSMembership",
+							"Type": "AutoGUID",
+							"Size": "36"
+						},
+						{
+							"Column": "CreateDate",
+							"Type": "CreateDate",
+							"Size": "Default"
+						},
+						{
+							"Column": "CreatingIDUser",
+							"Type": "CreateIDUser",
+							"Size": "int"
+						},
+						{
+							"Column": "UpdateDate",
+							"Type": "UpdateDate",
+							"Size": "Default"
+						},
+						{
+							"Column": "UpdatingIDUser",
+							"Type": "UpdateIDUser",
+							"Size": "int"
+						},
+						{
+							"Column": "Deleted",
+							"Type": "Deleted",
+							"Size": "Default"
+						},
+						{
+							"Column": "DeleteDate",
+							"Type": "DeleteDate",
+							"Size": "Default"
+						},
+						{
+							"Column": "DeletingIDUser",
+							"Type": "DeleteIDUser",
+							"Size": "int"
+						},
+						{
+							"Column": "IDRFSAccount",
+							"Type": "Integer",
+							"Size": "int"
+						},
+						{
+							"Column": "IDUser",
+							"Type": "Integer",
+							"Size": "int"
+						},
+						{
+							"Column": "DisplayName",
+							"Type": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "ShortName",
+							"Type": "String",
+							"Size": "16"
+						},
+						{
+							"Column": "Role",
+							"Type": "String",
+							"Size": "64"
+						},
+						{
+							"Column": "Active",
+							"Type": "Boolean",
+							"Size": "Default"
+						},
+						{
+							"Column": "IDCustomer",
+							"Type": "Integer",
+							"Size": "int"
+						}
+					],
+					"DefaultObject": {
+						"IDRFSMembership": 0,
+						"GUIDRFSMembership": "0x0000000000000000",
+						"CreateDate": null,
+						"CreatingIDUser": 0,
+						"UpdateDate": null,
+						"UpdatingIDUser": 0,
+						"Deleted": false,
+						"DeleteDate": null,
+						"DeletingIDUser": 0,
+						"IDRFSAccount": 0,
+						"IDUser": 0,
+						"DisplayName": "",
+						"ShortName": "",
+						"Role": "",
+						"Active": false,
+						"IDCustomer": 0
+					},
+					"JsonSchema": {
+						"title": "RFSMembership",
+						"type": "object",
+						"properties": {
+							"IDRFSMembership": {
+								"type": "integer",
+								"size": "Default"
+							},
+							"GUIDRFSMembership": {
+								"type": "string",
+								"size": "36"
+							},
+							"CreateDate": {
+								"type": "string",
+								"size": "Default"
+							},
+							"CreatingIDUser": {
+								"type": "integer",
+								"size": "int"
+							},
+							"UpdateDate": {
+								"type": "string",
+								"size": "Default"
+							},
+							"UpdatingIDUser": {
+								"type": "integer",
+								"size": "int"
+							},
+							"Deleted": {
+								"type": "boolean",
+								"size": "Default"
+							},
+							"DeleteDate": {
+								"type": "string",
+								"size": "Default"
+							},
+							"DeletingIDUser": {
+								"type": "integer",
+								"size": "int"
+							},
+							"IDRFSAccount": {
+								"type": "integer",
+								"size": "int"
+							},
+							"IDUser": {
+								"type": "integer",
+								"size": "int"
+							},
+							"DisplayName": {
+								"type": "string",
+								"size": "128"
+							},
+							"ShortName": {
+								"type": "string",
+								"size": "16"
+							},
+							"Role": {
+								"type": "string",
+								"size": "64"
+							},
+							"Active": {
+								"type": "boolean",
+								"size": "Default"
+							},
+							"IDCustomer": {
+								"type": "integer",
+								"size": "int"
+							}
+						},
+						"required": [
+							"IDRFSMembership"
+						]
+					},
+					"Authorization": {}
+				},
+				"Authorization": {}
+			},
+			"Role": {
+				"TableName": "Role",
+				"Domain": "Default",
+				"Columns": [
+					{
+						"Column": "IDRole",
+						"DataType": "ID"
+					},
+					{
+						"Column": "GUIDRole",
+						"DataType": "GUID",
+						"Size": "36"
+					},
+					{
+						"Column": "CreateDate",
+						"DataType": "DateTime"
+					},
+					{
+						"Column": "Deleted",
+						"DataType": "Boolean"
+					},
+					{
+						"Column": "DeleteDate",
+						"DataType": "DateTime"
+					},
+					{
+						"Column": "Name",
+						"DataType": "String",
+						"Size": "128"
+					},
+					{
+						"Column": "Key",
+						"DataType": "String",
+						"Size": "64"
+					},
+					{
+						"Column": "Description",
+						"DataType": "Text"
+					},
+					{
+						"Column": "IDCustomer",
+						"DataType": "Numeric",
+						"Size": "int",
+						"Join": "IDCustomer"
+					}
+				],
+				"Indices": [],
+				"Description": "Entitlements role, per tenant (Kit shape). Mounted, tenancy-scoped.",
+				"MeadowSchema": {
+					"Scope": "Role",
+					"DefaultIdentifier": "IDRole",
+					"Domain": "Default",
+					"Schema": [
+						{
+							"Column": "IDRole",
+							"Type": "AutoIdentity",
+							"Size": "Default"
+						},
+						{
+							"Column": "GUIDRole",
+							"Type": "AutoGUID",
+							"Size": "36"
+						},
+						{
+							"Column": "CreateDate",
+							"Type": "CreateDate",
+							"Size": "Default"
+						},
+						{
+							"Column": "Deleted",
+							"Type": "Deleted",
+							"Size": "Default"
+						},
+						{
+							"Column": "DeleteDate",
+							"Type": "DeleteDate",
+							"Size": "Default"
+						},
+						{
+							"Column": "Name",
+							"Type": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "Key",
+							"Type": "String",
+							"Size": "64"
+						},
+						{
+							"Column": "Description",
+							"Type": "Text",
+							"Size": "Default"
+						},
+						{
+							"Column": "IDCustomer",
+							"Type": "Integer",
+							"Size": "int"
+						}
+					],
+					"DefaultObject": {
+						"IDRole": 0,
+						"GUIDRole": "0x0000000000000000",
+						"CreateDate": null,
+						"Deleted": false,
+						"DeleteDate": null,
+						"Name": "",
+						"Key": "",
+						"Description": "",
+						"IDCustomer": 0
+					},
+					"JsonSchema": {
+						"title": "Role",
+						"type": "object",
+						"properties": {
+							"IDRole": {
+								"type": "integer",
+								"size": "Default"
+							},
+							"GUIDRole": {
+								"type": "string",
+								"size": "36"
+							},
+							"CreateDate": {
+								"type": "string",
+								"size": "Default"
+							},
+							"Deleted": {
+								"type": "boolean",
+								"size": "Default"
+							},
+							"DeleteDate": {
+								"type": "string",
+								"size": "Default"
+							},
+							"Name": {
+								"type": "string",
+								"size": "128"
+							},
+							"Key": {
+								"type": "string",
+								"size": "64"
+							},
+							"Description": {
+								"type": "string",
+								"size": "Default"
+							},
+							"IDCustomer": {
+								"type": "integer",
+								"size": "int"
+							}
+						},
+						"required": [
+							"IDRole"
+						]
+					},
+					"Authorization": {}
+				},
+				"Authorization": {}
+			},
+			"RoleAction": {
+				"TableName": "RoleAction",
+				"Domain": "Default",
+				"Columns": [
+					{
+						"Column": "IDRoleAction",
+						"DataType": "ID"
+					},
+					{
+						"Column": "GUIDRoleAction",
+						"DataType": "GUID",
+						"Size": "36"
+					},
+					{
+						"Column": "IDRole",
+						"DataType": "Numeric",
+						"Size": "int",
+						"Join": "IDRole"
+					},
+					{
+						"Column": "ActionKey",
+						"DataType": "String",
+						"Size": "128"
+					},
+					{
+						"Column": "IDCustomer",
+						"DataType": "Numeric",
+						"Size": "int",
+						"Join": "IDCustomer"
+					}
+				],
+				"Indices": [],
+				"Description": "One action key a Role grants (Kit shape). Mounted, tenancy-scoped.",
+				"MeadowSchema": {
+					"Scope": "RoleAction",
+					"DefaultIdentifier": "IDRoleAction",
+					"Domain": "Default",
+					"Schema": [
+						{
+							"Column": "IDRoleAction",
+							"Type": "AutoIdentity",
+							"Size": "Default"
+						},
+						{
+							"Column": "GUIDRoleAction",
+							"Type": "AutoGUID",
+							"Size": "36"
+						},
+						{
+							"Column": "IDRole",
+							"Type": "Integer",
+							"Size": "int"
+						},
+						{
+							"Column": "ActionKey",
+							"Type": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "IDCustomer",
+							"Type": "Integer",
+							"Size": "int"
+						}
+					],
+					"DefaultObject": {
+						"IDRoleAction": 0,
+						"GUIDRoleAction": "0x0000000000000000",
+						"IDRole": 0,
+						"ActionKey": "",
+						"IDCustomer": 0
+					},
+					"JsonSchema": {
+						"title": "RoleAction",
+						"type": "object",
+						"properties": {
+							"IDRoleAction": {
+								"type": "integer",
+								"size": "Default"
+							},
+							"GUIDRoleAction": {
+								"type": "string",
+								"size": "36"
+							},
+							"IDRole": {
+								"type": "integer",
+								"size": "int"
+							},
+							"ActionKey": {
+								"type": "string",
+								"size": "128"
+							},
+							"IDCustomer": {
+								"type": "integer",
+								"size": "int"
+							}
+						},
+						"required": [
+							"IDRoleAction"
+						]
+					},
+					"Authorization": {}
+				},
+				"Authorization": {}
+			},
+			"UserRole": {
+				"TableName": "UserRole",
+				"Domain": "Default",
+				"Columns": [
+					{
+						"Column": "IDUserRole",
+						"DataType": "ID"
+					},
+					{
+						"Column": "GUIDUserRole",
+						"DataType": "GUID",
+						"Size": "36"
+					},
+					{
+						"Column": "IDUser",
+						"DataType": "Numeric",
+						"Size": "int",
+						"Join": "IDUser"
+					},
+					{
+						"Column": "IDRole",
+						"DataType": "Numeric",
+						"Size": "int",
+						"Join": "IDRole"
+					},
+					{
+						"Column": "IDCustomer",
+						"DataType": "Numeric",
+						"Size": "int",
+						"Join": "IDCustomer"
+					}
+				],
+				"Indices": [],
+				"Description": "Grants a Role to a persona within a tenant (Kit shape). Mounted, tenancy-scoped.",
+				"MeadowSchema": {
+					"Scope": "UserRole",
+					"DefaultIdentifier": "IDUserRole",
+					"Domain": "Default",
+					"Schema": [
+						{
+							"Column": "IDUserRole",
+							"Type": "AutoIdentity",
+							"Size": "Default"
+						},
+						{
+							"Column": "GUIDUserRole",
+							"Type": "AutoGUID",
+							"Size": "36"
+						},
+						{
+							"Column": "IDUser",
+							"Type": "Integer",
+							"Size": "int"
+						},
+						{
+							"Column": "IDRole",
+							"Type": "Integer",
+							"Size": "int"
+						},
+						{
+							"Column": "IDCustomer",
+							"Type": "Integer",
+							"Size": "int"
+						}
+					],
+					"DefaultObject": {
+						"IDUserRole": 0,
+						"GUIDUserRole": "0x0000000000000000",
+						"IDUser": 0,
+						"IDRole": 0,
+						"IDCustomer": 0
+					},
+					"JsonSchema": {
+						"title": "UserRole",
+						"type": "object",
+						"properties": {
+							"IDUserRole": {
+								"type": "integer",
+								"size": "Default"
+							},
+							"GUIDUserRole": {
+								"type": "string",
+								"size": "36"
+							},
+							"IDUser": {
+								"type": "integer",
+								"size": "int"
+							},
+							"IDRole": {
+								"type": "integer",
+								"size": "int"
+							},
+							"IDCustomer": {
+								"type": "integer",
+								"size": "int"
+							}
+						},
+						"required": [
+							"IDUserRole"
+						]
+					},
+					"Authorization": {}
+				},
+				"Authorization": {}
+			},
+			"UserAction": {
+				"TableName": "UserAction",
+				"Domain": "Default",
+				"Columns": [
+					{
+						"Column": "IDUserAction",
+						"DataType": "ID"
+					},
+					{
+						"Column": "GUIDUserAction",
+						"DataType": "GUID",
+						"Size": "36"
+					},
+					{
+						"Column": "IDUser",
+						"DataType": "Numeric",
+						"Size": "int",
+						"Join": "IDUser"
+					},
+					{
+						"Column": "ActionKey",
+						"DataType": "String",
+						"Size": "128"
+					},
+					{
+						"Column": "Effect",
+						"DataType": "String",
+						"Size": "8"
+					},
+					{
+						"Column": "IDCustomer",
+						"DataType": "Numeric",
+						"Size": "int",
+						"Join": "IDCustomer"
+					}
+				],
+				"Indices": [],
+				"Description": "A direct per-persona grant or deny (deny wins) (Kit shape). NoAutoCRUD.",
+				"MeadowSchema": {
+					"Scope": "UserAction",
+					"DefaultIdentifier": "IDUserAction",
+					"Domain": "Default",
+					"Schema": [
+						{
+							"Column": "IDUserAction",
+							"Type": "AutoIdentity",
+							"Size": "Default"
+						},
+						{
+							"Column": "GUIDUserAction",
+							"Type": "AutoGUID",
+							"Size": "36"
+						},
+						{
+							"Column": "IDUser",
+							"Type": "Integer",
+							"Size": "int"
+						},
+						{
+							"Column": "ActionKey",
+							"Type": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "Effect",
+							"Type": "String",
+							"Size": "8"
+						},
+						{
+							"Column": "IDCustomer",
+							"Type": "Integer",
+							"Size": "int"
+						}
+					],
+					"DefaultObject": {
+						"IDUserAction": 0,
+						"GUIDUserAction": "0x0000000000000000",
+						"IDUser": 0,
+						"ActionKey": "",
+						"Effect": "",
+						"IDCustomer": 0
+					},
+					"JsonSchema": {
+						"title": "UserAction",
+						"type": "object",
+						"properties": {
+							"IDUserAction": {
+								"type": "integer",
+								"size": "Default"
+							},
+							"GUIDUserAction": {
+								"type": "string",
+								"size": "36"
+							},
+							"IDUser": {
+								"type": "integer",
+								"size": "int"
+							},
+							"ActionKey": {
+								"type": "string",
+								"size": "128"
+							},
+							"Effect": {
+								"type": "string",
+								"size": "8"
+							},
+							"IDCustomer": {
+								"type": "integer",
+								"size": "int"
+							}
+						},
+						"required": [
+							"IDUserAction"
+						]
+					},
+					"Authorization": {}
+				},
+				"Authorization": {}
+			}
+		}
+	},
+	"Probes": {
+		"LabTrack": {
+			"Anchors": [
+				"IDLabForm",
+				"IDMaterialIntake"
+			],
+			"Tables": {
+				"ProbeHidden": {
+					"TableName": "ProbeHidden",
+					"Domain": "Default",
+					"Columns": [
+						{
+							"Column": "IDProbeHidden",
+							"DataType": "ID"
+						},
+						{
+							"Column": "GUIDProbeHidden",
+							"DataType": "GUID",
+							"Size": "36"
+						},
+						{
+							"Column": "CreateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "CreatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "UpdateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "UpdatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Deleted",
+							"DataType": "Boolean"
+						},
+						{
+							"Column": "DeleteDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "DeletingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Name",
+							"DataType": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "IDLabForm",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDLabForm"
+						},
+						{
+							"Column": "IDMaterialIntake",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDMaterialIntake"
+						},
+						{
+							"Column": "IDCustomer",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDCustomer"
+						}
+					],
+					"Indices": [],
+					"Description": "Probe (LabTrack): NoAutoCRUD (DAL, no endpoint): Controllerless.",
+					"MeadowSchema": {
+						"Scope": "ProbeHidden",
+						"DefaultIdentifier": "IDProbeHidden",
+						"Domain": "Default",
+						"Schema": [
+							{
+								"Column": "IDProbeHidden",
+								"Type": "AutoIdentity",
+								"Size": "Default"
+							},
+							{
+								"Column": "GUIDProbeHidden",
+								"Type": "AutoGUID",
+								"Size": "36"
+							},
+							{
+								"Column": "CreateDate",
+								"Type": "CreateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "CreatingIDUser",
+								"Type": "CreateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "UpdateDate",
+								"Type": "UpdateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "UpdatingIDUser",
+								"Type": "UpdateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Deleted",
+								"Type": "Deleted",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeleteDate",
+								"Type": "DeleteDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeletingIDUser",
+								"Type": "DeleteIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Name",
+								"Type": "String",
+								"Size": "128"
+							},
+							{
+								"Column": "IDLabForm",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDMaterialIntake",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDCustomer",
+								"Type": "Integer",
+								"Size": "int"
+							}
+						],
+						"DefaultObject": {
+							"IDProbeHidden": 0,
+							"GUIDProbeHidden": "0x0000000000000000",
+							"CreateDate": null,
+							"CreatingIDUser": 0,
+							"UpdateDate": null,
+							"UpdatingIDUser": 0,
+							"Deleted": false,
+							"DeleteDate": null,
+							"DeletingIDUser": 0,
+							"Name": "",
+							"IDLabForm": 0,
+							"IDMaterialIntake": 0,
+							"IDCustomer": 0
+						},
+						"JsonSchema": {
+							"title": "ProbeHidden",
+							"type": "object",
+							"properties": {
+								"IDProbeHidden": {
+									"type": "integer",
+									"size": "Default"
+								},
+								"GUIDProbeHidden": {
+									"type": "string",
+									"size": "36"
+								},
+								"CreateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"CreatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"UpdateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"UpdatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Deleted": {
+									"type": "boolean",
+									"size": "Default"
+								},
+								"DeleteDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"DeletingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Name": {
+									"type": "string",
+									"size": "128"
+								},
+								"IDLabForm": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDMaterialIntake": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDCustomer": {
+									"type": "integer",
+									"size": "int"
+								}
+							},
+							"required": [
+								"IDProbeHidden"
+							]
+						},
+						"Authorization": {}
+					},
+					"Authorization": {}
+				},
+				"ProbeDenied": {
+					"TableName": "ProbeDenied",
+					"Domain": "Default",
+					"Columns": [
+						{
+							"Column": "IDProbeDenied",
+							"DataType": "ID"
+						},
+						{
+							"Column": "GUIDProbeDenied",
+							"DataType": "GUID",
+							"Size": "36"
+						},
+						{
+							"Column": "CreateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "CreatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "UpdateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "UpdatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Deleted",
+							"DataType": "Boolean"
+						},
+						{
+							"Column": "DeleteDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "DeletingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Name",
+							"DataType": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "IDLabForm",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDLabForm"
+						},
+						{
+							"Column": "IDMaterialIntake",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDMaterialIntake"
+						},
+						{
+							"Column": "IDCustomer",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDCustomer"
+						}
+					],
+					"Indices": [],
+					"Description": "Probe (LabTrack): Mounted and tenancy-guarded, but under a tenancy DeniedPrefix (/1.0/ProbeDenied).",
+					"MeadowSchema": {
+						"Scope": "ProbeDenied",
+						"DefaultIdentifier": "IDProbeDenied",
+						"Domain": "Default",
+						"Schema": [
+							{
+								"Column": "IDProbeDenied",
+								"Type": "AutoIdentity",
+								"Size": "Default"
+							},
+							{
+								"Column": "GUIDProbeDenied",
+								"Type": "AutoGUID",
+								"Size": "36"
+							},
+							{
+								"Column": "CreateDate",
+								"Type": "CreateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "CreatingIDUser",
+								"Type": "CreateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "UpdateDate",
+								"Type": "UpdateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "UpdatingIDUser",
+								"Type": "UpdateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Deleted",
+								"Type": "Deleted",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeleteDate",
+								"Type": "DeleteDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeletingIDUser",
+								"Type": "DeleteIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Name",
+								"Type": "String",
+								"Size": "128"
+							},
+							{
+								"Column": "IDLabForm",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDMaterialIntake",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDCustomer",
+								"Type": "Integer",
+								"Size": "int"
+							}
+						],
+						"DefaultObject": {
+							"IDProbeDenied": 0,
+							"GUIDProbeDenied": "0x0000000000000000",
+							"CreateDate": null,
+							"CreatingIDUser": 0,
+							"UpdateDate": null,
+							"UpdatingIDUser": 0,
+							"Deleted": false,
+							"DeleteDate": null,
+							"DeletingIDUser": 0,
+							"Name": "",
+							"IDLabForm": 0,
+							"IDMaterialIntake": 0,
+							"IDCustomer": 0
+						},
+						"JsonSchema": {
+							"title": "ProbeDenied",
+							"type": "object",
+							"properties": {
+								"IDProbeDenied": {
+									"type": "integer",
+									"size": "Default"
+								},
+								"GUIDProbeDenied": {
+									"type": "string",
+									"size": "36"
+								},
+								"CreateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"CreatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"UpdateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"UpdatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Deleted": {
+									"type": "boolean",
+									"size": "Default"
+								},
+								"DeleteDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"DeletingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Name": {
+									"type": "string",
+									"size": "128"
+								},
+								"IDLabForm": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDMaterialIntake": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDCustomer": {
+									"type": "integer",
+									"size": "int"
+								}
+							},
+							"required": [
+								"IDProbeDenied"
+							]
+						},
+						"Authorization": {}
+					},
+					"Authorization": {}
+				},
+				"ProbeExcluded": {
+					"TableName": "ProbeExcluded",
+					"Domain": "Default",
+					"Columns": [
+						{
+							"Column": "IDProbeExcluded",
+							"DataType": "ID"
+						},
+						{
+							"Column": "GUIDProbeExcluded",
+							"DataType": "GUID",
+							"Size": "36"
+						},
+						{
+							"Column": "CreateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "CreatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "UpdateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "UpdatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Deleted",
+							"DataType": "Boolean"
+						},
+						{
+							"Column": "DeleteDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "DeletingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Name",
+							"DataType": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "IDLabForm",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDLabForm"
+						},
+						{
+							"Column": "IDMaterialIntake",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDMaterialIntake"
+						},
+						{
+							"Column": "IDCustomer",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDCustomer"
+						}
+					],
+					"Indices": [],
+					"Description": "Probe (LabTrack): Mounted, in Tenancy.Exclude, WITH the tenancy column: Excluded (not facetable unless opted in).",
+					"MeadowSchema": {
+						"Scope": "ProbeExcluded",
+						"DefaultIdentifier": "IDProbeExcluded",
+						"Domain": "Default",
+						"Schema": [
+							{
+								"Column": "IDProbeExcluded",
+								"Type": "AutoIdentity",
+								"Size": "Default"
+							},
+							{
+								"Column": "GUIDProbeExcluded",
+								"Type": "AutoGUID",
+								"Size": "36"
+							},
+							{
+								"Column": "CreateDate",
+								"Type": "CreateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "CreatingIDUser",
+								"Type": "CreateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "UpdateDate",
+								"Type": "UpdateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "UpdatingIDUser",
+								"Type": "UpdateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Deleted",
+								"Type": "Deleted",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeleteDate",
+								"Type": "DeleteDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeletingIDUser",
+								"Type": "DeleteIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Name",
+								"Type": "String",
+								"Size": "128"
+							},
+							{
+								"Column": "IDLabForm",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDMaterialIntake",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDCustomer",
+								"Type": "Integer",
+								"Size": "int"
+							}
+						],
+						"DefaultObject": {
+							"IDProbeExcluded": 0,
+							"GUIDProbeExcluded": "0x0000000000000000",
+							"CreateDate": null,
+							"CreatingIDUser": 0,
+							"UpdateDate": null,
+							"UpdatingIDUser": 0,
+							"Deleted": false,
+							"DeleteDate": null,
+							"DeletingIDUser": 0,
+							"Name": "",
+							"IDLabForm": 0,
+							"IDMaterialIntake": 0,
+							"IDCustomer": 0
+						},
+						"JsonSchema": {
+							"title": "ProbeExcluded",
+							"type": "object",
+							"properties": {
+								"IDProbeExcluded": {
+									"type": "integer",
+									"size": "Default"
+								},
+								"GUIDProbeExcluded": {
+									"type": "string",
+									"size": "36"
+								},
+								"CreateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"CreatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"UpdateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"UpdatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Deleted": {
+									"type": "boolean",
+									"size": "Default"
+								},
+								"DeleteDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"DeletingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Name": {
+									"type": "string",
+									"size": "128"
+								},
+								"IDLabForm": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDMaterialIntake": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDCustomer": {
+									"type": "integer",
+									"size": "int"
+								}
+							},
+							"required": [
+								"IDProbeExcluded"
+							]
+						},
+						"Authorization": {}
+					},
+					"Authorization": {}
+				},
+				"ProbeGlobal": {
+					"TableName": "ProbeGlobal",
+					"Domain": "Default",
+					"Columns": [
+						{
+							"Column": "IDProbeGlobal",
+							"DataType": "ID"
+						},
+						{
+							"Column": "GUIDProbeGlobal",
+							"DataType": "GUID",
+							"Size": "36"
+						},
+						{
+							"Column": "CreateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "CreatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "UpdateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "UpdatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Deleted",
+							"DataType": "Boolean"
+						},
+						{
+							"Column": "DeleteDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "DeletingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Name",
+							"DataType": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "IDLabForm",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDLabForm"
+						},
+						{
+							"Column": "IDMaterialIntake",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDMaterialIntake"
+						}
+					],
+					"Indices": [],
+					"Description": "Probe (LabTrack): Mounted, in Tenancy.Exclude, no tenancy column, in Catalog.GlobalEntities: Global.",
+					"MeadowSchema": {
+						"Scope": "ProbeGlobal",
+						"DefaultIdentifier": "IDProbeGlobal",
+						"Domain": "Default",
+						"Schema": [
+							{
+								"Column": "IDProbeGlobal",
+								"Type": "AutoIdentity",
+								"Size": "Default"
+							},
+							{
+								"Column": "GUIDProbeGlobal",
+								"Type": "AutoGUID",
+								"Size": "36"
+							},
+							{
+								"Column": "CreateDate",
+								"Type": "CreateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "CreatingIDUser",
+								"Type": "CreateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "UpdateDate",
+								"Type": "UpdateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "UpdatingIDUser",
+								"Type": "UpdateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Deleted",
+								"Type": "Deleted",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeleteDate",
+								"Type": "DeleteDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeletingIDUser",
+								"Type": "DeleteIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Name",
+								"Type": "String",
+								"Size": "128"
+							},
+							{
+								"Column": "IDLabForm",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDMaterialIntake",
+								"Type": "Integer",
+								"Size": "int"
+							}
+						],
+						"DefaultObject": {
+							"IDProbeGlobal": 0,
+							"GUIDProbeGlobal": "0x0000000000000000",
+							"CreateDate": null,
+							"CreatingIDUser": 0,
+							"UpdateDate": null,
+							"UpdatingIDUser": 0,
+							"Deleted": false,
+							"DeleteDate": null,
+							"DeletingIDUser": 0,
+							"Name": "",
+							"IDLabForm": 0,
+							"IDMaterialIntake": 0
+						},
+						"JsonSchema": {
+							"title": "ProbeGlobal",
+							"type": "object",
+							"properties": {
+								"IDProbeGlobal": {
+									"type": "integer",
+									"size": "Default"
+								},
+								"GUIDProbeGlobal": {
+									"type": "string",
+									"size": "36"
+								},
+								"CreateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"CreatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"UpdateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"UpdatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Deleted": {
+									"type": "boolean",
+									"size": "Default"
+								},
+								"DeleteDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"DeletingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Name": {
+									"type": "string",
+									"size": "128"
+								},
+								"IDLabForm": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDMaterialIntake": {
+									"type": "integer",
+									"size": "int"
+								}
+							},
+							"required": [
+								"IDProbeGlobal"
+							]
+						},
+						"Authorization": {}
+					},
+					"Authorization": {}
+				},
+				"ProbeLate": {
+					"TableName": "ProbeLate",
+					"Domain": "Default",
+					"Columns": [
+						{
+							"Column": "IDProbeLate",
+							"DataType": "ID"
+						},
+						{
+							"Column": "GUIDProbeLate",
+							"DataType": "GUID",
+							"Size": "36"
+						},
+						{
+							"Column": "CreateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "CreatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "UpdateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "UpdatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Deleted",
+							"DataType": "Boolean"
+						},
+						{
+							"Column": "DeleteDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "DeletingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Name",
+							"DataType": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "IDLabForm",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDLabForm"
+						},
+						{
+							"Column": "IDMaterialIntake",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDMaterialIntake"
+						},
+						{
+							"Column": "IDCustomer",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDCustomer"
+						}
+					],
+					"Indices": [],
+					"Description": "Probe (LabTrack): Mounted by a route installer AFTER tenancy (late mount) WITH the tenancy column: Unguarded, never facetable.",
+					"MeadowSchema": {
+						"Scope": "ProbeLate",
+						"DefaultIdentifier": "IDProbeLate",
+						"Domain": "Default",
+						"Schema": [
+							{
+								"Column": "IDProbeLate",
+								"Type": "AutoIdentity",
+								"Size": "Default"
+							},
+							{
+								"Column": "GUIDProbeLate",
+								"Type": "AutoGUID",
+								"Size": "36"
+							},
+							{
+								"Column": "CreateDate",
+								"Type": "CreateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "CreatingIDUser",
+								"Type": "CreateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "UpdateDate",
+								"Type": "UpdateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "UpdatingIDUser",
+								"Type": "UpdateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Deleted",
+								"Type": "Deleted",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeleteDate",
+								"Type": "DeleteDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeletingIDUser",
+								"Type": "DeleteIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Name",
+								"Type": "String",
+								"Size": "128"
+							},
+							{
+								"Column": "IDLabForm",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDMaterialIntake",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDCustomer",
+								"Type": "Integer",
+								"Size": "int"
+							}
+						],
+						"DefaultObject": {
+							"IDProbeLate": 0,
+							"GUIDProbeLate": "0x0000000000000000",
+							"CreateDate": null,
+							"CreatingIDUser": 0,
+							"UpdateDate": null,
+							"UpdatingIDUser": 0,
+							"Deleted": false,
+							"DeleteDate": null,
+							"DeletingIDUser": 0,
+							"Name": "",
+							"IDLabForm": 0,
+							"IDMaterialIntake": 0,
+							"IDCustomer": 0
+						},
+						"JsonSchema": {
+							"title": "ProbeLate",
+							"type": "object",
+							"properties": {
+								"IDProbeLate": {
+									"type": "integer",
+									"size": "Default"
+								},
+								"GUIDProbeLate": {
+									"type": "string",
+									"size": "36"
+								},
+								"CreateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"CreatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"UpdateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"UpdatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Deleted": {
+									"type": "boolean",
+									"size": "Default"
+								},
+								"DeleteDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"DeletingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Name": {
+									"type": "string",
+									"size": "128"
+								},
+								"IDLabForm": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDMaterialIntake": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDCustomer": {
+									"type": "integer",
+									"size": "int"
+								}
+							},
+							"required": [
+								"IDProbeLate"
+							]
+						},
+						"Authorization": {}
+					},
+					"Authorization": {}
+				},
+				"ProbeLateGlobal": {
+					"TableName": "ProbeLateGlobal",
+					"Domain": "Default",
+					"Columns": [
+						{
+							"Column": "IDProbeLateGlobal",
+							"DataType": "ID"
+						},
+						{
+							"Column": "GUIDProbeLateGlobal",
+							"DataType": "GUID",
+							"Size": "36"
+						},
+						{
+							"Column": "CreateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "CreatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "UpdateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "UpdatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Deleted",
+							"DataType": "Boolean"
+						},
+						{
+							"Column": "DeleteDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "DeletingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Name",
+							"DataType": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "IDLabForm",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDLabForm"
+						},
+						{
+							"Column": "IDMaterialIntake",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDMaterialIntake"
+						}
+					],
+					"Indices": [],
+					"Description": "Probe (LabTrack): Late mount without the tenancy column, in Catalog.GlobalEntities: Unguarded Global.",
+					"MeadowSchema": {
+						"Scope": "ProbeLateGlobal",
+						"DefaultIdentifier": "IDProbeLateGlobal",
+						"Domain": "Default",
+						"Schema": [
+							{
+								"Column": "IDProbeLateGlobal",
+								"Type": "AutoIdentity",
+								"Size": "Default"
+							},
+							{
+								"Column": "GUIDProbeLateGlobal",
+								"Type": "AutoGUID",
+								"Size": "36"
+							},
+							{
+								"Column": "CreateDate",
+								"Type": "CreateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "CreatingIDUser",
+								"Type": "CreateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "UpdateDate",
+								"Type": "UpdateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "UpdatingIDUser",
+								"Type": "UpdateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Deleted",
+								"Type": "Deleted",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeleteDate",
+								"Type": "DeleteDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeletingIDUser",
+								"Type": "DeleteIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Name",
+								"Type": "String",
+								"Size": "128"
+							},
+							{
+								"Column": "IDLabForm",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDMaterialIntake",
+								"Type": "Integer",
+								"Size": "int"
+							}
+						],
+						"DefaultObject": {
+							"IDProbeLateGlobal": 0,
+							"GUIDProbeLateGlobal": "0x0000000000000000",
+							"CreateDate": null,
+							"CreatingIDUser": 0,
+							"UpdateDate": null,
+							"UpdatingIDUser": 0,
+							"Deleted": false,
+							"DeleteDate": null,
+							"DeletingIDUser": 0,
+							"Name": "",
+							"IDLabForm": 0,
+							"IDMaterialIntake": 0
+						},
+						"JsonSchema": {
+							"title": "ProbeLateGlobal",
+							"type": "object",
+							"properties": {
+								"IDProbeLateGlobal": {
+									"type": "integer",
+									"size": "Default"
+								},
+								"GUIDProbeLateGlobal": {
+									"type": "string",
+									"size": "36"
+								},
+								"CreateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"CreatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"UpdateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"UpdatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Deleted": {
+									"type": "boolean",
+									"size": "Default"
+								},
+								"DeleteDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"DeletingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Name": {
+									"type": "string",
+									"size": "128"
+								},
+								"IDLabForm": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDMaterialIntake": {
+									"type": "integer",
+									"size": "int"
+								}
+							},
+							"required": [
+								"IDProbeLateGlobal"
+							]
+						},
+						"Authorization": {}
+					},
+					"Authorization": {}
+				},
+				"ProbeLink": {
+					"TableName": "ProbeLink",
+					"Domain": "Default",
+					"Columns": [
+						{
+							"Column": "IDProbeLink",
+							"DataType": "ID"
+						},
+						{
+							"Column": "GUIDProbeLink",
+							"DataType": "GUID",
+							"Size": "36"
+						},
+						{
+							"Column": "CreateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "CreatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "UpdateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "UpdatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Deleted",
+							"DataType": "Boolean"
+						},
+						{
+							"Column": "DeleteDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "DeletingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Name",
+							"DataType": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "IDProbeHidden",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDProbeHidden"
+						},
+						{
+							"Column": "IDProbeDenied",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDProbeDenied"
+						},
+						{
+							"Column": "IDProbeExcluded",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDProbeExcluded"
+						},
+						{
+							"Column": "IDProbeGlobal",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDProbeGlobal"
+						},
+						{
+							"Column": "IDProbeLate",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDProbeLate"
+						},
+						{
+							"Column": "IDProbeLateGlobal",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDProbeLateGlobal"
+						},
+						{
+							"Column": "IDLabForm",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDLabForm"
+						},
+						{
+							"Column": "IDMaterialIntake",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDMaterialIntake"
+						},
+						{
+							"Column": "IDCustomer",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDCustomer"
+						}
+					],
+					"Indices": [],
+					"Description": "Probe (LabTrack): Installed (tenancy-guarded) table whose FKs point at every probe, so each probe is a label target and a parent hop.",
+					"MeadowSchema": {
+						"Scope": "ProbeLink",
+						"DefaultIdentifier": "IDProbeLink",
+						"Domain": "Default",
+						"Schema": [
+							{
+								"Column": "IDProbeLink",
+								"Type": "AutoIdentity",
+								"Size": "Default"
+							},
+							{
+								"Column": "GUIDProbeLink",
+								"Type": "AutoGUID",
+								"Size": "36"
+							},
+							{
+								"Column": "CreateDate",
+								"Type": "CreateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "CreatingIDUser",
+								"Type": "CreateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "UpdateDate",
+								"Type": "UpdateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "UpdatingIDUser",
+								"Type": "UpdateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Deleted",
+								"Type": "Deleted",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeleteDate",
+								"Type": "DeleteDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeletingIDUser",
+								"Type": "DeleteIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Name",
+								"Type": "String",
+								"Size": "128"
+							},
+							{
+								"Column": "IDProbeHidden",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDProbeDenied",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDProbeExcluded",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDProbeGlobal",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDProbeLate",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDProbeLateGlobal",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDLabForm",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDMaterialIntake",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDCustomer",
+								"Type": "Integer",
+								"Size": "int"
+							}
+						],
+						"DefaultObject": {
+							"IDProbeLink": 0,
+							"GUIDProbeLink": "0x0000000000000000",
+							"CreateDate": null,
+							"CreatingIDUser": 0,
+							"UpdateDate": null,
+							"UpdatingIDUser": 0,
+							"Deleted": false,
+							"DeleteDate": null,
+							"DeletingIDUser": 0,
+							"Name": "",
+							"IDProbeHidden": 0,
+							"IDProbeDenied": 0,
+							"IDProbeExcluded": 0,
+							"IDProbeGlobal": 0,
+							"IDProbeLate": 0,
+							"IDProbeLateGlobal": 0,
+							"IDLabForm": 0,
+							"IDMaterialIntake": 0,
+							"IDCustomer": 0
+						},
+						"JsonSchema": {
+							"title": "ProbeLink",
+							"type": "object",
+							"properties": {
+								"IDProbeLink": {
+									"type": "integer",
+									"size": "Default"
+								},
+								"GUIDProbeLink": {
+									"type": "string",
+									"size": "36"
+								},
+								"CreateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"CreatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"UpdateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"UpdatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Deleted": {
+									"type": "boolean",
+									"size": "Default"
+								},
+								"DeleteDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"DeletingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Name": {
+									"type": "string",
+									"size": "128"
+								},
+								"IDProbeHidden": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDProbeDenied": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDProbeExcluded": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDProbeGlobal": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDProbeLate": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDProbeLateGlobal": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDLabForm": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDMaterialIntake": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDCustomer": {
+									"type": "integer",
+									"size": "int"
+								}
+							},
+							"required": [
+								"IDProbeLink"
+							]
+						},
+						"Authorization": {}
+					},
+					"Authorization": {}
+				}
+			}
+		},
+		"ProjectTrack": {
+			"Anchors": [
+				"IDProject",
+				"IDTask"
+			],
+			"Tables": {
+				"ProbeHidden": {
+					"TableName": "ProbeHidden",
+					"Domain": "Default",
+					"Columns": [
+						{
+							"Column": "IDProbeHidden",
+							"DataType": "ID"
+						},
+						{
+							"Column": "GUIDProbeHidden",
+							"DataType": "GUID",
+							"Size": "36"
+						},
+						{
+							"Column": "CreateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "CreatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "UpdateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "UpdatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Deleted",
+							"DataType": "Boolean"
+						},
+						{
+							"Column": "DeleteDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "DeletingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Name",
+							"DataType": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "IDProject",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDProject"
+						},
+						{
+							"Column": "IDTask",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDTask"
+						},
+						{
+							"Column": "IDCustomer",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDCustomer"
+						}
+					],
+					"Indices": [],
+					"Description": "Probe (ProjectTrack): NoAutoCRUD (DAL, no endpoint): Controllerless.",
+					"MeadowSchema": {
+						"Scope": "ProbeHidden",
+						"DefaultIdentifier": "IDProbeHidden",
+						"Domain": "Default",
+						"Schema": [
+							{
+								"Column": "IDProbeHidden",
+								"Type": "AutoIdentity",
+								"Size": "Default"
+							},
+							{
+								"Column": "GUIDProbeHidden",
+								"Type": "AutoGUID",
+								"Size": "36"
+							},
+							{
+								"Column": "CreateDate",
+								"Type": "CreateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "CreatingIDUser",
+								"Type": "CreateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "UpdateDate",
+								"Type": "UpdateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "UpdatingIDUser",
+								"Type": "UpdateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Deleted",
+								"Type": "Deleted",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeleteDate",
+								"Type": "DeleteDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeletingIDUser",
+								"Type": "DeleteIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Name",
+								"Type": "String",
+								"Size": "128"
+							},
+							{
+								"Column": "IDProject",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDTask",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDCustomer",
+								"Type": "Integer",
+								"Size": "int"
+							}
+						],
+						"DefaultObject": {
+							"IDProbeHidden": 0,
+							"GUIDProbeHidden": "0x0000000000000000",
+							"CreateDate": null,
+							"CreatingIDUser": 0,
+							"UpdateDate": null,
+							"UpdatingIDUser": 0,
+							"Deleted": false,
+							"DeleteDate": null,
+							"DeletingIDUser": 0,
+							"Name": "",
+							"IDProject": 0,
+							"IDTask": 0,
+							"IDCustomer": 0
+						},
+						"JsonSchema": {
+							"title": "ProbeHidden",
+							"type": "object",
+							"properties": {
+								"IDProbeHidden": {
+									"type": "integer",
+									"size": "Default"
+								},
+								"GUIDProbeHidden": {
+									"type": "string",
+									"size": "36"
+								},
+								"CreateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"CreatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"UpdateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"UpdatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Deleted": {
+									"type": "boolean",
+									"size": "Default"
+								},
+								"DeleteDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"DeletingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Name": {
+									"type": "string",
+									"size": "128"
+								},
+								"IDProject": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDTask": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDCustomer": {
+									"type": "integer",
+									"size": "int"
+								}
+							},
+							"required": [
+								"IDProbeHidden"
+							]
+						},
+						"Authorization": {}
+					},
+					"Authorization": {}
+				},
+				"ProbeDenied": {
+					"TableName": "ProbeDenied",
+					"Domain": "Default",
+					"Columns": [
+						{
+							"Column": "IDProbeDenied",
+							"DataType": "ID"
+						},
+						{
+							"Column": "GUIDProbeDenied",
+							"DataType": "GUID",
+							"Size": "36"
+						},
+						{
+							"Column": "CreateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "CreatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "UpdateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "UpdatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Deleted",
+							"DataType": "Boolean"
+						},
+						{
+							"Column": "DeleteDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "DeletingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Name",
+							"DataType": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "IDProject",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDProject"
+						},
+						{
+							"Column": "IDTask",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDTask"
+						},
+						{
+							"Column": "IDCustomer",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDCustomer"
+						}
+					],
+					"Indices": [],
+					"Description": "Probe (ProjectTrack): Mounted and tenancy-guarded, but under a tenancy DeniedPrefix (/1.0/ProbeDenied).",
+					"MeadowSchema": {
+						"Scope": "ProbeDenied",
+						"DefaultIdentifier": "IDProbeDenied",
+						"Domain": "Default",
+						"Schema": [
+							{
+								"Column": "IDProbeDenied",
+								"Type": "AutoIdentity",
+								"Size": "Default"
+							},
+							{
+								"Column": "GUIDProbeDenied",
+								"Type": "AutoGUID",
+								"Size": "36"
+							},
+							{
+								"Column": "CreateDate",
+								"Type": "CreateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "CreatingIDUser",
+								"Type": "CreateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "UpdateDate",
+								"Type": "UpdateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "UpdatingIDUser",
+								"Type": "UpdateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Deleted",
+								"Type": "Deleted",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeleteDate",
+								"Type": "DeleteDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeletingIDUser",
+								"Type": "DeleteIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Name",
+								"Type": "String",
+								"Size": "128"
+							},
+							{
+								"Column": "IDProject",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDTask",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDCustomer",
+								"Type": "Integer",
+								"Size": "int"
+							}
+						],
+						"DefaultObject": {
+							"IDProbeDenied": 0,
+							"GUIDProbeDenied": "0x0000000000000000",
+							"CreateDate": null,
+							"CreatingIDUser": 0,
+							"UpdateDate": null,
+							"UpdatingIDUser": 0,
+							"Deleted": false,
+							"DeleteDate": null,
+							"DeletingIDUser": 0,
+							"Name": "",
+							"IDProject": 0,
+							"IDTask": 0,
+							"IDCustomer": 0
+						},
+						"JsonSchema": {
+							"title": "ProbeDenied",
+							"type": "object",
+							"properties": {
+								"IDProbeDenied": {
+									"type": "integer",
+									"size": "Default"
+								},
+								"GUIDProbeDenied": {
+									"type": "string",
+									"size": "36"
+								},
+								"CreateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"CreatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"UpdateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"UpdatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Deleted": {
+									"type": "boolean",
+									"size": "Default"
+								},
+								"DeleteDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"DeletingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Name": {
+									"type": "string",
+									"size": "128"
+								},
+								"IDProject": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDTask": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDCustomer": {
+									"type": "integer",
+									"size": "int"
+								}
+							},
+							"required": [
+								"IDProbeDenied"
+							]
+						},
+						"Authorization": {}
+					},
+					"Authorization": {}
+				},
+				"ProbeExcluded": {
+					"TableName": "ProbeExcluded",
+					"Domain": "Default",
+					"Columns": [
+						{
+							"Column": "IDProbeExcluded",
+							"DataType": "ID"
+						},
+						{
+							"Column": "GUIDProbeExcluded",
+							"DataType": "GUID",
+							"Size": "36"
+						},
+						{
+							"Column": "CreateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "CreatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "UpdateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "UpdatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Deleted",
+							"DataType": "Boolean"
+						},
+						{
+							"Column": "DeleteDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "DeletingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Name",
+							"DataType": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "IDProject",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDProject"
+						},
+						{
+							"Column": "IDTask",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDTask"
+						},
+						{
+							"Column": "IDCustomer",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDCustomer"
+						}
+					],
+					"Indices": [],
+					"Description": "Probe (ProjectTrack): Mounted, in Tenancy.Exclude, WITH the tenancy column: Excluded (not facetable unless opted in).",
+					"MeadowSchema": {
+						"Scope": "ProbeExcluded",
+						"DefaultIdentifier": "IDProbeExcluded",
+						"Domain": "Default",
+						"Schema": [
+							{
+								"Column": "IDProbeExcluded",
+								"Type": "AutoIdentity",
+								"Size": "Default"
+							},
+							{
+								"Column": "GUIDProbeExcluded",
+								"Type": "AutoGUID",
+								"Size": "36"
+							},
+							{
+								"Column": "CreateDate",
+								"Type": "CreateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "CreatingIDUser",
+								"Type": "CreateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "UpdateDate",
+								"Type": "UpdateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "UpdatingIDUser",
+								"Type": "UpdateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Deleted",
+								"Type": "Deleted",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeleteDate",
+								"Type": "DeleteDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeletingIDUser",
+								"Type": "DeleteIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Name",
+								"Type": "String",
+								"Size": "128"
+							},
+							{
+								"Column": "IDProject",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDTask",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDCustomer",
+								"Type": "Integer",
+								"Size": "int"
+							}
+						],
+						"DefaultObject": {
+							"IDProbeExcluded": 0,
+							"GUIDProbeExcluded": "0x0000000000000000",
+							"CreateDate": null,
+							"CreatingIDUser": 0,
+							"UpdateDate": null,
+							"UpdatingIDUser": 0,
+							"Deleted": false,
+							"DeleteDate": null,
+							"DeletingIDUser": 0,
+							"Name": "",
+							"IDProject": 0,
+							"IDTask": 0,
+							"IDCustomer": 0
+						},
+						"JsonSchema": {
+							"title": "ProbeExcluded",
+							"type": "object",
+							"properties": {
+								"IDProbeExcluded": {
+									"type": "integer",
+									"size": "Default"
+								},
+								"GUIDProbeExcluded": {
+									"type": "string",
+									"size": "36"
+								},
+								"CreateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"CreatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"UpdateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"UpdatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Deleted": {
+									"type": "boolean",
+									"size": "Default"
+								},
+								"DeleteDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"DeletingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Name": {
+									"type": "string",
+									"size": "128"
+								},
+								"IDProject": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDTask": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDCustomer": {
+									"type": "integer",
+									"size": "int"
+								}
+							},
+							"required": [
+								"IDProbeExcluded"
+							]
+						},
+						"Authorization": {}
+					},
+					"Authorization": {}
+				},
+				"ProbeGlobal": {
+					"TableName": "ProbeGlobal",
+					"Domain": "Default",
+					"Columns": [
+						{
+							"Column": "IDProbeGlobal",
+							"DataType": "ID"
+						},
+						{
+							"Column": "GUIDProbeGlobal",
+							"DataType": "GUID",
+							"Size": "36"
+						},
+						{
+							"Column": "CreateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "CreatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "UpdateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "UpdatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Deleted",
+							"DataType": "Boolean"
+						},
+						{
+							"Column": "DeleteDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "DeletingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Name",
+							"DataType": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "IDProject",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDProject"
+						},
+						{
+							"Column": "IDTask",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDTask"
+						}
+					],
+					"Indices": [],
+					"Description": "Probe (ProjectTrack): Mounted, in Tenancy.Exclude, no tenancy column, in Catalog.GlobalEntities: Global.",
+					"MeadowSchema": {
+						"Scope": "ProbeGlobal",
+						"DefaultIdentifier": "IDProbeGlobal",
+						"Domain": "Default",
+						"Schema": [
+							{
+								"Column": "IDProbeGlobal",
+								"Type": "AutoIdentity",
+								"Size": "Default"
+							},
+							{
+								"Column": "GUIDProbeGlobal",
+								"Type": "AutoGUID",
+								"Size": "36"
+							},
+							{
+								"Column": "CreateDate",
+								"Type": "CreateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "CreatingIDUser",
+								"Type": "CreateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "UpdateDate",
+								"Type": "UpdateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "UpdatingIDUser",
+								"Type": "UpdateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Deleted",
+								"Type": "Deleted",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeleteDate",
+								"Type": "DeleteDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeletingIDUser",
+								"Type": "DeleteIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Name",
+								"Type": "String",
+								"Size": "128"
+							},
+							{
+								"Column": "IDProject",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDTask",
+								"Type": "Integer",
+								"Size": "int"
+							}
+						],
+						"DefaultObject": {
+							"IDProbeGlobal": 0,
+							"GUIDProbeGlobal": "0x0000000000000000",
+							"CreateDate": null,
+							"CreatingIDUser": 0,
+							"UpdateDate": null,
+							"UpdatingIDUser": 0,
+							"Deleted": false,
+							"DeleteDate": null,
+							"DeletingIDUser": 0,
+							"Name": "",
+							"IDProject": 0,
+							"IDTask": 0
+						},
+						"JsonSchema": {
+							"title": "ProbeGlobal",
+							"type": "object",
+							"properties": {
+								"IDProbeGlobal": {
+									"type": "integer",
+									"size": "Default"
+								},
+								"GUIDProbeGlobal": {
+									"type": "string",
+									"size": "36"
+								},
+								"CreateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"CreatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"UpdateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"UpdatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Deleted": {
+									"type": "boolean",
+									"size": "Default"
+								},
+								"DeleteDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"DeletingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Name": {
+									"type": "string",
+									"size": "128"
+								},
+								"IDProject": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDTask": {
+									"type": "integer",
+									"size": "int"
+								}
+							},
+							"required": [
+								"IDProbeGlobal"
+							]
+						},
+						"Authorization": {}
+					},
+					"Authorization": {}
+				},
+				"ProbeLate": {
+					"TableName": "ProbeLate",
+					"Domain": "Default",
+					"Columns": [
+						{
+							"Column": "IDProbeLate",
+							"DataType": "ID"
+						},
+						{
+							"Column": "GUIDProbeLate",
+							"DataType": "GUID",
+							"Size": "36"
+						},
+						{
+							"Column": "CreateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "CreatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "UpdateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "UpdatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Deleted",
+							"DataType": "Boolean"
+						},
+						{
+							"Column": "DeleteDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "DeletingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Name",
+							"DataType": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "IDProject",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDProject"
+						},
+						{
+							"Column": "IDTask",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDTask"
+						},
+						{
+							"Column": "IDCustomer",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDCustomer"
+						}
+					],
+					"Indices": [],
+					"Description": "Probe (ProjectTrack): Mounted by a route installer AFTER tenancy (late mount) WITH the tenancy column: Unguarded, never facetable.",
+					"MeadowSchema": {
+						"Scope": "ProbeLate",
+						"DefaultIdentifier": "IDProbeLate",
+						"Domain": "Default",
+						"Schema": [
+							{
+								"Column": "IDProbeLate",
+								"Type": "AutoIdentity",
+								"Size": "Default"
+							},
+							{
+								"Column": "GUIDProbeLate",
+								"Type": "AutoGUID",
+								"Size": "36"
+							},
+							{
+								"Column": "CreateDate",
+								"Type": "CreateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "CreatingIDUser",
+								"Type": "CreateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "UpdateDate",
+								"Type": "UpdateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "UpdatingIDUser",
+								"Type": "UpdateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Deleted",
+								"Type": "Deleted",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeleteDate",
+								"Type": "DeleteDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeletingIDUser",
+								"Type": "DeleteIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Name",
+								"Type": "String",
+								"Size": "128"
+							},
+							{
+								"Column": "IDProject",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDTask",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDCustomer",
+								"Type": "Integer",
+								"Size": "int"
+							}
+						],
+						"DefaultObject": {
+							"IDProbeLate": 0,
+							"GUIDProbeLate": "0x0000000000000000",
+							"CreateDate": null,
+							"CreatingIDUser": 0,
+							"UpdateDate": null,
+							"UpdatingIDUser": 0,
+							"Deleted": false,
+							"DeleteDate": null,
+							"DeletingIDUser": 0,
+							"Name": "",
+							"IDProject": 0,
+							"IDTask": 0,
+							"IDCustomer": 0
+						},
+						"JsonSchema": {
+							"title": "ProbeLate",
+							"type": "object",
+							"properties": {
+								"IDProbeLate": {
+									"type": "integer",
+									"size": "Default"
+								},
+								"GUIDProbeLate": {
+									"type": "string",
+									"size": "36"
+								},
+								"CreateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"CreatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"UpdateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"UpdatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Deleted": {
+									"type": "boolean",
+									"size": "Default"
+								},
+								"DeleteDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"DeletingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Name": {
+									"type": "string",
+									"size": "128"
+								},
+								"IDProject": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDTask": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDCustomer": {
+									"type": "integer",
+									"size": "int"
+								}
+							},
+							"required": [
+								"IDProbeLate"
+							]
+						},
+						"Authorization": {}
+					},
+					"Authorization": {}
+				},
+				"ProbeLateGlobal": {
+					"TableName": "ProbeLateGlobal",
+					"Domain": "Default",
+					"Columns": [
+						{
+							"Column": "IDProbeLateGlobal",
+							"DataType": "ID"
+						},
+						{
+							"Column": "GUIDProbeLateGlobal",
+							"DataType": "GUID",
+							"Size": "36"
+						},
+						{
+							"Column": "CreateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "CreatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "UpdateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "UpdatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Deleted",
+							"DataType": "Boolean"
+						},
+						{
+							"Column": "DeleteDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "DeletingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Name",
+							"DataType": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "IDProject",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDProject"
+						},
+						{
+							"Column": "IDTask",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDTask"
+						}
+					],
+					"Indices": [],
+					"Description": "Probe (ProjectTrack): Late mount without the tenancy column, in Catalog.GlobalEntities: Unguarded Global.",
+					"MeadowSchema": {
+						"Scope": "ProbeLateGlobal",
+						"DefaultIdentifier": "IDProbeLateGlobal",
+						"Domain": "Default",
+						"Schema": [
+							{
+								"Column": "IDProbeLateGlobal",
+								"Type": "AutoIdentity",
+								"Size": "Default"
+							},
+							{
+								"Column": "GUIDProbeLateGlobal",
+								"Type": "AutoGUID",
+								"Size": "36"
+							},
+							{
+								"Column": "CreateDate",
+								"Type": "CreateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "CreatingIDUser",
+								"Type": "CreateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "UpdateDate",
+								"Type": "UpdateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "UpdatingIDUser",
+								"Type": "UpdateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Deleted",
+								"Type": "Deleted",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeleteDate",
+								"Type": "DeleteDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeletingIDUser",
+								"Type": "DeleteIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Name",
+								"Type": "String",
+								"Size": "128"
+							},
+							{
+								"Column": "IDProject",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDTask",
+								"Type": "Integer",
+								"Size": "int"
+							}
+						],
+						"DefaultObject": {
+							"IDProbeLateGlobal": 0,
+							"GUIDProbeLateGlobal": "0x0000000000000000",
+							"CreateDate": null,
+							"CreatingIDUser": 0,
+							"UpdateDate": null,
+							"UpdatingIDUser": 0,
+							"Deleted": false,
+							"DeleteDate": null,
+							"DeletingIDUser": 0,
+							"Name": "",
+							"IDProject": 0,
+							"IDTask": 0
+						},
+						"JsonSchema": {
+							"title": "ProbeLateGlobal",
+							"type": "object",
+							"properties": {
+								"IDProbeLateGlobal": {
+									"type": "integer",
+									"size": "Default"
+								},
+								"GUIDProbeLateGlobal": {
+									"type": "string",
+									"size": "36"
+								},
+								"CreateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"CreatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"UpdateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"UpdatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Deleted": {
+									"type": "boolean",
+									"size": "Default"
+								},
+								"DeleteDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"DeletingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Name": {
+									"type": "string",
+									"size": "128"
+								},
+								"IDProject": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDTask": {
+									"type": "integer",
+									"size": "int"
+								}
+							},
+							"required": [
+								"IDProbeLateGlobal"
+							]
+						},
+						"Authorization": {}
+					},
+					"Authorization": {}
+				},
+				"ProbeLink": {
+					"TableName": "ProbeLink",
+					"Domain": "Default",
+					"Columns": [
+						{
+							"Column": "IDProbeLink",
+							"DataType": "ID"
+						},
+						{
+							"Column": "GUIDProbeLink",
+							"DataType": "GUID",
+							"Size": "36"
+						},
+						{
+							"Column": "CreateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "CreatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "UpdateDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "UpdatingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Deleted",
+							"DataType": "Boolean"
+						},
+						{
+							"Column": "DeleteDate",
+							"DataType": "DateTime"
+						},
+						{
+							"Column": "DeletingIDUser",
+							"DataType": "Numeric",
+							"Size": "int"
+						},
+						{
+							"Column": "Name",
+							"DataType": "String",
+							"Size": "128"
+						},
+						{
+							"Column": "IDProbeHidden",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDProbeHidden"
+						},
+						{
+							"Column": "IDProbeDenied",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDProbeDenied"
+						},
+						{
+							"Column": "IDProbeExcluded",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDProbeExcluded"
+						},
+						{
+							"Column": "IDProbeGlobal",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDProbeGlobal"
+						},
+						{
+							"Column": "IDProbeLate",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDProbeLate"
+						},
+						{
+							"Column": "IDProbeLateGlobal",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDProbeLateGlobal"
+						},
+						{
+							"Column": "IDProject",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDProject"
+						},
+						{
+							"Column": "IDTask",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDTask"
+						},
+						{
+							"Column": "IDCustomer",
+							"DataType": "Numeric",
+							"Size": "int",
+							"Join": "IDCustomer"
+						}
+					],
+					"Indices": [],
+					"Description": "Probe (ProjectTrack): Installed (tenancy-guarded) table whose FKs point at every probe, so each probe is a label target and a parent hop.",
+					"MeadowSchema": {
+						"Scope": "ProbeLink",
+						"DefaultIdentifier": "IDProbeLink",
+						"Domain": "Default",
+						"Schema": [
+							{
+								"Column": "IDProbeLink",
+								"Type": "AutoIdentity",
+								"Size": "Default"
+							},
+							{
+								"Column": "GUIDProbeLink",
+								"Type": "AutoGUID",
+								"Size": "36"
+							},
+							{
+								"Column": "CreateDate",
+								"Type": "CreateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "CreatingIDUser",
+								"Type": "CreateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "UpdateDate",
+								"Type": "UpdateDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "UpdatingIDUser",
+								"Type": "UpdateIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Deleted",
+								"Type": "Deleted",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeleteDate",
+								"Type": "DeleteDate",
+								"Size": "Default"
+							},
+							{
+								"Column": "DeletingIDUser",
+								"Type": "DeleteIDUser",
+								"Size": "int"
+							},
+							{
+								"Column": "Name",
+								"Type": "String",
+								"Size": "128"
+							},
+							{
+								"Column": "IDProbeHidden",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDProbeDenied",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDProbeExcluded",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDProbeGlobal",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDProbeLate",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDProbeLateGlobal",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDProject",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDTask",
+								"Type": "Integer",
+								"Size": "int"
+							},
+							{
+								"Column": "IDCustomer",
+								"Type": "Integer",
+								"Size": "int"
+							}
+						],
+						"DefaultObject": {
+							"IDProbeLink": 0,
+							"GUIDProbeLink": "0x0000000000000000",
+							"CreateDate": null,
+							"CreatingIDUser": 0,
+							"UpdateDate": null,
+							"UpdatingIDUser": 0,
+							"Deleted": false,
+							"DeleteDate": null,
+							"DeletingIDUser": 0,
+							"Name": "",
+							"IDProbeHidden": 0,
+							"IDProbeDenied": 0,
+							"IDProbeExcluded": 0,
+							"IDProbeGlobal": 0,
+							"IDProbeLate": 0,
+							"IDProbeLateGlobal": 0,
+							"IDProject": 0,
+							"IDTask": 0,
+							"IDCustomer": 0
+						},
+						"JsonSchema": {
+							"title": "ProbeLink",
+							"type": "object",
+							"properties": {
+								"IDProbeLink": {
+									"type": "integer",
+									"size": "Default"
+								},
+								"GUIDProbeLink": {
+									"type": "string",
+									"size": "36"
+								},
+								"CreateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"CreatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"UpdateDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"UpdatingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Deleted": {
+									"type": "boolean",
+									"size": "Default"
+								},
+								"DeleteDate": {
+									"type": "string",
+									"size": "Default"
+								},
+								"DeletingIDUser": {
+									"type": "integer",
+									"size": "int"
+								},
+								"Name": {
+									"type": "string",
+									"size": "128"
+								},
+								"IDProbeHidden": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDProbeDenied": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDProbeExcluded": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDProbeGlobal": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDProbeLate": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDProbeLateGlobal": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDProject": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDTask": {
+									"type": "integer",
+									"size": "int"
+								},
+								"IDCustomer": {
+									"type": "integer",
+									"size": "int"
+								}
+							},
+							"required": [
+								"IDProbeLink"
+							]
+						},
+						"Authorization": {}
+					},
+					"Authorization": {}
+				}
+			}
+		}
+	}
+}

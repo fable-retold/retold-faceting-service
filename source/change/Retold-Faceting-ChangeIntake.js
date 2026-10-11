@@ -395,6 +395,32 @@ class RetoldFacetingChangeIntake extends libFableServiceProviderBase
 	}
 
 	/**
+	 * Does the host write this entity DAL-direct outside every change source (Host.rawWriterEntities(),
+	 * internal-contracts §79.2; RAFS's Membership / Entitlements / Profile / RecordLevel / Comms tables)?
+	 * A throwing host answers true (fail closed: uncovered, never cached).
+	 *
+	 * @param {string} pEntity
+	 * @return {boolean}
+	 */
+	isRawWriterEntity(pEntity)
+	{
+		let tmpHost = this._host();
+		if (!tmpHost || (typeof(tmpHost.rawWriterEntities) !== 'function'))
+		{
+			return false;
+		}
+		try
+		{
+			let tmpEntities = tmpHost.rawWriterEntities();
+			return Array.isArray(tmpEntities) && (tmpEntities.indexOf(pEntity) >= 0);
+		}
+		catch (pRawWriterError)
+		{
+			return true;
+		}
+	}
+
+	/**
 	 * Does a change source cover every write of this entity right now (internal-contracts §40.1)?
 	 *
 	 *   'Bus'      the upstream DAL hook sees every write: yes
@@ -402,6 +428,8 @@ class RetoldFacetingChangeIntake extends libFableServiceProviderBase
 	 *   'Interim'  declared notify-managed, or its route-bound controller's write path still carries
 	 *              this intake's wrappers — a dispatcher replaced since the install is wrapped again
 	 *              (and the entity invalidated) before this answers
+	 *   'None' and 'Interim' never cover an entity the host writes DAL-direct (Host.rawWriterEntities(),
+	 *   internal-contracts §79.2) unless ChangeCapture.NotifyManaged names it.
 	 *
 	 * A cheap property test; the Cache stage asks it for every DepSet entity of a cacheable request.
 	 *
@@ -410,11 +438,21 @@ class RetoldFacetingChangeIntake extends libFableServiceProviderBase
 	 */
 	covers(pEntity)
 	{
-		if ((this._Source === 'Bus') || (this._Source === 'None'))
+		if (this._Source === 'Bus')
 		{
 			return true;
 		}
 		if (this.notifyManaged(pEntity))
+		{
+			return true;
+		}
+		if (this.isRawWriterEntity(pEntity))
+		{
+			// §79.2: the host writes it DAL-direct (a chassis service), which no wrapper and no notify
+			// sees: never covered unless ChangeCapture.NotifyManaged names it.
+			return false;
+		}
+		if (this._Source === 'None')
 		{
 			return true;
 		}
@@ -1184,7 +1222,8 @@ class RetoldFacetingChangeIntake extends libFableServiceProviderBase
 			{
 				return false;
 			}
-			tmpActor.PrincipalKey = libRetoldFacetingUtil.principalKey(pSource.Principal);
+			// §71.2: the identity key (no role set), as read-your-writes looks reads up.
+			tmpActor.PrincipalKey = libRetoldFacetingUtil.principalIdentityKey(pSource.Principal);
 			let tmpUserID = normalizeScopeValue(pSource.Principal.IDUser);
 			tmpActor.UserID = (tmpUserID === null) ? 0 : tmpUserID;
 		}
@@ -1620,7 +1659,7 @@ class RetoldFacetingChangeIntake extends libFableServiceProviderBase
 					try
 					{
 						let tmpPrincipal = tmpHost.buildPrincipal(tmpActorIn.Session, null);
-						tmpActor.PrincipalKey = libRetoldFacetingUtil.principalKey(tmpPrincipal);
+						tmpActor.PrincipalKey = libRetoldFacetingUtil.principalIdentityKey(tmpPrincipal);
 						if ((tmpActor.UserID === null) || (typeof(tmpActor.UserID) === 'undefined'))
 						{
 							tmpActor.UserID = tmpPrincipal.IDUser;

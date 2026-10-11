@@ -38,6 +38,7 @@ const libFacetEnvelope = require('./contract/Facet-Contract-Envelope.js');
 const libFacetClauses = require('./contract/Facet-Contract-Clauses.js');
 
 const libRetoldFacetingHostDataService = require('./host/Retold-Faceting-Host-DataService.js');
+const libRetoldFacetingHostApplicationServer = require('./host/Retold-Faceting-Host-ApplicationServer.js');
 const libRetoldFacetingCatalog = require('./catalog/Retold-Faceting-Catalog.js');
 const libRetoldFacetingGraph = require('./catalog/Retold-Faceting-Graph.js');
 const libRetoldFacetingDefinitionRegistry = require('./catalog/Retold-Faceting-DefinitionRegistry.js');
@@ -87,6 +88,8 @@ const libRetoldFacetingUtil = require('./Retold-Faceting-Util.js');
 const SUB_SERVICES = (
 	[
 		[ 'RetoldFacetingHostDataService', libRetoldFacetingHostDataService ],
+		// Part V (internal-contracts §71–§79): the RAFS host (attach selects it from { ApplicationServer, Phase })
+		[ 'RetoldFacetingHostApplicationServer', libRetoldFacetingHostApplicationServer ],
 		[ 'RetoldFacetingGraph', libRetoldFacetingGraph ],
 		[ 'RetoldFacetingCatalog', libRetoldFacetingCatalog ],
 		[ 'RetoldFacetingDefinitionRegistry', libRetoldFacetingDefinitionRegistry ],
@@ -177,6 +180,9 @@ class RetoldFacetingService extends libFableServiceProviderBase
 		this.Host = null;
 		this._ServicesRegistered = false;
 		this._Attached = false;
+		// Part V (internal-contracts §73.3): a RAFS hook-phase attach serves in-process queries before the
+		// route phase mounts the facet routes; true once Routes.connect ran (the RDS attach does both at once).
+		this._RoutesConnected = false;
 		this._RequestCounter = 0;
 		// M5 (internal-contracts §54.2): what installStores() did ({ Configured, Available, Reason }).
 		this._StoreInstall = { Configured: false, Available: false, Reason: null };
@@ -213,21 +219,43 @@ class RetoldFacetingService extends libFableServiceProviderBase
 	}
 
 	/**
-	 * Attach to a host (design 07 §2.2): register services, bind the host, refuse reserved entity
+	 * Attach to a host (design 07 §2.2 / §3): register services, bind the host, refuse reserved entity
 	 * names, build the catalog, mount the routes.
 	 *
-	 * @param {{ RetoldDataService: any }} pAttachOptions
+	 *   { RetoldDataService }                       the plain retold-data-service host, one phase
+	 *   { ApplicationServer: pServer, Phase }       the RAFS host (internal-contracts §73.3–§73.4):
+	 *       Phase 'Hook'    everything except the routes (in-process queries work; nothing is served)
+	 *       Phase 'Routes'  the hook phase first when it did not run, then Host.captureLateMounts(),
+	 *                       the facet routes and the shutdown hook (the default when Phase is omitted)
+	 *
+	 * Options.Host ('Auto' | 'DataService' | 'ApplicationServer') must agree with the attach key.
+	 *
+	 * @param {{ RetoldDataService?: any, ApplicationServer?: any, Phase?: string }} pAttachOptions
 	 * @param {(pError?: Error) => void} fCallback
 	 */
 	attach(pAttachOptions, fCallback)
 	{
+		let tmpAttachOptions = libRetoldFacetingUtil.isPlainObject(pAttachOptions) ? pAttachOptions : {};
+		if (tmpAttachOptions.ApplicationServer)
+		{
+			if (tmpAttachOptions.RetoldDataService)
+			{
+				return fCallback(libFacetErrors.create('FACET_INTERNAL', 'attach takes one host: a RetoldDataService or an ApplicationServer, not both.'));
+			}
+			return this.attachApplicationServer(tmpAttachOptions.ApplicationServer, tmpAttachOptions.Phase, fCallback);
+		}
 		if (this._Attached)
 		{
 			return fCallback();
 		}
+		let tmpHostRefusal = this.hostKindRefusal('DataService');
+		if (tmpHostRefusal)
+		{
+			return fCallback(tmpHostRefusal);
+		}
 		this.registerServices();
 		this.Host = this.fable.RetoldFacetingHostDataService;
-		let tmpRetoldDataService = (pAttachOptions && pAttachOptions.RetoldDataService) ? pAttachOptions.RetoldDataService : this.fable.RetoldDataService;
+		let tmpRetoldDataService = tmpAttachOptions.RetoldDataService ? tmpAttachOptions.RetoldDataService : this.fable.RetoldDataService;
 
 		this.Host.bind(tmpRetoldDataService,
 			(pBindError) =>
@@ -236,59 +264,206 @@ class RetoldFacetingService extends libFableServiceProviderBase
 				{
 					return fCallback(pBindError);
 				}
-				// D-17: an entity named like a facet route segment would shadow the routes (the one check).
-				let tmpReserved = this.Host.reservedEntityNames();
-				if (tmpReserved.length > 0)
-				{
-					return fCallback(libFacetErrors.create('FACET_INTERNAL', `Faceting refuses to mount: entity name(s) [${tmpReserved.join(', ')}] collide with facet routes (D-17).`));
-				}
-				let tmpUnenforced = libOptions.LIMITS_NOT_ENFORCED.filter((pLimit) => { return libRetoldFacetingUtil.hasOwn(this.options.Limits, pLimit); });
-				if (tmpUnenforced.length > 0)
-				{
-					this.fable.log.warn(`RetoldFaceting: Limits [${tmpUnenforced.join(', ')}] are configured but not enforced in this milestone.`);
-				}
-				// Boot check (O9): every shell template passes the tag scan and dry-builds on every dialect.
-				let tmpShellCheck = this.fable.RetoldFacetingShellTemplates.validateAll();
-				if (tmpShellCheck.Errors.length > 0)
-				{
-					return fCallback(libFacetErrors.create('FACET_INTERNAL', `Faceting shell templates failed validation: ${tmpShellCheck.Errors.map((pError) => { return `${pError.Dialect}.${pError.Template} ${pError.Tag}`; }).join('; ')}`));
-				}
+				return this.attachBoundHost(
+					(pAttachError) =>
+					{
+						if (pAttachError)
+						{
+							return fCallback(pAttachError);
+						}
+						this.fable.RetoldFacetingRoutes.connect(this.Host.getServiceServer());
+						this.installShutdownHook();
+						this._RoutesConnected = true;
+						this._Attached = true;
+						return fCallback();
+					});
+			});
+	}
+
+	/**
+	 * Does Options.Host allow this host kind (internal-contracts §71.2)?  A FacetError when it does not.
+	 *
+	 * @param {string} pKind - 'DataService' | 'ApplicationServer'
+	 * @return {Error|null}
+	 */
+	hostKindRefusal(pKind)
+	{
+		let tmpOption = (typeof(this.options.Host) === 'string') ? this.options.Host : 'Auto';
+		if ((tmpOption === 'Auto') || (tmpOption === pKind))
+		{
+			return null;
+		}
+		if ((tmpOption !== 'DataService') && (tmpOption !== 'ApplicationServer'))
+		{
+			return libFacetErrors.create('FACET_INTERNAL', `RetoldFaceting Options.Host must be 'Auto', 'DataService' or 'ApplicationServer' (got ${libRetoldFacetingUtil.logSafe(tmpOption)}).`);
+		}
+		return libFacetErrors.create('FACET_INTERNAL', `RetoldFaceting Options.Host is '${tmpOption}' but it is being attached to a ${pKind} host.`);
+	}
+
+	/**
+	 * The attach steps after a host bound (shared by both hosts): D-17, the unenforced-limit warning,
+	 * the shell-template check, the catalog, change capture, the stores and the model-change listener.
+	 * Mounts no routes.
+	 *
+	 * @param {(pError?: Error) => void} fCallback
+	 */
+	attachBoundHost(fCallback)
+	{
+		// D-17: an entity named like a facet route segment would shadow the routes (the one check).
+		let tmpReserved = this.Host.reservedEntityNames();
+		if (tmpReserved.length > 0)
+		{
+			return fCallback(libFacetErrors.create('FACET_INTERNAL', `Faceting refuses to mount: entity name(s) [${tmpReserved.join(', ')}] collide with facet routes (D-17).`));
+		}
+		let tmpUnenforced = libOptions.LIMITS_NOT_ENFORCED.filter((pLimit) => { return libRetoldFacetingUtil.hasOwn(this.options.Limits, pLimit); });
+		if (tmpUnenforced.length > 0)
+		{
+			this.fable.log.warn(`RetoldFaceting: Limits [${tmpUnenforced.join(', ')}] are configured but not enforced in this milestone.`);
+		}
+		// Boot check (O9): every shell template passes the tag scan and dry-builds on every dialect.
+		let tmpShellCheck = this.fable.RetoldFacetingShellTemplates.validateAll();
+		if (tmpShellCheck.Errors.length > 0)
+		{
+			return fCallback(libFacetErrors.create('FACET_INTERNAL', `Faceting shell templates failed validation: ${tmpShellCheck.Errors.map((pError) => { return `${pError.Dialect}.${pError.Template} ${pError.Tag}`; }).join('; ')}`));
+		}
+		try
+		{
+			this.rebuildCatalog(this.Host.getModelSync());
+		}
+		catch (pCatalogError)
+		{
+			return fCallback(pCatalogError);
+		}
+		// M4 (internal-contracts §44.10): the change intake on every facetable entity's route-bound
+		// controller, then the subscriptions (Generations, ReadYourWrites, the host's own, SSE).
+		this.installChangeCapture();
+		// M5 (internal-contracts §54.2): the stores (never fails attach: a store that is down or
+		// misconfigured is logged and retried while Live answers).
+		this.installStores();
+		// D-31: a host model reload rebuilds the graph, the catalog and the definitions (same sources;
+		// the previous catalog stays on failure); M4: the intake then wraps the new controllers, every
+		// cached answer goes (its ModelVersion changed) and open change streams are told.  On RAFS the
+		// only "reload" is the route phase capturing late mounts (internal-contracts §73.4).
+		this.Host.onModelChanged(
+			(pModel) =>
+			{
 				try
 				{
-					this.rebuildCatalog(this.Host.getModelSync());
+					this.rebuildCatalog(pModel, true);
 				}
-				catch (pCatalogError)
+				catch (pRebuildError)
 				{
-					return fCallback(pCatalogError);
+					this.fable.log.error(`RetoldFaceting: the catalog rebuild after a model reload failed; keeping the previous catalog: ${pRebuildError.message}`);
+					return;
 				}
-				// M4 (internal-contracts §44.10): the change intake on every facetable entity's route-bound
-				// controller, then the subscriptions (Generations, ReadYourWrites, SSE).
-				this.installChangeCapture();
-				// M5 (internal-contracts §54.2): the stores (never fails attach: a store that is down or
-				// misconfigured is logged and retried while Live answers).
-				this.installStores();
-				// D-31: a host model reload rebuilds the graph, the catalog and the definitions (same sources;
-				// the previous catalog stays on failure); M4: the intake then wraps the new controllers, every
-				// cached answer goes (its ModelVersion changed) and open change streams are told.
-				this.Host.onModelChanged(
-					(pModel) =>
-					{
-						try
-						{
-							this.rebuildCatalog(pModel, true);
-						}
-						catch (pRebuildError)
-						{
-							this.fable.log.error(`RetoldFaceting: the catalog rebuild after a model reload failed; keeping the previous catalog: ${pRebuildError.message}`);
-							return;
-						}
-						this.afterModelReload();
-					});
-				this.fable.RetoldFacetingRoutes.connect(this.Host.getServiceServer());
-				this.installShutdownHook();
-				this._Attached = true;
-				return fCallback();
+				this.afterModelReload();
 			});
+		return fCallback();
+	}
+
+	/**
+	 * Attach to a retold-application-foundation-server (internal-contracts §73.3–§73.4).  Idempotent per
+	 * phase; a service attached to another host (or another server) refuses.
+	 *
+	 * @param {any} pServer - the RetoldApplicationServer
+	 * @param {string} [pPhase] - 'Hook' | 'Routes' (default 'Routes': both phases at once)
+	 * @param {(pError?: Error) => void} fCallback
+	 */
+	attachApplicationServer(pServer, pPhase, fCallback)
+	{
+		let tmpPhase = (typeof(pPhase) === 'undefined') ? 'Routes' : pPhase;
+		if ((tmpPhase !== 'Hook') && (tmpPhase !== 'Routes'))
+		{
+			return fCallback(libFacetErrors.create('FACET_INTERNAL', `attach({ ApplicationServer, Phase }) takes Phase 'Hook' or 'Routes' (got ${libRetoldFacetingUtil.logSafe(String(tmpPhase))}).`));
+		}
+		let tmpHostRefusal = this.hostKindRefusal('ApplicationServer');
+		if (tmpHostRefusal)
+		{
+			return fCallback(tmpHostRefusal);
+		}
+		if (this._Attached)
+		{
+			let tmpSameHost = !!this.Host && (this.Host === this.fable.RetoldFacetingHostApplicationServer)
+				&& (typeof(this.Host.getApplicationServer) === 'function') && (this.Host.getApplicationServer() === pServer);
+			if (!tmpSameHost)
+			{
+				return fCallback(libFacetErrors.create('FACET_INTERNAL', 'The faceting service on this fable is already attached to a different host.'));
+			}
+			if (tmpPhase === 'Hook')
+			{
+				return fCallback();
+			}
+			return this.connectApplicationServerRoutes(fCallback);
+		}
+		if (tmpPhase === 'Routes')
+		{
+			this.fable.log.info('RetoldFaceting: the hook phase did not run (foundationHookInstaller missing from hookInstallers()); running it now from the route phase, so endpoints mounted after tenancy are classified Unguarded.');
+		}
+		this.registerServices();
+		this.Host = this.fable.RetoldFacetingHostApplicationServer;
+		this.Host.setCapturePhase(tmpPhase);
+		this.Host.bind(pServer,
+			(pBindError) =>
+			{
+				if (pBindError)
+				{
+					this.Host = null;
+					return fCallback(pBindError);
+				}
+				return this.attachBoundHost(
+					(pAttachError) =>
+					{
+						if (pAttachError)
+						{
+							return fCallback(pAttachError);
+						}
+						this._Attached = true;
+						this._RoutesConnected = false;
+						// From the hook phase on (internal-contracts §73.3): the stores and timers started here
+						// stop with fable.Orator.stopService even when the route phase never runs (in-process
+						// use only, a forgotten route installer, a boot that fails after this step).
+						this.installShutdownHook();
+						if (tmpPhase === 'Hook')
+						{
+							this.fable.log.info('RetoldFaceting: hook phase done (in-process queries work); the facet routes mount only when foundationRouteInstaller runs from routeInstallers().');
+							return fCallback();
+						}
+						return this.connectApplicationServerRoutes(fCallback);
+					});
+			});
+	}
+
+	/**
+	 * The RAFS route phase after the hook phase (internal-contracts §73.4 steps 2–3): capture late mounts
+	 * (the catalog, the intake and the cache follow through onModelChanged), mount the facet routes on
+	 * fable.Orator.serviceServer and wrap its close() (so fable.Orator.stopService runs shutdown() first).
+	 * Idempotent.
+	 *
+	 * @param {(pError?: Error) => void} fCallback
+	 */
+	connectApplicationServerRoutes(fCallback)
+	{
+		if (this._RoutesConnected)
+		{
+			return fCallback();
+		}
+		this.Host.captureLateMounts();
+		// A check that needs the final coverage failed (header sessions on a late controller, a
+		// PersonalScopes conflict on a newly guarded entity): the boot fails, the host already serves nothing.
+		let tmpRouteRefusal = (typeof(this.Host.routePhaseRefusal) === 'function') ? this.Host.routePhaseRefusal() : null;
+		if (tmpRouteRefusal)
+		{
+			return fCallback(libFacetErrors.create('FACET_INTERNAL', `RetoldFaceting cannot mount its routes on this RetoldApplicationServer: ${tmpRouteRefusal}`));
+		}
+		let tmpServiceServer = this.Host.getServiceServer();
+		if (!tmpServiceServer || (typeof(tmpServiceServer.post) !== 'function') || (typeof(tmpServiceServer.get) !== 'function'))
+		{
+			return fCallback(libFacetErrors.create('FACET_INTERNAL', 'The RetoldApplicationServer has no Orator service server to mount the facet routes on.'));
+		}
+		this.fable.RetoldFacetingRoutes.connect(tmpServiceServer);
+		this.installShutdownHook();
+		this._RoutesConnected = true;
+		return fCallback();
 	}
 
 	/**
@@ -370,6 +545,19 @@ class RetoldFacetingService extends libFableServiceProviderBase
 		if (tmpReadYourWrites)
 		{
 			tmpIntake.subscribe('ReadYourWrites', (pEvent) => { tmpReadYourWrites.onChange(pEvent); });
+		}
+		// Part V (internal-contracts §71.2, §79.3): the host's own subscribers, after the two above (the
+		// RAFS host drops cached entitlement sets on role-table writes; the DataService host has none).
+		if (this.Host && (typeof(this.Host.installChangeIntake) === 'function'))
+		{
+			try
+			{
+				this.Host.installChangeIntake(tmpIntake);
+			}
+			catch (pHostIntakeError)
+			{
+				this.fable.log.error(`RetoldFaceting: the host change-intake hook failed: ${pHostIntakeError.message}`);
+			}
 		}
 		if (tmpSSE)
 		{
@@ -3348,4 +3536,14 @@ module.exports.installOnRetoldDataService = (pRetoldDataService, pOptions, fCall
 {
 	// Late require: the installers module requires this one.
 	return require('./Retold-Faceting-Installers.js').installOnRetoldDataService(pRetoldDataService, pOptions, fCallback);
+};
+// Part V (internal-contracts §73.1): the RAFS boot steps, re-exported so an app calls them from the package
+// root (design 07 §3.1).  Late require, as above.
+module.exports.foundationHookInstaller = (pServer, pOptions, fStep) =>
+{
+	return require('./Retold-Faceting-Installers.js').foundationHookInstaller(pServer, pOptions, fStep);
+};
+module.exports.foundationRouteInstaller = (pServer, pOptions, fStep) =>
+{
+	return require('./Retold-Faceting-Installers.js').foundationRouteInstaller(pServer, pOptions, fStep);
 };

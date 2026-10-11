@@ -70,14 +70,18 @@ const SERVICE_CLASSES = (
 		[ 'persistence/Retold-Faceting-Freshness.js', 'RetoldFacetingFreshness' ],
 		[ 'persistence/Retold-Faceting-Rebuilder.js', 'RetoldFacetingRebuilder' ],
 		[ 'persistence/Retold-Faceting-Reconciler.js', 'RetoldFacetingReconciler' ],
-		[ 'engine/Retold-Faceting-EngineClickHouse.js', 'RetoldFacetingEngineClickHouse' ]
+		[ 'engine/Retold-Faceting-EngineClickHouse.js', 'RetoldFacetingEngineClickHouse' ],
+		// Part V (internal-contracts §71.3): the RAFS host skeleton
+		[ 'host/Retold-Faceting-Host-ApplicationServer.js', 'RetoldFacetingHostApplicationServer' ]
 	]);
 
 // [ relative path, required export names ] for every pure / function module
 const PURE_MODULES = (
 	[
 		[ 'Retold-Faceting-Service-Options.js', [ 'DEFAULTS', 'ROUTE_RESERVED_NAMES', 'NEVER_FACETABLE', 'resolve', 'deepMerge', 'hasScopePolicy', 'STORE_DEFAULTS' ] ],
-		[ 'Retold-Faceting-Installers.js', [ 'installOnRetoldDataService' ] ],
+		[ 'Retold-Faceting-Installers.js', [ 'installOnRetoldDataService',
+			// Part V (internal-contracts §73)
+			'foundationHookInstaller', 'foundationRouteInstaller', 'resolveFoundationOptions', 'FOUNDATION_PHASES', 'FOUNDATION_OPTION_SOURCES' ] ],
 		[ 'contract/Facet-Contract-Request.js', [ 'CONTRACT_VERSION', 'FOLDS', 'SELECTABLE_FOLDS', 'INTERVALS', 'ORDERS', 'NUMERIC_MODES', 'EXCLUDE_POLICIES', 'DEFAULT_EXCLUDE', 'FOLD_CLAUSE_TYPE', 'M1_CLAUSE_TYPES', 'FILTER_INSTRUCTIONS', 'FILTER_STRIPPED_INSTRUCTIONS', 'FILTER_OPERATOR_MAP', 'PRED_OPS', 'IDENTIFIER_PATTERN', 'parseFacetID', 'defaultExcludeFor', 'clauseTypeFor', 'clampPositiveInteger' ] ],
 		[ 'contract/Facet-Contract-Envelope.js', [ 'CONTRACT_VERSION', 'NUMERIC_KEY_TYPES', 'VOLATILE_FIELDS', 'normalizeKey', 'emptyFacetResult', 'buildFacetResult', 'buildEnvelope', 'normalizeForComparison' ] ],
 		[ 'contract/Facet-Contract-Buckets.js', [ 'canonicalDateTime', 'dateKey', 'nextDateKey', 'fillDateKeys', 'dateLabel', 'coarserInterval', 'units', 'numericGeometry', 'edgesGeometry', 'numericIndex', 'numericBucketBounds', 'numericLabel', 'compareKeys',
@@ -287,6 +291,8 @@ suite
 						Expect(tmpFable.RetoldFacetingRouter.engine('Live')).to.equal(tmpFable.RetoldFacetingEngineLive);
 						Expect(tmpFable.RetoldFacetingRouter.engine('Reference')).to.equal(tmpFable.RetoldFacetingEngineReference);
 						Expect(libRetoldFacetingService.installOnRetoldDataService).to.be.a('function');
+						Expect(libRetoldFacetingService.foundationHookInstaller).to.be.a('function');
+						Expect(libRetoldFacetingService.foundationRouteInstaller).to.be.a('function');
 						let tmpContext = tmpService.newContext('Review', { params: {}, headers: {} }, { ForceEngine: 'Reference' });
 						Expect(tmpContext.ForceEngine).to.equal('Reference');
 						Expect(tmpContext.Memo).to.deep.equal({ Relations: {}, Captures: {}, VariantRows: {} });

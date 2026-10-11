@@ -70,29 +70,33 @@ const filterDepths = (pFilter) =>
 };
 
 /**
- * Is the client fence intact?  Every 'FacetFenceOpen' entry must sit at depth 0 and be closed by
- * the 'FacetFenceClose' entry that returns to depth 0.
+ * Is the client fence intact?  Every 'FacetFenceOpen' entry must sit at the base depth and be closed
+ * by the 'FacetFenceClose' entry that returns to it.  The base depth is 0, or the number of host wrap
+ * layers ScopeCapture peeled (internal-contracts §75.4: a host that grouped the whole prior filter puts
+ * the client fence one level down per layer).
  *
  * @param {Array<Record<string, any>>} pFilter
  * @param {Array<number>} pDepths
+ * @param {number} [pBaseDepth] - default 0
  * @return {boolean}
  */
-const fenceIntact = (pFilter, pDepths) =>
+const fenceIntact = (pFilter, pDepths, pBaseDepth) =>
 {
+	let tmpBase = ((typeof(pBaseDepth) === 'number') && Number.isInteger(pBaseDepth) && (pBaseDepth > 0)) ? pBaseDepth : 0;
 	for (let i = 0; i < pFilter.length; i++)
 	{
 		if (!pFilter[i] || (pFilter[i].Parameter !== 'FacetFenceOpen'))
 		{
 			continue;
 		}
-		if ((pFilter[i].Operator !== '(') || (pDepths[i] !== 0))
+		if ((pFilter[i].Operator !== '(') || (pDepths[i] !== tmpBase))
 		{
 			return false;
 		}
 		let tmpClosed = false;
 		for (let j = i + 1; j < pFilter.length; j++)
 		{
-			if ((pFilter[j].Operator === ')') && (pDepths[j] === 0))
+			if ((pFilter[j].Operator === ')') && (pDepths[j] === tmpBase))
 			{
 				if (pFilter[j].Parameter !== 'FacetFenceClose')
 				{
@@ -247,7 +251,8 @@ class RetoldFacetingScopeGuard extends libFableServiceProviderBase
 			// (Only present when true, so M1 guard results keep their exact shape.)
 			tmpResult.Deferred = true;
 		}
-		if (!tmpShape.Balanced || !fenceIntact(tmpFilter, tmpShape.Depths))
+		let tmpHostWraps = (pCapture && (typeof(pCapture.HostWraps) === 'number')) ? pCapture.HostWraps : 0;
+		if (!tmpShape.Balanced || !fenceIntact(tmpFilter, tmpShape.Depths, tmpHostWraps))
 		{
 			tmpResult.Violations.push({ Rule: 'UnbalancedFence' });
 		}
@@ -363,3 +368,4 @@ module.exports.serviceType = 'RetoldFacetingScopeGuard';
 module.exports.GUARD_MODES = GUARD_MODES;
 module.exports.stripColumn = stripColumn;
 module.exports.filterDepths = filterDepths;
+module.exports.fenceIntact = fenceIntact;

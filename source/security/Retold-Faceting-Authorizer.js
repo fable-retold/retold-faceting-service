@@ -6,8 +6,12 @@
  * Root entity failures are 404 FACET_UNKNOWN_ENTITY (indistinguishable from nonexistent).
  *
  * canRead is also what Describe filters by (entities and FK Targets), so Describe never lists an
- * entity the principal could not query.  On a scope-policy host an Anonymous principal can read
- * only the entities in Catalog.AllowAnonymous (06 §5.1 rule 5).
+ * entity the principal could not query.  On a scope-policy host, and on a host that authenticates
+ * (Host.authenticationRequired()), an Anonymous principal can read only the entities in
+ * Catalog.AllowAnonymous (06 §5.1 rule 5).  On a scope-policy host an entity whose own scope
+ * requirements the principal cannot meet (an unset owner / Required value, or one the host could not
+ * compute) is not readable: the PrincipalResolver answered 401 for such a root already, so this
+ * denies it as a hop, scope, join or label target (per-entity, never a whole-request 401).
  *
  * @author Steven Velozo <steven@velozo.com>
  */
@@ -15,6 +19,7 @@ const libFableServiceProviderBase = require('fable-serviceproviderbase');
 
 const libOptions = require('../Retold-Faceting-Service-Options.js');
 const libFacetErrors = require('../contract/Facet-Contract-Errors.js');
+const libRetoldFacetingUtil = require('../Retold-Faceting-Util.js');
 
 class RetoldFacetingAuthorizer extends libFableServiceProviderBase
 {
@@ -102,14 +107,20 @@ class RetoldFacetingAuthorizer extends libFableServiceProviderBase
 	canRead(pContext, pEntity)
 	{
 		let tmpPolicy = (typeof(pContext.Host.getScopePolicy) === 'function') ? pContext.Host.getScopePolicy() : null;
-		if (tmpPolicy && (tmpPolicy.Kind === 'Policy') && (!pContext.Principal || (pContext.Principal.Kind === 'Anonymous')))
+		let tmpPolicyHost = !!tmpPolicy && (tmpPolicy.Kind === 'Policy');
+		let tmpAuthenticating = (typeof(pContext.Host.authenticationRequired) === 'function') && (pContext.Host.authenticationRequired() === true);
+		let tmpOptions = pContext.Options || this.options;
+		if ((tmpPolicyHost || tmpAuthenticating) && (!pContext.Principal || (pContext.Principal.Kind === 'Anonymous')))
 		{
-			let tmpOptions = pContext.Options || this.options;
 			let tmpAllowAnonymous = (tmpOptions.Catalog && Array.isArray(tmpOptions.Catalog.AllowAnonymous)) ? tmpOptions.Catalog.AllowAnonymous : [];
 			if (tmpAllowAnonymous.indexOf(pEntity) < 0)
 			{
 				return false;
 			}
+		}
+		if (tmpPolicyHost && !this.meetsScopeRequirements(tmpPolicy, pEntity, pContext.Principal, tmpOptions))
+		{
+			return false;
 		}
 		let tmpAuthorizer = (typeof(pContext.Host.getAuthorizer) === 'function') ? pContext.Host.getAuthorizer() : null;
 		if (!tmpAuthorizer || (typeof(tmpAuthorizer.canRead) !== 'function'))
@@ -125,6 +136,34 @@ class RetoldFacetingAuthorizer extends libFableServiceProviderBase
 			this.fable.log.error(`RetoldFaceting Authorizer: the host authorizer failed for ${pEntity}: ${pAuthorizerError.message}`);
 			return false;
 		}
+	}
+
+	/**
+	 * Does the principal carry a set value for every scope column the entity requires (its tenancy,
+	 * PersonalScopes and Required columns), none of them one the host could not compute?
+	 *
+	 * @param {Record<string, any>} pPolicy - a Kind 'Policy' scope policy
+	 * @param {string} pEntity
+	 * @param {Record<string, any>} pPrincipal
+	 * @param {Record<string, any>} pOptions
+	 * @return {boolean}
+	 */
+	meetsScopeRequirements(pPolicy, pEntity, pPrincipal, pOptions)
+	{
+		if (typeof(pPolicy.requiredFor) !== 'function')
+		{
+			return true;
+		}
+		let tmpRequired = pPolicy.requiredFor(pEntity, pPrincipal || null);
+		if (tmpRequired.length < 1)
+		{
+			return true;
+		}
+		let tmpUnsetValues = Array.isArray(pPolicy.UnsetValues) ? pPolicy.UnsetValues
+			: (pOptions && pOptions.Scope && Array.isArray(pOptions.Scope.UnsetValues)) ? pOptions.Scope.UnsetValues
+			: [];
+		let tmpUnresolved = (pPrincipal && Array.isArray(pPrincipal.UnresolvedScopeColumns)) ? pPrincipal.UnresolvedScopeColumns : [];
+		return tmpRequired.every((pEntry) => { return (tmpUnresolved.indexOf(pEntry.Column) < 0) && !libRetoldFacetingUtil.isUnsetScopeValue(pEntry.Value, tmpUnsetValues); });
 	}
 }
 

@@ -24,7 +24,12 @@
  * ScopedRelationBuilder can run it Staged (internal-contracts §26.3); every other Opaque capture is
  * refused by the guard.
  *
- * Contract: internal-contracts §8.1, §26.2.
+ * Host fences (internal-contracts §75.4, Part V): a host behavior that wraps the whole prior filter in a
+ * bare group before appending its scope (RAFS's tenancy fence) is peeled before the diff (HostWraps), and
+ * operators the host's fence refuses (Host.fenceProfile().Swap, RAFS: 'IS' + null on SQLite) are swapped
+ * for the behavior run only and restored before the after-snapshot.  Anything else still fails closed.
+ *
+ * Contract: internal-contracts §8.1, §26.2, §75.4.
  *
  * @author Steven Velozo <steven@velozo.com>
  */
@@ -56,6 +61,9 @@ const READ_SIDE_BEHAVIORS = Object.freeze([ 'Read-PreOperation', 'Reads-PostOper
 // The Opaque reason of an untrusted read-side behavior (never stageable: a staged key query does not
 // run the PostOperation either).
 const POST_OPERATION_REASON = 'PostOperation';
+
+// The Parameter suffix of an entry the fence swap changed while a host behavior ran (§75.4).
+const SWAP_MARKER = '~FacetSwap';
 
 const hasOwn = libRetoldFacetingUtil.hasOwn;
 const stripColumn = libRetoldFacetingUtil.stripColumn;
@@ -136,6 +144,187 @@ const entryDepths = (pFilter) =>
 		}
 	}
 	return tmpDepths;
+};
+
+/**
+ * Is a filter entry a host's BARE paren (internal-contracts §75.4): Operator pOperator, Column '',
+ * Parameter '', Connector 'AND' — what a host wrap layer (RAFS's tenancy fence) unshifts / pushes, and
+ * never what faceting renders (its own parens carry a Facet* Parameter).
+ *
+ * @param {any} pEntry
+ * @param {string} pOperator - '(' | ')'
+ * @return {boolean}
+ */
+const isBareParen = (pEntry, pOperator) =>
+{
+	return !!pEntry && (typeof(pEntry) === 'object')
+		&& (pEntry.Operator === pOperator)
+		&& ((pEntry.Column === '') || (pEntry.Column === null) || (typeof(pEntry.Column) === 'undefined'))
+		&& ((pEntry.Parameter === '') || (pEntry.Parameter === null) || (typeof(pEntry.Parameter) === 'undefined'))
+		&& (String(pEntry.Connector).toUpperCase() === 'AND');
+};
+
+/**
+ * Do the first pBefore.length entries of pFilter from pStart match pBefore on Column / Value /
+ * Connector / Parameter (operators may differ: Transformed)?
+ *
+ * @param {Array<Record<string, any>>} pBefore
+ * @param {Array<Record<string, any>>} pFilter
+ * @param {number} pStart
+ * @param {number} pEnd - exclusive
+ * @return {boolean}
+ */
+const alignsWith = (pBefore, pFilter, pStart, pEnd) =>
+{
+	if ((pEnd - pStart) < pBefore.length)
+	{
+		return false;
+	}
+	for (let i = 0; i < pBefore.length; i++)
+	{
+		let tmpWas = pBefore[i];
+		let tmpIs = pFilter[pStart + i];
+		if ((canonicalJSON(tmpWas.Column) !== canonicalJSON(tmpIs.Column))
+			|| (canonicalJSON(tmpWas.Value) !== canonicalJSON(tmpIs.Value))
+			|| (tmpWas.Connector !== tmpIs.Connector)
+			|| (tmpWas.Parameter !== tmpIs.Parameter))
+		{
+			return false;
+		}
+	}
+	return true;
+};
+
+/**
+ * Host-wrap peeling (internal-contracts §75.4, F1).  While the candidate range starts with a bare '('
+ * whose matching close (by depth) is a bare ')', peel the pair: the entries after that close were
+ * appended by that wrap layer (collected innermost first), the inside is the next candidate.  Accepted
+ * only when the final inside aligns with pBefore; otherwise nothing is peeled (null: the M1
+ * index-aligned rule applies and fails closed).
+ *
+ * @param {Array<Record<string, any>>} pBefore - the pre-behavior filter
+ * @param {Array<Record<string, any>>} pAfter - the post-behavior filter
+ * @return {{ HostWraps: number, Start: number, End: number, LayerRanges: Array<{ Start: number, End: number }> }|null}
+ */
+const peelHostWraps = (pBefore, pAfter) =>
+{
+	let tmpStart = 0;
+	let tmpEnd = pAfter.length;
+	let tmpLayers = [];
+	while (((tmpEnd - tmpStart) >= 2) && isBareParen(pAfter[tmpStart], '('))
+	{
+		let tmpDepth = 0;
+		let tmpClose = -1;
+		for (let i = tmpStart; i < tmpEnd; i++)
+		{
+			if (pAfter[i] && (pAfter[i].Operator === '('))
+			{
+				tmpDepth++;
+			}
+			else if (pAfter[i] && (pAfter[i].Operator === ')'))
+			{
+				tmpDepth--;
+				if (tmpDepth === 0)
+				{
+					tmpClose = i;
+					break;
+				}
+			}
+		}
+		if ((tmpClose < 0) || !isBareParen(pAfter[tmpClose], ')'))
+		{
+			break;
+		}
+		tmpLayers.push({ Start: tmpClose + 1, End: tmpEnd });
+		tmpStart = tmpStart + 1;
+		tmpEnd = tmpClose;
+	}
+	if ((tmpLayers.length < 1) || !alignsWith(pBefore, pAfter, tmpStart, tmpEnd))
+	{
+		return null;
+	}
+	// Innermost first: the layer peeled last appended first.
+	tmpLayers.reverse();
+	return { HostWraps: tmpLayers.length, Start: tmpStart, End: tmpEnd, LayerRanges: tmpLayers };
+};
+
+/**
+ * The fence swap (internal-contracts §75.4, F2): right before a host Reads behavior runs over a
+ * faceting-rendered filter, every entry with an operator the host fence refuses (Host.fenceProfile()
+ * .Swap, e.g. { IS: '=' }) and a null Value is swapped to the stand-in operator (value kept, Parameter
+ * suffixed SWAP_MARKER); restoreFenceSwap puts the original back right after the behavior calls back.
+ *
+ * @param {any} pHost
+ * @param {any} pQuery - FoxHound query
+ * @return {{ Swapped: Array<{ Operator: string, Parameter: any, Stand: string }> }|null} null when nothing was swapped
+ */
+const applyFenceSwap = (pHost, pQuery) =>
+{
+	let tmpProfile = null;
+	try
+	{
+		tmpProfile = (pHost && (typeof(pHost.fenceProfile) === 'function')) ? pHost.fenceProfile() : null;
+	}
+	catch (pProfileError)
+	{
+		tmpProfile = null;
+	}
+	let tmpSwap = (tmpProfile && tmpProfile.Swap && (typeof(tmpProfile.Swap) === 'object')) ? tmpProfile.Swap : null;
+	let tmpFilter = (pQuery && pQuery.parameters && Array.isArray(pQuery.parameters.filter)) ? pQuery.parameters.filter : null;
+	if (!tmpSwap || !tmpFilter)
+	{
+		return null;
+	}
+	let tmpSwapped = [];
+	for (let i = 0; i < tmpFilter.length; i++)
+	{
+		let tmpEntry = tmpFilter[i];
+		if (!tmpEntry || (tmpEntry.Value !== null) || (typeof(tmpEntry.Operator) !== 'string') || !hasOwn(tmpSwap, tmpEntry.Operator))
+		{
+			continue;
+		}
+		let tmpStand = tmpSwap[tmpEntry.Operator];
+		tmpSwapped.push({ Operator: tmpEntry.Operator, Parameter: tmpEntry.Parameter, Stand: tmpStand });
+		tmpEntry.Operator = tmpStand;
+		tmpEntry.Parameter = `${(typeof(tmpEntry.Parameter) === 'string') ? tmpEntry.Parameter : ''}${SWAP_MARKER}`;
+	}
+	return (tmpSwapped.length > 0) ? { Swapped: tmpSwapped } : null;
+};
+
+/**
+ * Undo applyFenceSwap on the post-behavior filter: the marked entries, in order, get their original
+ * operator and Parameter back.  False (the capture is Opaque, FilterRewritten) when the behavior
+ * dropped, duplicated or re-operated a marked entry.
+ *
+ * @param {Record<string, any>|null} pSwap - applyFenceSwap()
+ * @param {any} pQuery
+ * @return {boolean} intact
+ */
+const restoreFenceSwap = (pSwap, pQuery) =>
+{
+	if (!pSwap)
+	{
+		return true;
+	}
+	let tmpFilter = (pQuery && pQuery.parameters && Array.isArray(pQuery.parameters.filter)) ? pQuery.parameters.filter : [];
+	let tmpMarked = tmpFilter.filter((pEntry) => { return !!pEntry && (typeof(pEntry.Parameter) === 'string') && pEntry.Parameter.endsWith(SWAP_MARKER); });
+	let tmpIntact = (tmpMarked.length === pSwap.Swapped.length);
+	for (let i = 0; i < tmpMarked.length; i++)
+	{
+		let tmpOriginal = (i < pSwap.Swapped.length) ? pSwap.Swapped[i] : null;
+		if (!tmpOriginal || (tmpMarked[i].Operator !== tmpOriginal.Stand) || (tmpMarked[i].Value !== null)
+			|| (tmpMarked[i].Parameter !== `${(typeof(tmpOriginal.Parameter) === 'string') ? tmpOriginal.Parameter : ''}${SWAP_MARKER}`))
+		{
+			tmpIntact = false;
+		}
+		// Restore regardless (a rewritten capture is refused anyway; never leave a marker in SQL).
+		if (tmpOriginal)
+		{
+			tmpMarked[i].Operator = tmpOriginal.Operator;
+			tmpMarked[i].Parameter = tmpOriginal.Parameter;
+		}
+	}
+	return tmpIntact;
 };
 
 /**
@@ -276,11 +465,18 @@ class RetoldFacetingScopeCapture extends libFableServiceProviderBase
 	/**
 	 * Diff a pre-behavior snapshot against the query after the behaviors ran.
 	 *
+	 * Host wraps (internal-contracts §75.4, F1) are peeled before the index-aligned diff: a host layer
+	 * that grouped the whole prior filter in bare parens and appended after them (RAFS's tenancy fence)
+	 * is not a rewrite.  Indexes (Transformed) stay in the pre-behavior filter's index space; Depths
+	 * are those of the FINAL filter (the wrap puts every faceting entry at depth >= 1, the host
+	 * predicates at depth 0).
+	 *
 	 * @param {Record<string, any>} pBefore - snapshot()
 	 * @param {any} pQuery
-	 * @return {{ PostBehaviorFilter: Array<Record<string, any>>, Appended: Array<Record<string, any>>, Transformed: Array<Record<string, any>>, Opaque: boolean, OpaqueReasons: Array<string>, Portable: boolean }}
+	 * @param {{ SwapIntact?: boolean }} [pOptions] - SwapIntact false: the fence swap found a marked entry rewritten (Opaque)
+	 * @return {{ PostBehaviorFilter: Array<Record<string, any>>, Appended: Array<Record<string, any>>, Transformed: Array<Record<string, any>>, Opaque: boolean, OpaqueReasons: Array<string>, Portable: boolean, HostWraps: number }}
 	 */
-	analyze(pBefore, pQuery)
+	analyze(pBefore, pQuery, pOptions)
 	{
 		let tmpAfter = this.snapshot(pQuery);
 		let tmpFilter = tmpAfter.Filter;
@@ -305,16 +501,25 @@ class RetoldFacetingScopeCapture extends libFableServiceProviderBase
 		{
 			fReason('QueryBranches');
 		}
-
-		let tmpTransformed = [];
-		if (tmpFilter.length < pBefore.Filter.length)
+		if (pOptions && (pOptions.SwapIntact === false))
 		{
 			fReason('FilterRewritten');
 		}
-		for (let i = 0; (i < pBefore.Filter.length) && (i < tmpFilter.length); i++)
+
+		// F1: peel the host's bare wrap layers (null: none, or the inside does not align → M1 rule).
+		let tmpPeel = peelHostWraps(pBefore.Filter, tmpFilter);
+		let tmpInsideStart = tmpPeel ? tmpPeel.Start : 0;
+		let tmpInsideEnd = tmpPeel ? tmpPeel.End : tmpFilter.length;
+
+		let tmpTransformed = [];
+		if ((tmpInsideEnd - tmpInsideStart) < pBefore.Filter.length)
+		{
+			fReason('FilterRewritten');
+		}
+		for (let i = 0; (i < pBefore.Filter.length) && ((tmpInsideStart + i) < tmpInsideEnd); i++)
 		{
 			let tmpWas = pBefore.Filter[i];
-			let tmpIs = tmpFilter[i];
+			let tmpIs = tmpFilter[tmpInsideStart + i];
 			let tmpSameButOperator = (canonicalJSON(tmpWas.Column) === canonicalJSON(tmpIs.Column))
 				&& (canonicalJSON(tmpWas.Value) === canonicalJSON(tmpIs.Value))
 				&& (tmpWas.Connector === tmpIs.Connector)
@@ -331,17 +536,26 @@ class RetoldFacetingScopeCapture extends libFableServiceProviderBase
 
 		let tmpDepths = entryDepths(tmpFilter);
 		let tmpAppended = [];
-		for (let i = pBefore.Filter.length; i < tmpFilter.length; i++)
+		let fAppend = (pStart, pEnd) =>
 		{
-			tmpAppended.push(
-				{
-					Column: tmpFilter[i].Column,
-					Operator: tmpFilter[i].Operator,
-					Value: Array.isArray(tmpFilter[i].Value) ? tmpFilter[i].Value.slice() : tmpFilter[i].Value,
-					Connector: tmpFilter[i].Connector,
-					Parameter: tmpFilter[i].Parameter,
-					Depth: tmpDepths[i]
-				});
+			for (let i = pStart; i < pEnd; i++)
+			{
+				tmpAppended.push(
+					{
+						Column: tmpFilter[i].Column,
+						Operator: tmpFilter[i].Operator,
+						Value: Array.isArray(tmpFilter[i].Value) ? tmpFilter[i].Value.slice() : tmpFilter[i].Value,
+						Connector: tmpFilter[i].Connector,
+						Parameter: tmpFilter[i].Parameter,
+						Depth: tmpDepths[i]
+					});
+			}
+		};
+		// What a behavior inside the innermost wrap appended, then each wrap layer's own, innermost first.
+		fAppend(tmpInsideStart + pBefore.Filter.length, tmpInsideEnd);
+		if (tmpPeel)
+		{
+			tmpPeel.LayerRanges.forEach((pRange) => { fAppend(pRange.Start, pRange.End); });
 		}
 
 		let tmpSchema = (pQuery && pQuery.query && Array.isArray(pQuery.query.schema)) ? pQuery.query.schema : [];
@@ -382,7 +596,8 @@ class RetoldFacetingScopeCapture extends libFableServiceProviderBase
 				Transformed: tmpTransformed,
 				Opaque: (tmpReasons.length > 0),
 				OpaqueReasons: tmpReasons,
-				Portable: (tmpReasons.length < 1)
+				Portable: (tmpReasons.length < 1),
+				HostWraps: tmpPeel ? tmpPeel.HostWraps : 0
 			});
 	}
 
@@ -390,12 +605,20 @@ class RetoldFacetingScopeCapture extends libFableServiceProviderBase
 	 * 'sf:' + first 12 hex of sha256(Entity | canonical(Appended) | canonical(Transformed) | Behavior | ScopeMode).
 	 *
 	 * @param {Record<string, any>} pCapture
+	 * (+ 'hw<n>' when host wraps were peeled, §75.4)
+	 *
 	 * @param {string} pScopeMode
 	 * @return {string}
 	 */
 	fingerprint(pCapture, pScopeMode)
 	{
 		let tmpParts = [ pCapture.Entity, canonicalJSON(pCapture.Appended), canonicalJSON(pCapture.Transformed), pCapture.Behavior, pScopeMode ];
+		if ((typeof(pCapture.HostWraps) === 'number') && (pCapture.HostWraps > 0))
+		{
+			// §75.4: the peeled host wraps are part of the material (absent on hosts that never wrap, so
+			// their fingerprints are unchanged).
+			tmpParts.push(`hw${pCapture.HostWraps}`);
+		}
 		if (pScopeMode === 'TenantOnly')
 		{
 			// A relaxed capture fingerprints differently from the Inherit one (what was removed).
@@ -627,19 +850,27 @@ class RetoldFacetingScopeCapture extends libFableServiceProviderBase
 		}
 		tmpState.Query = pQuery;
 
+		// F2 (§75.4): the host fence refuses operators faceting renders (RAFS: 'IS' + null on SQLite);
+		// swap them for the behavior run only, and restore before the after-snapshot.
+		let tmpSwap = applyFenceSwap(tmpHost, pQuery);
+
 		let fContinue = (pBehaviorError) =>
 		{
+			let tmpSwapIntact = restoreFenceSwap(tmpSwap, pQuery);
 			if (pBehaviorError)
 			{
 				// One mapping for every engine (the Reference uses the same function).
+				// (A host 400 over a faceting-rendered filter — e.g. a fence refusal — is FACET_INTERNAL: a
+				// faceting defect, never a client error, §75.4.)
 				let tmpMapped = libFacetErrors.fromBehaviorError(pBehaviorError);
 				if (tmpMapped.Code === 'FACET_INTERNAL')
 				{
-					this.fable.log.error(`RetoldFaceting ScopeCapture: the ${tmpBehavior} behavior of ${pEntity} failed.`);
+					let tmpStatus = (pBehaviorError && (typeof(pBehaviorError) === 'object')) ? (pBehaviorError.StatusCode || pBehaviorError.statusCode || '') : '';
+					this.fable.log.error(`RetoldFaceting ScopeCapture: the ${tmpBehavior} behavior of ${pEntity} failed${tmpStatus ? ` (${tmpStatus})` : ''}.`);
 				}
 				return fCallback(tmpMapped);
 			}
-			return this._finishCapture(tmpContext, pEntity, pQuery, tmpScopeMode, tmpBehavior, tmpBehaviorRan, tmpBefore, tmpMemoKey, tmpScopeGuard, tmpPostOperation, tmpState, fCallback);
+			return this._finishCapture(tmpContext, pEntity, pQuery, tmpScopeMode, tmpBehavior, tmpBehaviorRan, tmpBefore, tmpMemoKey, tmpScopeGuard, tmpPostOperation, tmpState, fCallback, { SwapIntact: tmpSwapIntact });
 		};
 
 		// A synchronous behavior's continuation runs AFTER runBehavior returns, so nothing downstream
@@ -693,10 +924,11 @@ class RetoldFacetingScopeCapture extends libFableServiceProviderBase
 	 * @param {Record<string, any>} pPostOperation - postOperationAudit()
 	 * @param {Record<string, any>} pState - the request state the QueryConfiguration behavior ran with
 	 * @param {(pError?: Error, pCapture?: Record<string, any>) => void} fCallback
+	 * @param {{ SwapIntact?: boolean }} [pAnalyzeOptions] - the fence swap's restore result (§75.4)
 	 */
-	_finishCapture(pContext, pEntity, pQuery, pScopeMode, pBehavior, pBehaviorRan, pBefore, pMemoKey, pScopeGuard, pPostOperation, pState, fCallback)
+	_finishCapture(pContext, pEntity, pQuery, pScopeMode, pBehavior, pBehaviorRan, pBefore, pMemoKey, pScopeGuard, pPostOperation, pState, fCallback, pAnalyzeOptions)
 	{
-		let tmpAnalysis = this.analyze(pBefore, pQuery);
+		let tmpAnalysis = this.analyze(pBefore, pQuery, pAnalyzeOptions);
 		if (Array.isArray(pContext.ScopeLog))
 		{
 			// M4 (internal-contracts §42.8): what this execution's behavior appended, before any
@@ -725,6 +957,8 @@ class RetoldFacetingScopeCapture extends libFableServiceProviderBase
 				Opaque: tmpAnalysis.Opaque,
 				OpaqueReasons: tmpAnalysis.OpaqueReasons,
 				Portable: tmpAnalysis.Portable,
+				// §75.4: how many host wrap layers (bare outer groups) were peeled before the diff.
+				HostWraps: tmpAnalysis.HostWraps,
 				// TenantOnly: what the relaxation removed (and why it refused, when it did).
 				Relaxed: false,
 				Removed: [],
@@ -823,6 +1057,10 @@ class RetoldFacetingScopeCapture extends libFableServiceProviderBase
 // The TenantOnly relaxation is a pure static (internal-contracts §26.2): the Reference engine
 // calls RetoldFacetingScopeCapture.relaxPersonalScope(…) without a service instance.
 RetoldFacetingScopeCapture.relaxPersonalScope = relaxPersonalScope;
+// The fence swap (§75.4) is shared the same way: every path that runs a host Reads behavior over a
+// faceting-rendered filter brackets the run with it (the Reference engine's list waterfall included).
+RetoldFacetingScopeCapture.applyFenceSwap = applyFenceSwap;
+RetoldFacetingScopeCapture.restoreFenceSwap = restoreFenceSwap;
 
 module.exports = RetoldFacetingScopeCapture;
 module.exports.serviceType = 'RetoldFacetingScopeCapture';
@@ -832,6 +1070,10 @@ module.exports.REPLACING_REASONS = REPLACING_REASONS;
 module.exports.READ_SIDE_BEHAVIORS = READ_SIDE_BEHAVIORS;
 module.exports.POST_OPERATION_REASON = POST_OPERATION_REASON;
 module.exports.relaxPersonalScope = relaxPersonalScope;
+module.exports.SWAP_MARKER = SWAP_MARKER;
+module.exports.peelHostWraps = peelHostWraps;
+module.exports.applyFenceSwap = applyFenceSwap;
+module.exports.restoreFenceSwap = restoreFenceSwap;
 module.exports.entryDepths = entryDepths;
 module.exports.canonicalJSON = canonicalJSON;
 module.exports.stripColumn = stripColumn;

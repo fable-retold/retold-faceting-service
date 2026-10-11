@@ -90,8 +90,9 @@ class RetoldFacetingReadYourWrites extends libFableServiceProviderBase
 	}
 
 	/**
-	 * The tracking key of a principal: its principalKey (internal-contracts §38.5), or a principal key
-	 * string passed as is.
+	 * The tracking key of a principal: its principalIdentityKey (internal-contracts §38.5, §71.2: the
+	 * principal key without the role set, so a write and the same session's reads match on a host
+	 * whose reads carry a RoleSetHash), or a principal key string passed as is.
 	 *
 	 * @param {Record<string, any>|string} pPrincipal
 	 * @return {string|null}
@@ -102,7 +103,7 @@ class RetoldFacetingReadYourWrites extends libFableServiceProviderBase
 		{
 			return (/^pk:[0-9a-f]{16}$/.test(pPrincipal)) ? pPrincipal : null;
 		}
-		return libRetoldFacetingUtil.principalKey(pPrincipal);
+		return libRetoldFacetingUtil.principalIdentityKey(pPrincipal);
 	}
 
 	/**

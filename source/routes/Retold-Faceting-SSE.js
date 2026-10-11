@@ -34,7 +34,9 @@
  * client reconnects through the host's full authentication, so a logout, a tenant switch or a role
  * change takes effect without the stream trusting the session snapshot it opened with.  A host that
  * can re-read a session from its store implements Host.revalidatePrincipal(pRequest, fCallback) and
- * keeps streams open instead.
+ * keeps streams open instead; such a host may also call revalidateAll() when something a principal's
+ * rights depend on changed (the RAFS host does on every role-table write), so a revocation reaches
+ * open streams at once instead of at their next revalidation time.
  *
  * Limits: SSE.MaxPerPrincipal (refuse new, 429), a per-tenant fair share
  * min(MaxPerTenant, MaxConnections / active tenants) under a policy (none without one: a single
@@ -119,6 +121,8 @@ class RetoldFacetingSSE extends libFableServiceProviderBase
 		this._HousekeepingTimer = null;
 		// Socket-destroy fallbacks still pending (timers)
 		this._SocketTimers = new Set();
+		// The pending revalidateAll() pass (one setImmediate for a burst of calls)
+		this._RevalidateSoon = null;
 		this._ConnectionCounter = 0;
 		this._Stats = { Opened: 0, Refused: {}, Sent: 0, Coalesced: 0, Heartbeats: 0, Closed: 0, Revalidated: 0, Stalled: 0 };
 	}
@@ -591,6 +595,8 @@ class RetoldFacetingSSE extends libFableServiceProviderBase
 				Blocked: false,
 				BlockedSince: null,
 				Revalidating: false,
+				// revalidateAll() arrived while a revalidation was in flight: run it once more after
+				RevalidateAgain: false,
 				NextHeartbeatAt: tmpNow + this.setting('HeartbeatMS'),
 				RevalidateAt: (tmpRevalidateMS > 0) ? (tmpNow + Math.round(tmpRevalidateMS * (1 - REVALIDATE_JITTER + (Math.random() * 2 * REVALIDATE_JITTER)))) : null,
 				Closed: false,
@@ -1304,6 +1310,13 @@ class RetoldFacetingSSE extends libFableServiceProviderBase
 			pConnection.VisibleKeys.clear();
 			let tmpRevalidateMS = this.setting('RevalidateMS');
 			pConnection.RevalidateAt = (tmpRevalidateMS > 0) ? (Date.now() + tmpRevalidateMS) : null;
+			if (pConnection.RevalidateAgain)
+			{
+				// revalidateAll() was called while this one ran (it may have read the old rights): once more.
+				pConnection.RevalidateAgain = false;
+				pConnection.RevalidateAt = 0;
+				this.scheduleRevalidation();
+			}
 		};
 		try
 		{
@@ -1313,6 +1326,95 @@ class RetoldFacetingSSE extends libFableServiceProviderBase
 		{
 			fDone(pError);
 		}
+	}
+
+	/**
+	 * Revalidate open streams now (a host calls it when something a principal's rights depend on changed;
+	 * the RAFS host does on every role-table write): every stream, or only those whose tenant Part is
+	 * one of pTenants (tenant values; a stream without a tenant Part — no policy column — is always
+	 * included).  Each stream's per-entity caches are dropped and its revalidation runs on the next tick
+	 * (one pass for a burst of calls); a stream whose revalidation is already in flight runs once more
+	 * after it.  Without Host.revalidatePrincipal the streams close with { Reason: 'Revalidate' } (the
+	 * client reconnects).  Never throws.
+	 *
+	 * @param {Array<any>|null} [pTenants] - null / omitted: every stream
+	 * @return {number} the streams marked
+	 */
+	revalidateAll(pTenants)
+	{
+		let tmpParts = null;
+		if (Array.isArray(pTenants) && (pTenants.length > 0))
+		{
+			let tmpGenerations = this.fable.RetoldFacetingGenerations;
+			tmpParts = new Set();
+			pTenants.forEach(
+				(pTenant) =>
+				{
+					tmpParts.add((tmpGenerations && (typeof(tmpGenerations.tenantKey) === 'function')) ? tmpGenerations.tenantKey(pTenant)
+						: encodeURIComponent(String(libRetoldFacetingUtil.normalizeScopeValue(pTenant))).replace(/\*/g, '%2A'));
+				});
+		}
+		let tmpMarked = 0;
+		this._Connections.forEach(
+			(pConnection) =>
+			{
+				if (pConnection.Closed)
+				{
+					return;
+				}
+				if (tmpParts && (pConnection.TenantPart !== GLOBAL_KEY) && !tmpParts.has(pConnection.TenantPart))
+				{
+					return;
+				}
+				pConnection.CanFacet.clear();
+				pConnection.VisibleKeys.clear();
+				if (pConnection.Revalidating)
+				{
+					pConnection.RevalidateAgain = true;
+				}
+				else
+				{
+					pConnection.RevalidateAt = 0;
+				}
+				tmpMarked++;
+			});
+		if (tmpMarked > 0)
+		{
+			this.scheduleRevalidation();
+		}
+		return tmpMarked;
+	}
+
+	/**
+	 * Run the due revalidations on the next tick (at most one pending pass).
+	 */
+	scheduleRevalidation()
+	{
+		if (this._RevalidateSoon)
+		{
+			return;
+		}
+		this._RevalidateSoon = setImmediate(
+			() =>
+			{
+				this._RevalidateSoon = null;
+				try
+				{
+					let tmpNow = Date.now();
+					Array.from(this._Connections).forEach(
+						(pConnection) =>
+						{
+							if (!pConnection.Closed && (pConnection.RevalidateAt !== null) && (tmpNow >= pConnection.RevalidateAt))
+							{
+								this.revalidate(pConnection);
+							}
+						});
+				}
+				catch (pError)
+				{
+					this.fable.log.warn(`RetoldFaceting SSE: the revalidation pass failed: ${pError.message}`);
+				}
+			});
 	}
 
 	/**
@@ -1487,6 +1589,11 @@ class RetoldFacetingSSE extends libFableServiceProviderBase
 		Array.from(this._Connections).forEach((pConnection) => { this.close(pConnection, tmpReason); });
 		this.stopGlobalTick();
 		this.stopHousekeeping();
+		if (this._RevalidateSoon)
+		{
+			clearImmediate(this._RevalidateSoon);
+			this._RevalidateSoon = null;
+		}
 		if (this._FlushTimer)
 		{
 			clearTimeout(this._FlushTimer);
@@ -1514,7 +1621,7 @@ class RetoldFacetingSSE extends libFableServiceProviderBase
 	 */
 	timerCount()
 	{
-		return (this._GlobalTimer ? 1 : 0) + (this._FlushTimer ? 1 : 0) + (this._HousekeepingTimer ? 1 : 0) + this._SocketTimers.size;
+		return (this._GlobalTimer ? 1 : 0) + (this._FlushTimer ? 1 : 0) + (this._HousekeepingTimer ? 1 : 0) + (this._RevalidateSoon ? 1 : 0) + this._SocketTimers.size;
 	}
 
 	/**

@@ -485,12 +485,20 @@ class RetoldFacetingEngineReference extends libRetoldFacetingEngineBase
 			return fCallback(libFacetErrors.create('FACET_TOO_LARGE', 'The request needs too many scope behavior runs.', { Limit: 'MaxBehaviorRunsPerRequest' }));
 		}
 
+		// The host fence swap (internal-contracts §75.4), exactly as ScopeCapture brackets the run.
+		let tmpSwap = libRetoldFacetingScopeCapture.applyFenceSwap(tmpHost, tmpState.Query);
 		tmpInjection.runBehavior(tmpBehavior, tmpController, tmpRequest, tmpState,
 			(pBehaviorError) =>
 			{
+				let tmpSwapIntact = libRetoldFacetingScopeCapture.restoreFenceSwap(tmpSwap, tmpState.Query);
 				if (pBehaviorError)
 				{
 					return fCallback(this.behaviorError(pBehaviorError));
+				}
+				if (!tmpSwapIntact)
+				{
+					this.fable.log.error(`RetoldFacetingEngineReference: the ${libRetoldFacetingUtil.logSafe(tmpBehavior)} behavior of ${libRetoldFacetingUtil.logSafe(pEntity)} rewrote a fence-swapped entry.`);
+					return fCallback(libFacetErrors.create('FACET_SCOPE_POLICY_VIOLATION', null, { Entity: pEntity, Reason: 'FilterRewritten' }));
 				}
 				if (pScope === 'TenantOnly')
 				{
