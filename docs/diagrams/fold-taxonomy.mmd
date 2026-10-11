@@ -1,0 +1,6 @@
+graph LR
+    Folds["Fold kinds"] --> Buckets["Bucketing dimensions<br/>K1 Terms, K2 DateHistogram,<br/>K3 NumericHistogram, K4 Ranges,<br/>K8 PathTerms, K9 BridgeTerms,<br/>K12 ChildRollup, K20 ExistsSplit"]
+    Folds --> Measures["Measures<br/>K5 Stats, K6 DistinctCount,<br/>K7 Missing"]
+    Folds --> Predicates["Predicates<br/>K10 PathSemiJoin, K11 AntiPath,<br/>K17 UnionOfPaths, K19 HavingCount"]
+    Folds --> Pivots["Pivots<br/>K14 Pivot, K18 TuplePivot"]
+    Folds --> Planned["Planned<br/>K13 Quantified, K15 Computed,<br/>K16 UnionOfSources"]

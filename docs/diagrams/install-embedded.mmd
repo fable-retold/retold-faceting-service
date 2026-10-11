@@ -1,0 +1,9 @@
+graph TD
+    A["RetoldDataService<br/>initializeService callback"] --> B["installOnRetoldDataService<br/>options, else fable.settings.RetoldFaceting"]
+    B --> C["attach: register the sub-services"]
+    C --> D["Host bind<br/>DALs, route-bound controllers,<br/>session source, scope policy"]
+    D --> E["Boot checks<br/>reserved entity names, shell templates"]
+    E --> F["Catalog and definitions<br/>ModelVersion"]
+    F --> G["Change capture<br/>intake and subscribers"]
+    G --> H["Stores<br/>only with Stores.ClickHouse"]
+    H --> I["Routes under RoutePrefix<br/>and the shutdown hook"]

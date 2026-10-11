@@ -1,0 +1,8 @@
+graph LR
+    S["Definitions.Path *.json<br/>Definitions.Files<br/>Definitions.Objects"] --> A["Schema check<br/>per entry"]
+    A --> P["Names, aliases and<br/>paths against the<br/>model graph"]
+    P --> W["Predicates, tokens,<br/>params, scopes,<br/>dimensions"]
+    W --> V{"Valid?"}
+    V -->|yes| E["Enabled<br/>Describe lists it"]
+    V -->|no| X["Disabled<br/>FACET_DEFINITION_INVALID<br/>logged once"]
+    X --> Y["Dependants disabled<br/>DependsOnDisabled"]

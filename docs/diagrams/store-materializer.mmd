@@ -1,0 +1,9 @@
+graph LR
+    INT["Change intake<br/>ChangeEvents"] --> PS["PendingSet<br/>changed IDs per entity"]
+    REC["Reconciler<br/>Sweep, Bisect, Scrub"] --> PS
+    PS --> WL["WriterLoop cycle<br/>version, fresh read, keymap diff"]
+    SRC["Source database<br/>SQLite or PostgreSQL"] -->|"trusted DAL read,<br/>no behaviors"| WL
+    RB["Rebuilder<br/>shadow table + EXCHANGE TABLES"] --> WL
+    WL --> FL["Flush<br/>keymap intents, mirror rows<br/>and tombstones, retirements"]
+    FL --> CH["Mirror tables<br/>ReplacingMergeTree"]
+    LS["Lease _rfs_lease<br/>one materializing process"] -.-> WL

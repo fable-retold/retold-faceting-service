@@ -1,0 +1,7 @@
+graph LR
+    Checks["Checks (no SQL)<br/>1 Principal: 401<br/>2 Shape: 400<br/>3 Freshness<br/>4 Gate: 404"] --> Planning["Planning (no SQL)<br/>5 Bind<br/>6 Filter<br/>7 Plan"]
+    Planning --> Cache["8 Cache<br/>DependsOn, key,<br/>If-None-Match"]
+    Cache --> Execution["On a miss<br/>9 Execute: Router<br/>10 Records<br/>11 Post<br/>12 Store: cache write"]
+    Cache --> Served["Served by the cache<br/>304, Hit or Stale"]
+    Execution --> Envelope["Envelope"]
+    Served --> Envelope

@@ -1,0 +1,7 @@
+{
+	"emphasis":
+	[
+		{ "node": "Service", "accent": true, "bold": true },
+		{ "nodes": [ "Store" ], "dim": true }
+	]
+}

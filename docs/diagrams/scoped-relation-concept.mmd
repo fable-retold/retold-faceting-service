@@ -1,0 +1,5 @@
+graph TD
+    Facet["Facet: books by Genre,<br/>scope 'has a 5-star review'"] --> Book["Book relation<br/>the books Book's own list<br/>shows this user"]
+    Book -->|"EXISTS, joined on IDBook"| Review["Review relation<br/>the reviews Review's own list<br/>shows this user"]
+    Review -.-|"never contains"| Hidden["Deleted reviews,<br/>another tenant's reviews"]
+    Book --> Counts["Counts by Genre:<br/>only books the user could list,<br/>with a review the user could list"]

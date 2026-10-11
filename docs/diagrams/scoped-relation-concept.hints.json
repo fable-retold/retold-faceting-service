@@ -1,0 +1,8 @@
+{
+	"emphasis":
+	[
+		{ "node": "Book", "accent": true, "bold": true },
+		{ "node": "Review", "accent": true },
+		{ "nodes": [ "Hidden" ], "dim": true }
+	]
+}

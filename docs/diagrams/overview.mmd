@@ -1,0 +1,8 @@
+graph TD
+    Client["Browser page<br/>pict views, pict-section-recordset"] -->|"POST Clauses + Facets"| Routes["Facet routes<br/>Query, Records, Count, Keys, Describe"]
+    Routes --> Service["RetoldFacetingService<br/>principal, entity gate, plan,<br/>optional result cache"]
+    Service --> Live["Live engine<br/>SQL over Scoped Relations"]
+    Service -.->|"when fresh enough"| Store["ClickHouse store<br/>optional, per facet"]
+    Service --> Envelope["Envelope, back to the page<br/>Total, facets, buckets;<br/>each bucket carries its Clause"]
+    Live --> DB[("Source database<br/>read through each entity's<br/>DAL and list behaviors")]
+    Store -.->|"materializer reads<br/>changed rows"| DB

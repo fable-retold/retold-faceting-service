@@ -1,0 +1,5 @@
+graph LR
+    Bucket["Facet bucket<br/>Book.Language = eng, Count 862"] --> Clause["Bucket.Clause<br/>DistinctSelectedValueList<br/>Language in [eng]"]
+    Clause --> Filter["The client puts the clause<br/>into the list filter"]
+    Filter --> FacetCount["POST /1.0/Facet/Book/Records/Count<br/>Count 862"]
+    Filter --> ListCount["GET /1.0/Books/Count/FilteredTo/<br/>FBV~Language~EQ~eng<br/>Count 862"]

@@ -1,0 +1,9 @@
+graph LR
+    P["Principal<br/>from the host's session"] --> U{"Scope value set?"}
+    U -->|yes| G["Gate every entity<br/>facetable and readable"]
+    U -->|"no, or anonymous"| X1["401 FACET_UNAUTHENTICATED"]
+    G --> R["Scoped Relation per hop<br/>the entity's own Reads behaviors"]
+    G -->|"root hidden or unknown"| X2["404 FACET_UNKNOWN_ENTITY"]
+    R --> SG{"ScopeGuard"}
+    SG -->|satisfied| SQL["Bound SQL<br/>identifiers from the catalog,<br/>every value a parameter"]
+    SG -->|"violation"| X3["500 FACET_SCOPE_POLICY_VIOLATION"]

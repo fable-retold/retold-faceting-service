@@ -1,0 +1,352 @@
+{
+	"Generated": "2026-10-10T17:21:17.553Z",
+	"Mode": "module",
+	"GitHubOrg": "fable-retold",
+	"DefaultBranch": "master",
+	"Module": {
+		"Name": "retold-faceting-service",
+		"Repo": "retold-faceting-service",
+		"Group": "",
+		"Branch": "master",
+		"HasDocs": true,
+		"HasCover": true,
+		"Sidebar": [
+			{
+				"Title": "Getting Started",
+				"Children": [
+					{
+						"Title": "Introduction",
+						"Path": "README.md"
+					},
+					{
+						"Title": "Getting Started",
+						"Path": "Getting_Started.md"
+					},
+					{
+						"Title": "Architecture",
+						"Path": "Faceting_Architecture.md"
+					},
+					{
+						"Title": "Concepts",
+						"Path": "Concepts.md"
+					}
+				]
+			},
+			{
+				"Title": "Defining Facets",
+				"Children": [
+					{
+						"Title": "Definitions Files",
+						"Path": "Definitions.md"
+					},
+					{
+						"Title": "Configuration",
+						"Path": "Configuration.md"
+					}
+				]
+			},
+			{
+				"Title": "Fold Kinds",
+				"Children": [
+					{
+						"Title": "Choosing a Fold",
+						"Path": "Fold_Kinds.md"
+					},
+					{
+						"Title": "K1 Terms",
+						"Path": "fold_kinds/001-terms.md"
+					},
+					{
+						"Title": "K2 DateHistogram",
+						"Path": "fold_kinds/002-date-histogram.md"
+					},
+					{
+						"Title": "K3 NumericHistogram",
+						"Path": "fold_kinds/003-numeric-histogram.md"
+					},
+					{
+						"Title": "K4 Ranges",
+						"Path": "fold_kinds/004-ranges.md"
+					},
+					{
+						"Title": "K5 Stats",
+						"Path": "fold_kinds/005-stats.md"
+					},
+					{
+						"Title": "K6 DistinctCount",
+						"Path": "fold_kinds/006-distinct-count.md"
+					},
+					{
+						"Title": "K7 Missing",
+						"Path": "fold_kinds/007-missing.md"
+					},
+					{
+						"Title": "K8 PathTerms",
+						"Path": "fold_kinds/008-path-terms.md"
+					},
+					{
+						"Title": "K9 BridgeTerms",
+						"Path": "fold_kinds/009-bridge-terms.md"
+					},
+					{
+						"Title": "K10 PathSemiJoin",
+						"Path": "fold_kinds/010-path-semi-join.md"
+					},
+					{
+						"Title": "K11 AntiPath",
+						"Path": "fold_kinds/011-anti-path.md"
+					},
+					{
+						"Title": "K12 ChildRollup",
+						"Path": "fold_kinds/012-child-rollup.md"
+					},
+					{
+						"Title": "K14 Pivot",
+						"Path": "fold_kinds/014-pivot.md"
+					},
+					{
+						"Title": "K17 UnionOfPaths",
+						"Path": "fold_kinds/017-union-of-paths.md"
+					},
+					{
+						"Title": "K18 TuplePivot",
+						"Path": "fold_kinds/018-tuple-pivot.md"
+					},
+					{
+						"Title": "K19 HavingCount",
+						"Path": "fold_kinds/019-having-count.md"
+					},
+					{
+						"Title": "K20 ExistsSplit",
+						"Path": "fold_kinds/020-exists-split.md"
+					}
+				]
+			},
+			{
+				"Title": "API Reference",
+				"Children": [
+					{
+						"Title": "Overview",
+						"Path": "API_Reference.md"
+					},
+					{
+						"Title": "Routes",
+						"Path": "api/Routes.md"
+					},
+					{
+						"Title": "The Request Body",
+						"Path": "api/Request.md"
+					},
+					{
+						"Title": "The Response Envelope",
+						"Path": "api/Envelope.md"
+					},
+					{
+						"Title": "Describe",
+						"Path": "api/Describe.md"
+					},
+					{
+						"Title": "Records, Count and Keys",
+						"Path": "api/Records_And_Keys.md"
+					},
+					{
+						"Title": "The Change Feed (SSE)",
+						"Path": "api/Change_Feed.md"
+					},
+					{
+						"Title": "Errors and Limits",
+						"Path": "api/Errors_And_Limits.md"
+					},
+					{
+						"Title": "JavaScript API",
+						"Path": "api/JavaScript_API.md"
+					}
+				]
+			},
+			{
+				"Title": "Operations",
+				"Children": [
+					{
+						"Title": "Caching and Invalidation",
+						"Path": "Caching_And_Invalidation.md"
+					},
+					{
+						"Title": "The ClickHouse Store",
+						"Path": "ClickHouse_Store.md"
+					},
+					{
+						"Title": "Security and Tenancy",
+						"Path": "Security_And_Tenancy.md"
+					},
+					{
+						"Title": "Hosting",
+						"Path": "Hosting.md"
+					},
+					{
+						"Title": "Troubleshooting",
+						"Path": "Troubleshooting.md"
+					},
+					{
+						"Title": "Testing",
+						"Path": "Testing.md"
+					}
+				]
+			},
+			{
+				"Title": "Examples",
+				"Children": [
+					{
+						"Title": "Overview",
+						"Path": "Examples.md"
+					},
+					{
+						"Title": "The Faceting Demo",
+						"Path": "examples/Faceting_Demo.md"
+					},
+					{
+						"Title": "E1: Projects for Me",
+						"Path": "examples/E1_Projects_For_Me.md"
+					},
+					{
+						"Title": "E2: Documents by Form Type",
+						"Path": "examples/E2_Documents_By_Form_Type.md"
+					},
+					{
+						"Title": "E3: Lab Forms I Still Have to Fill Out",
+						"Path": "examples/E3_Lab_Forms_To_Fill_Out.md"
+					},
+					{
+						"Title": "Bookstore Explorer",
+						"Path": "examples/Bookstore_Explorer.md"
+					}
+				]
+			},
+			{
+				"Title": "Internals",
+				"Children": [
+					{
+						"Title": "Internals",
+						"Path": "Internals.md"
+					}
+				]
+			}
+		],
+		"DocFiles": [
+			".nojekyll",
+			"API_Reference.md",
+			"Caching_And_Invalidation.md",
+			"ClickHouse_Store.md",
+			"Concepts.md",
+			"Configuration.md",
+			"Definitions.md",
+			"Examples.md",
+			"Faceting_Architecture.md",
+			"Fold_Kinds.md",
+			"Getting_Started.md",
+			"Hosting.md",
+			"Internals.md",
+			"README.md",
+			"Security_And_Tenancy.md",
+			"Testing.md",
+			"Troubleshooting.md",
+			"_brand.json",
+			"_cover.md",
+			"_sidebar.md",
+			"_topbar.md",
+			"_version.json",
+			"api/Change_Feed.md",
+			"api/Describe.md",
+			"api/Envelope.md",
+			"api/Errors_And_Limits.md",
+			"api/JavaScript_API.md",
+			"api/Records_And_Keys.md",
+			"api/Request.md",
+			"api/Routes.md",
+			"diagrams/bucket-round-trip.excalidraw",
+			"diagrams/bucket-round-trip.mmd",
+			"diagrams/bucket-round-trip.svg",
+			"diagrams/change-flow.excalidraw",
+			"diagrams/change-flow.mmd",
+			"diagrams/change-flow.svg",
+			"diagrams/component-map.excalidraw",
+			"diagrams/component-map.mmd",
+			"diagrams/component-map.svg",
+			"diagrams/definitions-load.excalidraw",
+			"diagrams/definitions-load.mmd",
+			"diagrams/definitions-load.svg",
+			"diagrams/demo-topology.excalidraw",
+			"diagrams/demo-topology.hints.json",
+			"diagrams/demo-topology.mmd",
+			"diagrams/demo-topology.svg",
+			"diagrams/disjunctive-faceting.excalidraw",
+			"diagrams/disjunctive-faceting.mmd",
+			"diagrams/disjunctive-faceting.svg",
+			"diagrams/e3-variants.excalidraw",
+			"diagrams/e3-variants.mmd",
+			"diagrams/e3-variants.svg",
+			"diagrams/fold-taxonomy.excalidraw",
+			"diagrams/fold-taxonomy.hints.json",
+			"diagrams/fold-taxonomy.mmd",
+			"diagrams/fold-taxonomy.svg",
+			"diagrams/freshness-routing.excalidraw",
+			"diagrams/freshness-routing.mmd",
+			"diagrams/freshness-routing.svg",
+			"diagrams/install-embedded.excalidraw",
+			"diagrams/install-embedded.mmd",
+			"diagrams/install-embedded.svg",
+			"diagrams/overview.excalidraw",
+			"diagrams/overview.hints.json",
+			"diagrams/overview.mmd",
+			"diagrams/overview.svg",
+			"diagrams/request-lifecycle.excalidraw",
+			"diagrams/request-lifecycle.mmd",
+			"diagrams/request-lifecycle.svg",
+			"diagrams/scope-enforcement.excalidraw",
+			"diagrams/scope-enforcement.mmd",
+			"diagrams/scope-enforcement.svg",
+			"diagrams/scoped-relation-concept.excalidraw",
+			"diagrams/scoped-relation-concept.hints.json",
+			"diagrams/scoped-relation-concept.mmd",
+			"diagrams/scoped-relation-concept.svg",
+			"diagrams/scoped-relation.excalidraw",
+			"diagrams/scoped-relation.mmd",
+			"diagrams/scoped-relation.svg",
+			"diagrams/store-materializer.excalidraw",
+			"diagrams/store-materializer.mmd",
+			"diagrams/store-materializer.svg",
+			"examples/Bookstore_Explorer.md",
+			"examples/E1_Projects_For_Me.md",
+			"examples/E2_Documents_By_Form_Type.md",
+			"examples/E3_Lab_Forms_To_Fill_Out.md",
+			"examples/Faceting_Demo.md",
+			"fold_kinds/001-terms.md",
+			"fold_kinds/002-date-histogram.md",
+			"fold_kinds/003-numeric-histogram.md",
+			"fold_kinds/004-ranges.md",
+			"fold_kinds/005-stats.md",
+			"fold_kinds/006-distinct-count.md",
+			"fold_kinds/007-missing.md",
+			"fold_kinds/008-path-terms.md",
+			"fold_kinds/009-bridge-terms.md",
+			"fold_kinds/010-path-semi-join.md",
+			"fold_kinds/011-anti-path.md",
+			"fold_kinds/012-child-rollup.md",
+			"fold_kinds/014-pivot.md",
+			"fold_kinds/017-union-of-paths.md",
+			"fold_kinds/018-tuple-pivot.md",
+			"fold_kinds/019-having-count.md",
+			"fold_kinds/020-exists-split.md",
+			"images/demo-bookstore.jpg",
+			"images/demo-documents.jpg",
+			"images/demo-inspector.jpg",
+			"images/demo-labforms-a.jpg",
+			"images/demo-live-change.jpg",
+			"images/demo-projects.jpg",
+			"index.html",
+			"internal-contracts.md",
+			"retold-catalog.json",
+			"retold-keyword-index.json"
+		]
+	},
+	"Groups": []
+}

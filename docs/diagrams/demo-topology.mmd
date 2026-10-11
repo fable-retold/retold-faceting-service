@@ -1,0 +1,5 @@
+graph TD
+    Browser["Browser<br/>the demo page"] --> Front["Front server<br/>127.0.0.1:19300"]
+    Front --> Dist["dist/<br/>page, bundle, CSS"]
+    Front --> DemoAPI["/api/Demo/*<br/>personas, status"]
+    Front -->|"proxy /1.0/Facet/*"| Domains["Domain servers<br/>ProjectTrack, LabTrack,<br/>Bookstore: one test<br/>harness each, loopback"]

@@ -1,0 +1,7 @@
+graph TD
+    DAL["A fresh query from the entity's own DAL"] --> Fence["Client conjuncts in a fence ( … )<br/>definition Where in its own fence"]
+    Fence --> Deleted["Explicit Deleted = 0 at depth 0"]
+    Deleted --> Capture["Scope capture: the entity's Reads-QueryConfiguration<br/>runs on its route-bound controller"]
+    Capture --> Guard["ScopeGuard: every required policy column present<br/>(Strict refuses, Repair adds a missing one)"]
+    Guard --> Harvest["Minimal projection, SQL text harvested,<br/>parameters renamed alias_name"]
+    Harvest --> Compose["Composed by alias only:<br/>EXISTS, NOT EXISTS, LEFT JOIN, derived table"]

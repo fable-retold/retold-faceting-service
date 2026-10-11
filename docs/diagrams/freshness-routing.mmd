@@ -1,0 +1,9 @@
+graph TD
+    A["One facet of a Query"] --> B{"Engine: 'Live'?"}
+    B -->|yes| L["Live engine<br/>exact, always available"]
+    B -->|no| C{"Store capable?"}
+    C -->|no| L
+    C -->|yes| D{"Freshness admits?"}
+    D -->|no| L
+    D -->|yes| S["ClickHouse store"]
+    S -->|"error or timeout,<br/>same request"| L

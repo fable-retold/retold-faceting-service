@@ -1,0 +1,9 @@
+graph TD
+    Q["Lab forms I still have to fill out"] --> A["Variant A: stored requirements<br/>start from MaterialIntakeRequirement rows"]
+    Q --> B["Variant B: implied by configuration<br/>start from MaterialIntake rows"]
+    A --> A1["keep a row when its intake is<br/>in one of my queues (Exists)"]
+    A1 --> A2["drop it when a Complete LabForm exists<br/>for the same intake and form type<br/>(NotExists, TenantOnly)"]
+    A2 --> RA["count rows: CountMode Rows,<br/>a listable work list"]
+    B --> B1["pair each intake in my queues with the forms<br/>its material type requires (TuplePivot)"]
+    B1 --> B2["drop a pair when a Complete LabForm exists<br/>for it (NotExists, TenantOnly)"]
+    B2 --> RB["count distinct pairs: CountMode KeyDistinct,<br/>read-only buckets"]

@@ -1,0 +1,13 @@
+graph LR
+    routes["routes/<br/>Routes, SSE"] --> request["request/<br/>RequestNormalizer, FilterValidator,<br/>ClauseCompiler, FilterAST,<br/>DisjunctivePlanner"]
+    request --> plan["plan/<br/>Planner, FoldIR, Lowering, Binder"]
+    plan --> engine["engine/<br/>Router, EngineLive, EngineReference,<br/>EngineClickHouse; live/ SQL composition"]
+    security["security/<br/>PrincipalResolver, Authorizer,<br/>ScopeCapture, ScopeGuard, CacheKey"] --> engine
+    catalog["catalog/<br/>Catalog, Graph, DefinitionRegistry,<br/>LabelResolver"] --> plan
+    host["host/<br/>HostBase, HostDataService"] --> catalog
+    host --> security
+    change["change/<br/>ChangeIntake, ReadYourWrites"] --> cache["cache/<br/>Generations, ResultCache"]
+    change --> persistence["persistence/<br/>MirrorSpec, Materializer, Rebuilder,<br/>Reconciler, Freshness"]
+    persistence --> store["store/<br/>StoreBase, clickhouse/"]
+    engine --> store
+    contract["contract/<br/>Request, Envelope, Buckets,<br/>Clauses, Errors (pure)"] -.-> request

@@ -1,0 +1,9 @@
+graph LR
+    W["A write through a<br/>stock CRUD route"] --> I["Change intake<br/>wrapped dispatcher + DAL"]
+    N["notify() / notifyByFilter()<br/>raw writers, after COMMIT"] --> I
+    I --> E["ChangeEvent<br/>Entity, IDs, Tenants, Seq"]
+    E --> G["Generations<br/>bump Entity / tenant / column"]
+    E --> R["Read-your-writes<br/>the writer's last Seq"]
+    E --> M["Materializer<br/>only with a store"]
+    G --> C["Result cache<br/>new GenVector: miss"]
+    G --> S["Change feed (SSE)<br/>generation event"]

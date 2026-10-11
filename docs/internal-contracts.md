@@ -1,6 +1,6 @@
-# retold-faceting-service — Internal Contracts (Milestones 1, 2, 4 and 5)
+# retold-faceting-service — Internal Contracts (Milestones 1, 2, 4 and 5; Part V: the RAFS host)
 
-> **Part IV (§53–§70) is the Milestone 5 contract (the ClickHouse store: MirrorSpec, materializer, rebuild, reconcile, freshness, the ClickHouse fold compiler and engine) and wins over Parts I–III wherever they conflict** (§53.2 lists every earlier rule it changes). **Part III (§38–§52) is the Milestone 4 contract (change capture, generations, result cache, freshness, SSE) and wins over Parts I and II wherever they conflict** (§38.2 lists every earlier rule it changes). **Part II (§19–§37) is the Milestone 2 contract and wins over Part I wherever they conflict** (§19.2 lists every Part I rule it changes). Part I (§0–§18) below is the Milestone 1 contract as built. (Milestone 3 was the `example_applications/faceting_demo` app; its spec is that folder's `DEMO-SPEC.md`.)
+> **Part V (§71–§82) is the retold-application-foundation-server host contract (the RAFS host adapter and its installers) and wins over Parts I–IV wherever they conflict** (§71.2 lists every earlier rule it changes). **Part IV (§53–§70) is the Milestone 5 contract (the ClickHouse store: MirrorSpec, materializer, rebuild, reconcile, freshness, the ClickHouse fold compiler and engine) and wins over Parts I–III wherever they conflict** (§53.2 lists every earlier rule it changes). **Part III (§38–§52) is the Milestone 4 contract (change capture, generations, result cache, freshness, SSE) and wins over Parts I and II wherever they conflict** (§38.2 lists every earlier rule it changes). **Part II (§19–§37) is the Milestone 2 contract and wins over Part I wherever they conflict** (§19.2 lists every Part I rule it changes). Part I (§0–§18) below is the Milestone 1 contract as built. (Milestone 3 was the `example_applications/faceting_demo` app; its spec is that folder's `DEMO-SPEC.md`.)
 
 > **Binding.** This file is the interface spec Milestone 1 is coded against. Every shape, method name, field name and error code here is a contract between modules. If you need to change a contract, change it here first; never silently diverge. Where this file and the design set (`/Users/steven/Documents/retold-faceting-service-design/design/`) disagree, **this file wins for M1** and §16 lists every deliberate deviation.
 
@@ -53,7 +53,7 @@ RetoldFacetingPredicateCompiler  RetoldFacetingStagedKeys  RetoldFacetingCubeExe
 | Area | Files |
 |---|---|
 | Contract (pure, shared with pict-section-facet) | `source/contract/Facet-Contract-Request.js`, `-Envelope.js`, `-Buckets.js`, `-Clauses.js`, `-Errors.js`, `-Util.js` |
-| Host and catalog | `source/host/Retold-Faceting-Host-Base.js`, `source/host/Retold-Faceting-Host-DataService.js`, `source/catalog/Retold-Faceting-Catalog.js`, `source/catalog/Retold-Faceting-Graph.js`, `source/catalog/Retold-Faceting-LabelResolver.js`, `source/Retold-Faceting-Installers.js` |
+| Host and catalog | `source/host/Retold-Faceting-Host-Base.js`, `source/host/Retold-Faceting-Host-DataService.js`, `source/host/Retold-Faceting-Host-ApplicationServer.js` (Part V), `source/catalog/Retold-Faceting-Catalog.js`, `source/catalog/Retold-Faceting-Graph.js`, `source/catalog/Retold-Faceting-LabelResolver.js`, `source/Retold-Faceting-Installers.js` |
 | Request | `source/request/Retold-Faceting-RequestNormalizer.js`, `-FilterValidator.js`, `-ClauseCompiler.js`, `-FilterAST.js`, `-DisjunctivePlanner.js` |
 | Plan | `source/plan/Retold-Faceting-Planner.js`, `-FoldIR.js` |
 | Live engine and scope | `source/engine/live/*` (ScopedRelationBuilder, Dialects, ShellTemplates, `Shell-Templates-<Dialect>.js`), `source/engine/Retold-Faceting-EngineLive.js`, `source/security/Retold-Faceting-ScopeCapture.js`, `-ScopeGuard.js` |
@@ -990,7 +990,11 @@ See §9.3. The harness's `reference()` and the HTTP `facetQuery()` must produce 
 | 19196–19198 | `example_applications/faceting_demo` (registry tags of the ProjectTrack, LabTrack and Bookstore domains; binds ephemeral; the demo's own ports are 19300–19310: 19300 `npm start`, 19301 its `npm test`, 19302 its `npm run check:browser`) |
 | 19130–19137, 19192 | M4 test files and `debug/m4-smoke.js` (§49.2) |
 | 19140–19147, 19193 | M5 test files and `debug/m5-smoke.js` (§69.2) |
-| 19138–19139, 19148–19189, 19194–19195, 19199 | free; claim one by adding a row here |
+| 19138–19139 | `test/Facet-Host-RAFS_tests.js` (Part V §80.5: Header- and Login-mode RAFS harnesses) |
+| 19194 | `debug/rafs-smoke.js` (Part V; manual smoke run, not part of `npm test`) |
+| 19160 | `test/Facet-Docs_tests.js` (the documentation check; its harnesses bind ephemeral ports, 19160 names the runs) |
+| 19195 | the Getting Started playground (`docs/Getting_Started.md`, `try-facets.js`; manual, not part of `npm test`) |
+| 19149–19159, 19161–19189, 19199 | free; claim one by adding a row here (19161 is the local docs preview, `pict-docuserve serve -p 19161`) |
 
 ---
 
@@ -4598,3 +4602,535 @@ Never another container, image, volume or network (in particular never a Sluice 
 | Solr / OpenSearch stores | not present |
 | Tenant-scoped overflow remediation (Scrub of affected tenants, Sweep, fan-out of old keys) | whole-entity Resync |
 | A durable change log / Bus with `AppliedCursor` resume | in-memory PendingSet; Unverified + reconcile after a crash |
+
+
+---
+
+# Part V — Host: retold-application-foundation-server (RAFS)
+
+> **Binding for the RAFS host.** Part V wins over Parts I–IV wherever they conflict; §71.2 lists every earlier rule it changes. The target is **retold-application-foundation-server 1.0.5** (`/Users/steven/Code/retold/modules/private/retold-application-foundation-server`), a **private** package: retold-faceting-service never lists it as a dependency, never `require`s it from `source/`, and duck-types the server object. **Sluice is not a target** of this work: no Sluice-specific code, compat shim or option lands here (Sluice was the prototype; it will consume this host like any other RAFS app). Design references: `07 §3`, `06 §2.2 / §3 / §5`, `10 §2 (RAFS-1…6) / §3.2`, `03 §2`.
+
+> **Owner principle.** Tenancy is the host app's job, in its own behaviors. The service inherits it by running each entity's own `Reads-QueryConfiguration` on the **route-bound** controller (§8.1) and **asserts** the result with the ScopeGuard (§8.2) against the coverage RAFS actually installed (§75). It never re-implements `fFence` / `fFilter` / the stamp, and never patches RAFS, meadow-endpoints, foxhound or meadow-filter. Where RAFS and the service disagree on a shape (§72.10), the service adapts on its own side and the Guard still decides.
+
+---
+
+## 71. Overview, precedence, files
+
+### 71.1 What Part V adds
+
+| Area | Addition |
+|---|---|
+| Installers | `foundationHookInstaller(pServer, pOptions, fStep?)`, `foundationRouteInstaller(pServer, pOptions, fStep?)` in RAFS's step convention; option sourcing (§73) |
+| Host | `RetoldFacetingHostApplicationServer` (extends `RetoldFacetingHostDataService`): DALs / endpoints / model / service server from the RAFS object, the tenancy **coverage** snapshot, the scope policy from `tenancyConfig()`, the principal from `pRequest.UserSession`, the Retold-Entitlements authorizer, `isFacetable` over NoAutoCRUD / DeniedPrefixes / Exclude / late mounts / root and identity tables (§74–§78) |
+| Capture | host-wrap peeling and the fence operator swap, so RAFS's tenancy fence is inherited instead of refused (§75.4) |
+| Change capture | chassis raw writers reported as uncovered; entitlement-cache invalidation on every write through a role table's DAL (independent of facetability) and revalidation of open change streams; read-your-writes keyed by the principal **identity** (§79) |
+| Tests | the gated RAFS suite and harness (§80) |
+
+### 71.2 Earlier rules changed by Part V
+
+| Earlier | Rule there | Part V rule |
+|---|---|---|
+| §12.1 host list, §0.1 | one host (`HostDataService`) | + `RetoldFacetingHostApplicationServer`, registered in `SUB_SERVICES` right after `RetoldFacetingHostDataService` (done by the contracts pass) |
+| §12.3 installers | `installOnRetoldDataService` only | + the two foundation installers (§73); the package root re-exports them (done) |
+| `attach(pAttachOptions)` (§12.3, §44.10) | `{ RetoldDataService }`, one phase, routes mounted at attach | `{ ApplicationServer: pServer, Phase: 'Hook' \| 'Routes' }` selects `Host = fable.RetoldFacetingHostApplicationServer`; `'Hook'` does everything except `Routes.connect` (the shutdown hook included, §73.3); `'Routes'` runs `'Hook'` first when it did not run, then `Host.captureLateMounts()`, `Host.routePhaseRefusal()`, and mounts the routes (§73.3–§73.4). `Options.Host` (`'Auto'` default) may name `'DataService'` / `'ApplicationServer'`; a mismatch with the attach key is a boot error |
+| §8.1 capture diff | index-aligned `before` / `after`; any shift is `FilterRewritten` → Opaque | host wraps are peeled before the diff (§75.4); the fence swap brackets the behavior run (§75.4) |
+| §12.2 Principal | `RoleSetHash: ''` | RAFS: `'r:' + 12 hex` of the action set when entitlements are on; + `Platform`; non-enumerable `Actions` (§76) |
+| §38.5 `principalKey` users | read-your-writes and the intake `Actor.PrincipalKey` use `principalKey` | they use the new `Util.principalIdentityKey(p)` = `principalKey({ …p, RoleSetHash: '' })` (identical on the DataService host, where `RoleSetHash` is always `''`); `principalKey` (with `RoleSetHash`) stays for SSE revalidation, cache `By` and logs (§76.4) |
+| §40.8 `covers(E)` | Interim: the dispatcher carries the wrapper | also **false** when `Host.rawWriterEntities()` names `E` and `ChangeCapture.NotifyManaged` does not (§79.2) |
+| §38.2 `Host.installChangeIntake` | no-op seam, never called | the service calls `Host.installChangeIntake(ChangeIntake)` after every `ChangeIntake.install()`; the RAFS host subscribes its entitlement-cache invalidator (§79.3) |
+| §14.4 port registry | 19138–19139 free | claimed by `test/Facet-Host-RAFS_tests.js` (§80.5) |
+| §12.2 PrincipalResolver | any policy column unset → 401 on every route | the tenancy column on every route; the **root** entity's own required columns (PersonalScopes, `Required`) only for that root; other referenced entities with unset requirements are denied by the Authorizer (§75.5); `Principal.UnresolvedScopeColumns` → 500; a host whose `authenticationRequired()` is true refuses anonymous principals without a policy too (§76.3) |
+| §46 SSE revalidation | `Host.revalidatePrincipal` optional, never called early | the RAFS host implements it (§76.5); `SSE.revalidateAll(pTenants)` revalidates open streams at once (the RAFS host calls it on role-table writes) |
+| `Authorization.EntitlementCacheMS` default | 10 000 | **0** (resolved per request, as RAFS's own gate); a positive value is a per-process cache, warned at bind (§77.3) |
+
+Everything else in Parts I–IV holds unchanged on a RAFS host (pipeline, fences, explicit soft delete, Strict semantics, cache, SSE, stores). `Scope.Guard 'Repair'` is refused on a RAFS host with tenancy (§73.5).
+
+### 71.3 Files (as built; `npm test`, `npm run test:pg`, `npm run test:ch` green)
+
+| File | State |
+|---|---|
+| `source/host/Retold-Faceting-Host-ApplicationServer.js` | implemented (§74–§79, review fixes §83): bind and its refusals, the coverage snapshot, the scope policy, the principal (session source, persona enrichment, per-column personal values), `revalidatePrincipal`, `authenticationRequired`, the entitlements authorizer and its cache, the role-table DAL invalidation wrap, `isFacetable`, `rawWriterEntities`, `installChangeIntake`, `routePhaseRefusal`; fails closed until bound |
+| `source/Retold-Faceting-Installers.js` | implemented (§73): both phases, option sourcing + `FOUNDATION_DEFAULTS`, the second installer's option comparison (`optionDifferences`), the platform `Admin.authorize` default |
+| `source/Retold-Faceting-Service.js` | `attach({ ApplicationServer, Phase })` dispatch (§73.3–§73.4), the shutdown hook from the hook phase, `Host.routePhaseRefusal()` before the routes mount, `Host.installChangeIntake` after every intake install |
+| `source/security/Retold-Faceting-PrincipalResolver.js`, `-Authorizer.js`, `source/host/Retold-Faceting-Host-Base.js`, `source/routes/Retold-Faceting-SSE.js` | §83: per-entity scope requirements, `Host.authenticationRequired()` (Base: false), `SSE.revalidateAll(pTenants)` |
+| `source/security/Retold-Faceting-ScopeCapture.js`, `-ScopeGuard.js`, `source/engine/Retold-Faceting-EngineReference.js` | §75.4: host-wrap peeling (`peelHostWraps`, `HostWraps` on the capture and in its Fingerprint), the fence swap (`applyFenceSwap` / `restoreFenceSwap`, shared by ScopeCapture and the Reference list waterfall), the guard's client-fence check at the wrap depth |
+| `source/Retold-Faceting-Util.js`, `source/change/*` | §71.2: `principalIdentityKey` keys read-your-writes and the intake `Actor.PrincipalKey`; §79.2: `ChangeIntake.covers(E)` is false for `Host.rawWriterEntities()` unless `NotifyManaged` names `E` |
+| `test/support/Facet-RAFS-Harness.js` | implemented (§80.2) + `Store: 'ClickHouse'`, `FixedPort`, and the end-to-end helpers (`assertSelectionRoundTrip` with `CountVia 'List'` through the stock RAFS Count route, `assertRecordsMatchList`, `listRows`, `allRecords`, `openChanges`, `principalFor`, `quiesce` / `compareStore`) |
+| `test/Facet-Host-RAFS_tests.js` | module surface, RAFS pins, harness rows, and the booted-app rows R1–R10, L1–L5, V1–V6 (§83), P1 (PG gate) and the ClickHouse rows (CH gate) |
+| `test/Facet-Host-ApplicationServer-Unit_tests.js` | host and installer units against stub servers (no RAFS needed) |
+| `test/fixtures/RAFS-Overlay-Model.json` | written (§80.3) |
+| `debug/rafs-smoke.js` | port 19194: Describe, E3A and E1 for two logged-in users of two tenants |
+
+
+---
+
+## 72. The RAFS surface (as read, RAFS 1.0.5)
+
+Abbreviations: `RAS` = `source/Retold-Application-Server.js`; `Tenancy`, `Entitlements`, `Membership`, `AuthLocal`, `Manifest` = `source/services/Retold-<Name>.js` (`Retold-Auth-Local.js` for `AuthLocal`, `Retold-App-Manifest.js` for `Manifest`); `OA` = orator-authentication `source/Orator-Authentication.js` (1.1.2); `ME` = meadow-endpoints (umbrella **4.0.21**; RAFS asks `^4.1.1`, the umbrella resolves 4.0.21 — both carry the slots below). Every RAFS dependency resolves from the umbrella `node_modules`.
+
+### 72.1 How an app is configured
+
+| Form | Where | What it sets |
+|---|---|---|
+| Subclass | `RAS:18-28`, Kit example `example/server/Kit-Server.js` | `this.MeadowModel`, `this.NoAutoCRUDTables` after `super()`; overrides of the hook methods `RAS:113-182` (`seedSteps`, `hookInstallers`, `routeInstallers`, `authConfig`, `tenancyConfig`, `entitlementsConfig`, `membershipConfig`, `recordLevelConfig`, …) |
+| `define(pDefinition)` | `RAS:896-923` | `Options`, `MeadowModel`, `NoAutoCRUDTables`, `Auth` (turns on authentication) |
+| `fromManifest(root)` | `RAS:932-947`, `Manifest:133-189` | options from `retold-app.json`: `Tenancy` (`Manifest:99-128`), `Auth`, `NoAutoCRUDTables` (`:172`), `Entitlements` / `Profile` / `Comms` / `Membership` / `RecordLevel` (`:181-184`), then `Object.assign(options, manifest.Options)` (`:186`); the class carries `.manifest` (`RAS:945`) |
+
+`this.options` = `_DEFAULT_OPTIONS` + `defaultOptions()` + the constructor argument (`RAS:81`) and **is** the fable settings object (`RAS:208`). Each `*Config()` hook defaults to `this.options.<Name> || null` (`RAS:155, :161, :177`); the config is read once, by the matching `_mount*` step. Only Membership, RecordLevel and Comms stamp their resolved config on the server (`pServer.MembershipConfig` `Membership:481`, `pServer.RecordLevelConfig`, `pServer.CommsConfig`); tenancy and entitlements must be re-read through `pServer.tenancyConfig()` / `pServer.entitlementsConfig()`. `NoAutoCRUDTables` is an **object map** looked up by name (`RAS:606`; an array never matches and mounts public routes).
+
+### 72.2 Boot pipeline (`startupSteps`, `RAS:244-308`)
+
+```
+_mountServiceServer (restify, strictNext, handleUpgrades)  :251 / :314-322
+_mountOrator  _mountQueryParser  _mountRequestLogging        :252-254
+_connectDatabase (SQLite | PostgreSQL)                       :255 / :482-495
+preSchemaSteps()  _runSchema (createTables + _ensureIndexes) :256-257 / :504-588   Options.Indexes read at :544
+_loadMeadowEndpoints  → this.DAL[T], this.Endpoints[T]       :258 / :593-619
+seedSteps()                                                   :261
+_mountParime  _mountAuthentication (orator-authentication)    :264-265 / :638-663
+_mountTenancy        → Tenancy.installTenancy                 :270 / :668-673
+_mountEntitlements   → Entitlements.install (gate + route)    :274 / :679-684
+_mountProfile  _mountComms  _mountRecordLevel                 :278-288
+_mountMembership     → pServer.MembershipConfig               :293 / :718-723
+hookInstallers()     ← foundationHookInstaller(this, …)       :296
+routeInstallers()    ← foundationRouteInstaller(this, …) LAST :299
+_mountSessionStore  _mountAppManifest  _mountStaticAssets ('/*' catch-all, :873)   :302-304
+_startOrator (listen)                                         :305 / :878-885
+```
+
+`fAdd` binds the chassis steps (`:247`); `fAddAll` pushes the app's steps **unbound** (`:248`). `start()` builds the fable (`:208`), `anticipate`s every step, then `wait`s (`:213-229`); fable's Anticipate calls each step with exactly one callback and throws when a step calls back twice (`fable/source/services/Fable-Service-Anticipate.js:45, :82-86`); an error stops the boot. So at the hook phase: DALs, endpoints, auth, tenancy, entitlements, profile, comms, record-level and membership are installed; nothing listens yet. At the route phase every app hook and every earlier app route installer has run. **Pinned** by the RAFS pin "boot order" (§80.4).
+
+### 72.3 Model, DALs, endpoints, controllers, service server
+
+- `pServer.MeadowModel` = `{ Tables: { T: { Columns, MeadowSchema, … } } }` (Stricture extended); `_runSchema` refuses without `Tables` (`RAS:506-508`); `_ensureIndexes` **mutates** `Tables[T].Indices` (`:552-563`). Never reloaded: RAFS has no model-reload path.
+- `pServer.DAL[T]`: one meadow DAL per model table, `setProvider('SQLite' | 'PostgreSQL')` (`RAS:602-604`), so `DAL.providerName` gives the dialect. NoAutoCRUD tables get a DAL and **no** endpoint (`:606-610`).
+- `pServer.Endpoints[T]`: the meadow-endpoints instance, `connectRoutes(fable.OratorServiceServer)` (`:612-614`). Its controller is `endpoint.controller` (getter, `ME source/Meadow-Endpoints.js:108-111`) === `endpoint._Controller` (what Tenancy uses, `Tenancy:186-191`). This is the **route-bound controller**; nothing in RAFS replaces it after boot. Routes are mounted at `/1.0/<T>` and `/1.0/<T>s` (`EndpointVersion` default `'1.0'`).
+- Service server: `fable.OratorServiceServer` (`RAS:316-320`) is the object Orator serves (`fable.Orator.serviceServer`); tenancy (`Tenancy:503`), entitlements (`Entitlements:259`), membership and the app manifest (`RAS:781`) mount on `fable.Orator.serviceServer`; `fable.Orator.stopService` closes it (RAFS tests' teardown).
+
+### 72.4 Tenancy (`Tenancy`)
+
+- **Config** (`tenancyConfig()`, `Tenancy:473-490`): `{ Column = 'IDCustomer', getValue?(session), Exclude: [T], PersonalScopes: { T: { Column, getValue?, SessionField? } }, DeniedPrefixes: [url prefix], resolveSession?(pRequest, cb) }`. Default `getValue` = `session.UserRecord[Column] || 0` (`:468-471`); a personal spec reads `UserRecord[SessionField || Column] || 0` unless it has `getValue` (`:550-560`). Manifest form: `Manifest:99-128` (auto-excludes `RootTable || 'Customer'` and `IdentityTable || 'User'` unless `ScopeRootAndIdentity`; `DeniedPrefixes` default `'/1.0/' + each excluded`; the resolved options carry no `RootTable` / `IdentityTable`).
+- **Which entities**: `installTenancy` loops `Object.keys(pServer.Endpoints)` **at `_mountTenancy` time** minus `Exclude` (`:541-566`), **regardless of whether the table has the column**; `installTenancyBehaviors` returns false (installs nothing) without `_Controller.BehaviorInjection` (`:186-188`). Endpoints registered later (late mounts) get nothing. Every guarded `BehaviorInjection` carries `_RetoldTenancyLayers` (an array, one entry per install; `:433-437, :461`) — the **observed coverage marker**.
+- **Guards** (`:366-391`): `Reads-` / `Read-` / `Count-` / `CountBy-` / `ReadMax-` / `Delete-QueryConfiguration` get `After: fFilter`; create / update / upsert / undelete slots stamp, strip and refuse unscoped pre-reads. Each guard first answers **401** `'Authentication required.'` when `!pRequest.UserSession || !pRequest.UserSession.UserRecord` (`:400-404`). No read-side Pre/PostOperation slot is guarded (so the §8.1 PostOperation audit does not mark tenancy-guarded entities Opaque).
+- **fFilter** (`:280-296`): `fFence`, then `addFilter(Column, getValue(UserSession), '=', 'AND', 'Tenant' + Column)` per spec (`:293`).
+- **fFence** (`:247-277`): with a non-empty filter, refuses (400 `'The filter could not be safely scoped.'`) any stanza whose Column is not fence-safe (`:119-144`), whose Connector is not `AND` / `OR` / `NONE`, or whose Operator is not `(` / `)` / one of `= != <> > >= < <= LIKE NOT LIKE ILIKE NOT ILIKE IS NULL IS NOT NULL IN NOT IN` (`:69-75`); refuses unbalanced groups (400); then **unshifts** a bare `{ Column: '', Operator: '(', Value: '', Connector: 'AND', Parameter: '' }` and **pushes** the matching bare `)` (`:274-275`). An empty filter is not wrapped.
+- **setBehavior** is patched per endpoint so a later single-slot `setBehavior` lands **inside** the guard (`:433-451`); only a direct `_BehaviorFunctions` write escapes it.
+- **Session**: one `serviceServer.pre()` handler (`:514-539`) sets `pRequest.UserSession = session || {}` for **every** URL (facet routes included) via `resolveSession`, else `OratorAuthentication.resolveSessionForRequest`, else anonymous; then 404s any URL with `url.indexOf(prefix) === 0` for a `DeniedPrefixes` entry (`:524-532`) — which never matches `/1.0/Facet/<E>/…`.
+
+### 72.5 Entitlements (`Entitlements`)
+
+- **Config** (`entitlementsConfig()`; Kit example `Kit-Server.js:17-28`): `{ APIPrefix, IdentityTable, IdentityAccountField, IdentityUserField, TenantField, RoleTable, RoleActionTable, UserRoleTable, UserActionTable?, ExcludeEntities, DeclaredActions?, DefaultRoles }`. Not stamped on the server.
+- **Gated set** = `Object.keys(pServer.Endpoints)` minus `ExcludeEntities`, computed **per request** (`:46-51`); the catalog is `<E>.read/create/update/delete` per gated entity plus `DeclaredActions` (`:33-43`); grants expand `'*'` and `'*.<verb>'` over that catalog (`:55-75`); a `UserAction` deny always wins (`:126-135`).
+- `can(pActions, pAction)` = `pActions.has(pAction)` (`:77-80`); `resolveActions(pServer, pConfig, IDUser, IDCustomer, cb)` = 2–3 DAL reads → `{ RoleIDs, Actions: Set }` (`:107-146`); `resolveIDUser` reuses `UserRecord[IdentityUserField]` when set, else reads the identity table (`:85-102`).
+- **Gate** (`installGating`, `:257-313`, a `pre()` after tenancy's): anonymous requests pass untouched (`:272`); every authenticated request is **IDUser-enriched** (`UserRecord[IdentityUserField] = IDUser`, `:278-286`); `requiredActionFor` maps `<prefix><E>` / `<prefix><E>s` + method (GET read, POST create, PUT/PATCH update, DELETE delete) to `<E>.<verb>` (`:228-248`) — `/1.0/Facet/…` maps to **nothing** (segment `Facet`), so the service gates itself (`06 §5`).
+- Exported for apps: `pServer.constructor.Entitlements` (`RAS:987`; statics inherit, so a subclass reaches it), likewise `.Tenancy`, `.AuthLocal`, `.Membership`.
+
+### 72.6 Sessions and principals
+
+- `pRequest.UserSession` (set by the tenancy pre-handler, `Tenancy:522`) = the orator-authentication session `{ SessionID, UserRecord, CreatedAt, LastAccess }` (`OA:281-296`) or a bearer session `{ SessionID: 'token', UserRecord, ViaToken }` (`OA:447-480`), else `{}`. There is **no** `LoggedIn` flag in it; "authenticated" means `UserRecord` is an object (tenancy `:400`, entitlements `:272`, `OA:419-433`).
+- `UserRecord` = the authenticator's row minus the credential with the tenant stamped `|| 0` (`AuthLocal:90-100`; the tenant from `resolveTenant`, a `MembershipTable`, or the row, `:103-…`). **A user with no membership is an authenticated tenant-0 session.** In the Kit shape (Account login + User persona) `UserRecord` is the Account row; `IDUser` appears only through the entitlements enrichment.
+- Tenant switch (`Membership:407-430`, behind `POST /1.0/Session/Context/:ID`): verified against the persona join, sets `UserRecord[TenantField]` and **resets `UserRecord[PersonaIDField] = 0`** (`:427`) so the next request re-enriches.
+- Platform principal: `Membership` `SystemAdminField` / `SystemAdminValue` (`'SystemRole'` / `'root'`, `:75-76`) on the Account row (first-run admin, `:271`); RAFS itself grants it nothing beyond first-run.
+- meadow-endpoints' session marshaler copies `pRequest.UserSession` into the request state and **reassigns** `pRequest.UserSession = extend(MeadowEndpointsDefaultSessionObject, UserSession)` (same `UserRecord` reference; `ME …/Meadow-Endpoints-Session-Marshaler.js:12-51`); with `MeadowEndpointsSessionDataSource: 'Header'` it would take the session from `x-trusted-session` instead (spoofable).
+
+### 72.7 Global, excluded and hidden tables
+
+| Mechanism | Effect on the CRUD routes | Seen by the service as |
+|---|---|---|
+| `NoAutoCRUDTables` (map) | DAL, no endpoint | no route-bound controller → `Controllerless` |
+| `Tenancy.Exclude` | endpoint without tenancy guards | `Excluded` (Global) |
+| `Tenancy.DeniedPrefixes` | 404 at the `pre()` | denied by prefix (§78) |
+| `Entitlements.ExcludeEntities` | ungated | readable by any authenticated principal (§77.2) |
+| Late mount (endpoint registered after `_mountTenancy`) | endpoint without tenancy guards | `Unguarded` (§75.2) |
+
+### 72.8 Model reload
+
+None: RAFS builds the model once (`RAS:104`, `:593-619`). `Host.onModelChanged` listeners fire only from `captureLateMounts()` (§74).
+
+### 72.9 How RAFS's own tests boot apps with two tenants
+
+- **Header sessions** (`test/Retold-Tenancy_tests.js:66-92`, `Retold-Tenancy-Fence_tests.js:160-…`): the example app (`example/server/Hello-Server.js`) with `Tenancy.resolveSession` reading `X-Test-IDCustomer` / `X-Test-IDUser` → `{ UserRecord: { IDCustomer, IDUser } }`; no tenant header → `{}`. Fixed ports (18300+), a SQLite file under `./data/test/`, teardown `fable.Orator.stopService`.
+- **Real login** (`test/Retold-Membership_tests.js:100-…`): the Kit server (Auth.Local over Account + User persona, entitlements, membership, record-level, `PersonalScopes: { Note: { Column: 'OwnerIDUser', SessionField: 'IDUser' } }`); `POST /1.0/Signup` twice mints two tenants, `POST /1.0/Authenticate` returns the `RetoldSessionID` cookie, roles via `Entitlements.grantRole`, rows via `pServer.DAL[T].doCreate`.
+
+### 72.10 Incompatibilities found (each has a Part V answer)
+
+| # | Finding (RAFS 1.0.5) | Consequence without Part V | Answer |
+|---|---|---|---|
+| F1 | `fFence` **unshifts** an outer `(` (`Tenancy:274`) | §8.1's index-aligned diff sees every entry shifted → `FilterRewritten` → Opaque → every facet on every tenancy-guarded entity is `500 OpaqueUntrusted` under Strict | host-wrap peeling (§75.4) |
+| F2 | the fence allowlist has no `IS` (`Tenancy:69-75`); FilterAST renders NULL on SQLite as `IS` + null (FH-2, `FilterAST.js:752-756`) | any NULL / Missing-bucket clause on a SQLite RAFS app → behavior 400 → `FACET_INTERNAL` | the fence swap (§75.4) |
+| F3 | tenancy is installed on `Endpoints − Exclude` **whether or not the table has the column**, and not on late mounts | §8.3's "required iff the entity has the column" would call an unguarded late mount with the column "scoped" (Guard 500s) and a guarded table without the column "Global" | coverage classes (§75.2) |
+| F4 | sessions have no `LoggedIn`; the tenant defaults to 0 | `buildPrincipal` would make every RAFS principal Anonymous; tenant 0 would pass the equality check | §76 sources; `UnsetValues` → 401 (§75.5) |
+| F5 | entitlements are resolved per request and discarded; `can` needs the set | the synchronous authorizer has nothing to ask | actions resolved once per request in `resolvePrincipal` (§77.3) |
+| F6 | a write's principal (intake, synchronous) cannot carry the action set | `principalKey` of a write ≠ of the reads → read-your-writes never fires | `principalIdentityKey` (§71.2, §76.4) |
+| F7 | Membership signup, entitlement provisioning, Profile, RecordLevel and Comms write DAL-direct | the interim intake never sees them; cached answers over those tables would go stale | `Host.rawWriterEntities()` → uncovered (§79.2) |
+| F8 | `requiredActionFor` maps the first path segment after `APIPrefix` | a `RoutePrefix` whose segment equals an entity (or entity + `s`) turns every facet POST into `<E>.create` | bind refusal (§77.5) |
+
+F1, F2, F4 (tenant 0, anonymous `{}`), F8 and the boot order are pinned by executable RAFS pins in `test/Facet-Host-RAFS_tests.js` (§80.4).
+
+---
+
+## 73. The installers
+
+### 73.1 Signatures and the step convention (`source/Retold-Faceting-Installers.js`)
+
+```javascript
+foundationHookInstaller(pServer, pOptions)           // → step function (fStep) => void, for hookInstallers()
+foundationHookInstaller(pServer, pOptions, fStep)    // → undefined; runs now, calls fStep(pError?) exactly once
+foundationRouteInstaller(pServer, pOptions[, fStep]) // the same, for routeInstallers() (put it LAST)
+resolveFoundationOptions(pServer, pOptions)          // → { Source: 'Explicit' | 'ServerOptions' | 'Manifest' | 'Defaults', Options }
+FOUNDATION_PHASES = [ 'Hook', 'Routes' ]   FOUNDATION_OPTION_SOURCES = [ 'Explicit', 'ServerOptions', 'Manifest', 'Defaults' ]
+// re-exported by the package root: require('retold-faceting-service').foundationHookInstaller / .foundationRouteInstaller
+```
+
+```javascript
+class MyServer extends RetoldApplicationServer
+{
+	hookInstallers() { return super.hookInstallers().concat([ libRetoldFacetingService.foundationHookInstaller(this, this.options.Faceting) ]); }
+	routeInstallers() { return super.routeInstallers().concat([ libRetoldFacetingService.foundationRouteInstaller(this, this.options.Faceting) ]); }
+}
+```
+
+- `fStep` is called **once, on a later tick** (`setImmediate`), never synchronously: Anticipate resets an error a step reports synchronously before the boot's `wait()` is registered, and an asynchronous callback keeps the remaining boot off our stack. A throw from the caller's own `fStep` surfaces on that tick, never swallowed.
+- The installer function put in the array **unbound** receives RAFS's step callback as `pServer`: it calls it back with a usage error (never hangs the boot).
+- Any failure calls `fStep(FacetError FACET_INTERNAL)` and **fails the boot** (a misconfigured or refused faceting install is never a silent no-op). Stores stay feature-not-boot (§54.2).
+- Pass the **same options object** to both installers (or omit it from the second one). When the second installer to run receives explicit options and the service already exists, they are resolved the same way (§73.2, plus the platform `Admin.authorize` default) and compared with the running service's options by `optionDifferences` (plain objects key by key, arrays element by element, functions equal when identical or when their source text is identical; `Materialize: 'All'` is skipped once the store install expanded it): any difference fails the boot with `FACET_INTERNAL` naming the differing paths (at most 8, then a count), so a stricter object given only to `foundationRouteInstaller` (NeverFacet, RequireAction, Scope …) is never silently dropped.
+
+### 73.2 Options sourcing
+
+The **first** plain object of: explicit `pOptions` → `pServer.options.Faceting` → the manifest's `Options.Faceting` (`pServer.constructor.manifest`; a top-level `Faceting` once **[UPSTREAM RAFS-4]**) → `{}` is used **whole** (sources are never merged with one another), merged over `FOUNDATION_DEFAULTS` (`{ SSE: { RevalidateMS: 60000 } }`: on RAFS an open stream re-reads its session through `Host.revalidatePrincipal` instead of reconnecting, so it is re-checked every minute; a logout reaches it within ~60 s), then `libOptions.resolve`. An already resolved options object is used as is. A `fromManifest` app already has `Options.Faceting` in `pServer.options.Faceting` (`Manifest:186`), so `'Manifest'` matters only when the options were overridden without it. The tenancy policy is **never** read from these options (§75.3).
+
+### 73.3 Hook phase (`attach({ ApplicationServer: pServer, Phase: 'Hook' })`)
+
+1. Duck-type `pServer` (`isApplicationServer`: `fable`, plain `DAL` / `Endpoints`, `MeadowModel.Tables`, `tenancyConfig()`); `Role` must be `'Embedded'`; refuse when a service on `pServer.fable` is already attached to a different host.
+2. `addServiceType` / `instantiateServiceProvider('RetoldFacetingService', Options)` on **`pServer.fable`** with the §73.2 options (passed explicitly; `pServer.fable.settings.RetoldFaceting` is never consulted).
+3. `registerServices()`; `Host = fable.RetoldFacetingHostApplicationServer`; `Host.bind(pServer)` (§74.1) — the refusals of §73.5.
+4. D-17 (`reservedEntityNames`), unenforced-limit warning, shell validation, `rebuildCatalog(Host.getModelSync())`, `installChangeCapture()` (+ `Host.installChangeIntake`), `installStores()`, `Host.onModelChanged(rebuild + afterModelReload)` — exactly as `attach` today, **without** `Routes.connect`. `_Attached = true`, `_RoutesConnected = false`. In-process queries work from here; nothing is served yet.
+5. `installShutdownHook()` (idempotent): the materializer, reconciler and timers started here stop with `fable.Orator.stopService` even when the route phase never runs (in-process use only, a forgotten route installer, a boot that fails after this step). An info line says the facet routes mount only when `foundationRouteInstaller` runs.
+
+### 73.4 Route phase (`attach({ ApplicationServer: pServer, Phase: 'Routes' })`)
+
+1. Not attached → run the hook phase first (info log: the coverage snapshot then sees the late mounts as `Unguarded`, which only ever refuses more, §75.2).
+2. `Host.captureLateMounts()`: capture the route-bound controller of every `pServer.Endpoints` entry registered since the hook phase, rebuild the coverage snapshot, and `notifyModelChanged(model)` when anything was captured **or any entity's class changed** (an app hook between the phases may put RAFS's tenancy layer on an endpoint captured earlier, e.g. `Tenancy.installTenancyBehaviors` on an excluded table): catalog rebuild, intake wraps, mirror specs, cache cleared. The checks that need the final coverage run again — header sessions on a late controller, the PersonalScopes check on a newly Installed entity, `Scope.Behavior` / `BehaviorOverrides` on Installed entities — and a failure is kept for `Host.routePhaseRefusal()`; the host then stops serving (`isBound()` false, fail closed).
+3. `Host.routePhaseRefusal()` non-null → the route phase fails the boot (`FACET_INTERNAL`). Otherwise `Routes.connect(Host.getServiceServer())` and `installShutdownHook()` (already installed by the hook phase; wraps `fable.Orator.serviceServer.close`, so `fable.Orator.stopService` runs `shutdown()` first, §44.10). Idempotent: `_RoutesConnected`.
+4. Endpoints registered after this step (an app route installer placed after it) are never facetable; the boot log names them at the first request that references one (warn once).
+
+### 73.5 Boot refusals (`FACET_INTERNAL`, the boot fails)
+
+`pServer` is not a RAFS (§73.3 step 1); `Role !== 'Embedded'`; `Faceting.Scope.Policy` is an object (`'Auto'` / `false` only: the policy comes from `tenancyConfig()`); **the hook installer ran too early**: `tenancyConfig()` set, no RAFS-1 export, at least one mounted non-excluded endpoint with a `BehaviorInjection`, and no route-bound controller carrying the tenancy marker (it ran before `_mountTenancy`, e.g. from `seedSteps()`), or `membershipConfig()` set and no `pServer.MembershipConfig` (before `_mountMembership`); `Scope.Guard` other than `'Strict'` with tenancy (`'Off'` **and `'Repair'`**: tenancy is the app's job, a displaced RAFS guard must fail the facet, never be filled in by faceting while the entity's own list runs unscoped); `Scope.Behavior` / `Scope.BehaviorOverrides[E]` for an Installed entity outside the read hashes Retold-Tenancy guards (`Reads-` / `Read-` / `Count-` / `CountBy-` / `ReadMax-QueryConfiguration`); `MeadowEndpointsSessionDataSource: 'Header'` (setting or any route-bound controller) — **always** on RAFS (`Scope.AllowHeaderSession` is not accepted: each controller would replace `pRequest.UserSession` with the header session before the tenancy guard runs, so the guard and the principal would read different sessions); on the entities RAFS put a tenancy layer on (an entry for an excluded table, a late mount or a NoAutoCRUD table is never evaluated by RAFS and never fails the boot): a personal `Column` that is not an identifier or equals the tenancy `Column`, or two entries sharing a `Column` with **default** getValues and different `SessionField`s; `Catalog.GlobalEntities` naming a root / identity table (§78 rule 5) that is Global here; with `entitlementsConfig()`: `Authorization.Strategy: 'None'`, a missing `IdentityUserField`, `IdentityAccountField` or `TenantField` (Retold-Entitlements reads them with no default), no Retold-Entitlements module (`resolveActions` + `can`) through `pServer.constructor.Entitlements` or `Authorization.Entitlements` (a Strategy function needs it too: it only narrows, §77.1), the first `RoutePrefix` segment after `APIPrefix` naming a model entity or entity + `s` (§77.5); D-17 names. The route phase refuses (§73.4): header sessions on a late controller, a PersonalScopes conflict or an unguarded `Scope.Behavior` on a newly Installed entity, and options that differ from the running service's (§73.1).
+
+Warnings (boot continues): `NoAutoCRUDTables` is an array (RAFS mounted public routes for those names; faceting treats them as never facetable, §78 rule 2b); an endpoint whose `EndpointName` (DAL scope) differs from its model key; a `DeniedPrefixes` entry is a prefix of `RoutePrefix` (the facet routes are 404 at the RAFS pre-handler); an `Installed` entity lacks the tenancy column or its personal column (`Misconfigured`); an `Unguarded` entity carries the tenancy column; two PersonalScopes entries share a column through app getValue functions (faceting reads the first entry's; they must agree, a disagreement is a ScopeGuard 500 on the other entity, never a leak); `Catalog.AllowAnonymous` names an `Installed` entity (tenancy 401s it anyway); `Catalog.GlobalEntities` names an entity that is not Global; `Catalog.Controllerless` declarations (not supported yet, as §12.1); no `tenancyConfig()` while the server authenticates or has `entitlementsConfig()` (RAFS resolves sessions only in its tenancy pre-handler, so its own gate never runs and its lists see every caller as anonymous; the facet routes resolve the session themselves, §76.1, and can be stricter than those lists); `Authorization.EntitlementCacheMS > 0` (a per-process cache, §77.3).
+
+---
+
+## 74. `RetoldFacetingHostApplicationServer`, method by method
+
+`extends RetoldFacetingHostDataService`: the meadow-endpoints half is shared (controller snapshot `_captureRouteBoundControllers`, `hasConnectedReadRoutes`, `getSessionDataSource`, `getDialectProfile` from `DAL.providerName`, `getDeleteColumn` / `getPrimaryKey` from the execution DAL's schema, `reservedEntityNames` incl. endpoints, `scopeAssurance`); only the sources and the security methods differ.
+
+| Method | RAFS mapping |
+|---|---|
+| `getHostKind()` | `'ApplicationServer'` |
+| `bind(pServer, cb)` | §74.1 |
+| `getModel(cb)` / `getModelSync()` | `pServer.MeadowModel` (null without `Tables`); never reloaded |
+| `listEntities()` | `Object.keys(pServer.DAL)` with an object DAL (NoAutoCRUD tables included) |
+| `getDAL(E)` | `pServer.DAL[E]` |
+| `getExecutionDAL(E)` | inherited: the route-bound controller's `DAL` (=== `pServer.DAL[E]`), else `getDAL` |
+| `getRouteBoundController(E)` | `pServer.Endpoints[E].controller` (`_Controller` fallback) as captured at the hook phase or by `captureLateMounts`; never replaced |
+| `getServiceServer()` | `pServer.fable.Orator.serviceServer`, else `fable.OratorServiceServer` (bind warns when both exist and differ) |
+| `getScopePolicy()` | §75.3 (memoized; reset by `captureLateMounts`) |
+| `getAuthorizer()` | §77.1: `{ Strategy, canRead(E, Principal) }`, or `null` without entitlements |
+| `resolvePrincipal(pRequest, cb)` | §76 |
+| `revalidatePrincipal(pRequest, cb)` | §76.5 (an open change stream re-reads its session) |
+| `authenticationRequired()` | bound and (`pServer.options.EnableAuthentication === true` or `fable.OratorAuthentication` mounted): anonymous principals are 401 without a policy too (§76.3); Base host: `false` |
+| `buildPrincipal(pSessionData, pRequest, pSource)` | §76.4 (writes; ignores `pSessionData`) |
+| `isFacetable(E, Principal)` | §78 (principal-independent; the catalog build calls it without one) |
+| `entityScopeColumns(E)` | inherited (§41.2) over §75.3's policy: `Installed` → `Tenant` / `Personal`, everything else → `Global` |
+| `installChangeIntake(pIntake)` | §79.3 |
+| `onModelChanged(fListener)` | inherited listener list; fired only by `captureLateMounts()` |
+| `captureLateMounts()` → `[E]` | §73.4 step 2 |
+| `routePhaseRefusal()` | the route-phase refusal kept by `captureLateMounts()`, else `null` (§73.4 step 3) |
+| `tenancySnapshot()` / `tenancyCoverage(E)` | §75.1 / §75.2 |
+| `fenceProfile()` | `{ Swap: { IS: '=' } }` (§75.4); the DataService host has none (`null`) |
+| `rawWriterEntities()` | §79.2 |
+| `isPlatformPrincipal(Principal)` | `Principal.Platform === true` (§77.4) |
+| statics | `isApplicationServer(pServer)`, `deniedByPrefixes(E, pPrefixes, pVersion, pEndpointPrefix?)`, `modelPrimaryKey(pServer, T)`, `endpointController(pEndpoint)`; constants `TENANCY_LAYERS_MARKER`, `DEFAULT_TENANCY_COLUMN`, `DEFAULT_ROUTE_VERSION`, `DEFAULT_ROOT_TABLE`, `DEFAULT_IDENTITY_TABLE`, `DEFAULT_SYSTEM_ADMIN_FIELD/VALUE`, `ENTITLEMENT_CACHE_MAX_ENTRIES`, `ENTITLEMENT_SUBSCRIBER`, `ENTITLEMENT_WRAP_MARKER`, `REQUIRED_ENTITLEMENT_FIELDS`, `TENANCY_GUARDED_READ_BEHAVIORS`, `COVERAGE`, `FENCE_SWAP_OPERATORS`, `NOT_IMPLEMENTED_MESSAGE` |
+
+### 74.1 `bind(pServer, fCallback)`
+
+1. Duck type; `validateScopeConfiguration(Options.Scope)` plus §73.5's refusals.
+2. Capture: `this._Tenancy = pServer.tenancyConfig()`, `this._EntitlementsConfig = pServer.entitlementsConfig ? pServer.entitlementsConfig() : null`, the Entitlements module (`Authorization.Entitlements` object override, else `pServer.constructor.Entitlements`), the platform rule from `pServer.MembershipConfig` (`SystemAdminField` / `SystemAdminValue`; null without membership), the identity tables (§78 rule 5).
+3. `_captureRouteBoundControllers()` (inherited, reads `pServer.Endpoints`) and the coverage snapshot (§75.1).
+4. The §73.5 refusals that need the snapshot (boot phase, Guard, Scope.Behavior, PersonalScopes, GlobalEntities identity tables, entitlements), then the header-session refusal (inherited `getSessionDataSource()` over `pServer.fable.settings` and the controllers; always refused on RAFS).
+5. Wrap the role tables' DAL write methods for entitlement invalidation (§79.3).
+6. Logs: the coverage table (entity → class), `Unscoped` warning without tenancy (as §12.1), every §73.5 warning.
+
+---
+
+## 75. Tenancy coverage, the scope policy and the ScopeGuard Required set
+
+### 75.1 The snapshot (hook phase, refreshed by `captureLateMounts`)
+
+`{ Phase, Source: 'Export' | 'Marker', Column, Installed: Set, Excluded: Set, PersonalScopes, DeniedPrefixes, Classes: { E: class } }`, where **Installed** = `pServer.tenancyScopedEntities()` when RAFS exports it (**[UPSTREAM RAFS-1]**, `Source: 'Export'`), else every entity whose route-bound controller's `BehaviorInjection._RetoldTenancyLayers` is a non-empty array (`Source: 'Marker'`, `Tenancy:433-437, :461`). The marker is read from the controller, never inferred from `Endpoints − Exclude`, so an install that silently did nothing (no `BehaviorInjection`) and a late mount are both **not** Installed. Without `tenancyConfig()` every entity is `None`.
+
+### 75.2 Coverage classes (per model entity, with tenancy)
+
+| Class | When | Scope kind | Facetable |
+|---|---|---|---|
+| `Installed` | in Installed and has the tenancy `Column` (and the declared personal column, if any) | `Tenant` / `Personal` | yes (subject to §78) |
+| `Misconfigured` | in Installed, lacks one of those columns (its own list errors) | — | never; boot warning |
+| `Excluded` | in `Tenancy.Exclude`, has a route-bound controller, not Installed | `Global` | only via `Catalog.GlobalEntities` (§78) |
+| `Unguarded` | not Installed, not excluded, has a route-bound controller (late mount; no `BehaviorInjection`) | `Global` | without the tenancy column: only via `Catalog.GlobalEntities`; **with** it: never (its list is unscoped while the app meant it scoped) + boot warning |
+| `Controllerless` | no route-bound controller (NoAutoCRUD, never mounted) | `Global` | never (Controllerless declarations are a seam, §82) |
+| `None` | no `tenancyConfig()` | `Unscoped` | as plain RDS (§78) |
+
+### 75.3 The normalized policy (`getScopePolicy()`)
+
+With tenancy: `buildScopePolicy({ Policy: { Column, SessionField: Column, Exclude: [ every model entity that is not Installed ], PersonalScopes: { E: { Column: P.Column, SessionField: P.Column } for each Installed E with a PersonalScopes entry } }, Required: Options.Scope.Required, Guard: Options.Scope.Guard, UnsetValues: Options.Scope.UnsetValues }, entityHasColumn)`. `SessionField === Column` because the principal carries the **tenancy getValue results** under the column names (§76.1). So `requiredFor(E)` = `[ Column ]` (+ the personal column) exactly for Installed entities — **the ScopeGuard Required set is the set RAFS installed tenancy on** — plus any `Scope.Required[E]` entries (for app behaviors that append their own predicates; a Required column no behavior appends fails Strict, as on RDS). Without tenancy: `Kind: 'None'` plus `Scope.Required`.
+
+### 75.4 Capture compatibility (ScopeCapture, the Reference engine's list waterfall, label reads — every path that runs a host Reads behavior over a faceting-rendered filter)
+
+- **Host-wrap peeling (F1).** Before the §8.1 diff, while `after[0]` is a bare open paren (`Operator '('`, `Column ''`, `Parameter ''`, `Connector 'AND'`) whose matching close (by depth) is a bare close paren, peel the pair: the entries after the close are **appended by that wrap layer** (collected innermost first), the inside is the next candidate. Peeling is accepted only if the final inside aligns with `before` (the first `before.length` entries match on Column / Value / Connector / Parameter; operators may differ → `Transformed`); otherwise nothing is peeled and the M1 rule applies (`FilterRewritten` → Opaque, fail closed). The capture records `HostWraps: n` (part of the Fingerprint material). Depths, the Guard and TenantOnly run on the **final** filter, where the wrap puts every faceting entry at depth ≥ 1 and the tenancy predicates at depth 0. Two tenancy layers peel twice; an app behavior that ran inside the guard and appended `A` gives `Appended: [ A, policy… ]` with `A` at depth 1.
+- **Fence swap (F2).** When `Host.fenceProfile()` has `Swap`, every entry the faceting renderer produced with `Operator 'IS'` and `Value null` is swapped to `'='` (value kept, `Parameter` suffixed `'~FacetSwap'`) right before `runBehavior` and restored right after it calls back, **before** the after-snapshot; an entry that no longer carries the marker or no longer has `'='` makes the capture Opaque (`FilterRewritten`). Only faceting's own `IS` + null entries are swapped (the renderer never emits any other inadmissible stanza: plain catalog identifiers, `AND` / `OR`, operators in the fence set); a host 400 from any other cause is `FACET_INTERNAL` (logged with the plan hash — it is a faceting defect, never a client error).
+- Pinned today by the RAFS pins "outer group" and "IS refused"; the R7 / R8 cases assert the peeled capture and the swapped NULL against the Reference.
+
+### 75.5 Tenant 0 and anonymous
+
+`UnsetValues` (default `[ 0, '', null ]`). The **tenancy column** is checked on every route: an authenticated tenant-0 session is `401 FACET_UNAUTHENTICATED` from the PrincipalResolver before any SQL, cache lookup or entity check (§12.2) — while the RAFS list for the same session answers 200 over tenant-0 rows (the pin "tenant 0"). A **personal-scope (owner) column or a `Scope.Required` column** is checked only where an entity needs it, as RAFS evaluates a personal spec only on that entity's routes: `401` when the route's root entity needs it, and the Authorizer denies any other referenced entity that needs it (hop `403`, unlabeled label target, not listed by Describe). So an owner-0 session (no persona) facets `MaterialIntake` exactly as its RAFS list shows it and is 401 only on `LabForm`. A personal `getValue` that throws leaves its column unresolved (`Principal.UnresolvedScopeColumns`, non-enumerable; logged once per entity and column): `500 FACET_INTERNAL` as the root, denied elsewhere, while unrelated requests keep working (a throwing **tenancy** getValue still fails every request). Anonymous (`UserSession {}`) is `401` unless the root entity is in `Catalog.AllowAnonymous` (only meaningful for Global entities; an Installed entity's guard 401s it anyway); on a host that authenticates this also holds without tenancy (§76.3).
+
+---
+
+## 76. The principal on RAFS
+
+### 76.1 `resolvePrincipal(pRequest, fCallback)`
+
+Source (`_requestSession`): `tmpSession = pRequest.UserSession` whenever something set it — the tenancy pre-handler for every HTTP request on a tenancy app, the caller in-process (`{ UserSession }`). On a server with **no** `tenancyConfig()` there is no pre-handler, so nothing resolves sessions for RAFS's own routes either; there, when `pRequest` carries no `UserSession` and `fable.OratorAuthentication` is mounted, the session is resolved with RAFS's own `OratorAuthentication.resolveSessionForRequest` (cookie, then bearer token — the resolver the tenancy pre-handler would have called). That session is used for the principal only (`pRequest.UserSession` is not set, so entity behaviors see what the lists see). Otherwise anonymous. Then the persona is enriched (§76.2). With `R = tmpSession.UserRecord` (plain object or none) and the tenancy config `T`:
+
+| Field | Value |
+|---|---|
+| `Kind` | `'User'` when `R` is a plain object, else `'Anonymous'` |
+| `Source` | `'InProcess'` |
+| `IDUser` | `R[entitlementsConfig().IdentityUserField]` with entitlements (no default: the bind refuses a config without it, §73.5), `R.IDUser` otherwise; `\|\| 0` |
+| `IDCustomer` | `ScopeValues[T.Column]` (with tenancy), else `R.IDCustomer \|\| 0` |
+| (action tenant) | the action set is resolved for `R[entitlementsConfig().TenantField] \|\| 0`, exactly what RAFS's gate passes (`Entitlements:288`), which an app tenancy getValue need not equal |
+| `ScopeValues` | `{ [T.Column]: (T.getValue \|\| default)(tmpSession), [P.Column]: (P.getValue \|\| default(P.SessionField \|\| P.Column))(tmpSession) for each Installed personal scope }` — the **same** functions the guards call (`Tenancy:204, :468-471, :550-560`), so the Guard's value comparison holds by construction; then normalized (§0). A throwing tenancy `getValue` → `FACET_INTERNAL` (logged); a throwing personal `getValue` → that column `null` and listed in the non-enumerable `UnresolvedScopeColumns` (§75.5). Entries sharing a column use the first Installed entry's function (§73.5) |
+| `UserRecord` | `Scope.UserRecordFields` from `R` (as §12.2) |
+| `RoleSetHash` | entitlements on: `'r:' + first 12 hex of sha256(sorted actions joined '\n')`; else `''` |
+| `Actions` | non-enumerable `Set` (entitlements on), read-only by contract; absent otherwise |
+| `Platform` | §77.4 |
+| `ResolvedAt` | `Date.now()` |
+
+Implementation: build the synthetic session data `{ LoggedIn: Kind === 'User', UserID: IDUser, CustomerID: IDCustomer, <column>: value … }` and reuse the base `buildPrincipal` (so `$CurrentUser` / `$Scope` / `Required` binding is unchanged), then re-freeze with `RoleSetHash`, `Platform` and the non-enumerable `Actions`.
+
+### 76.2 IDUser enrichment
+
+On HTTP the entitlements pre-handler has already written the persona into `R[IdentityUserField]` (`Entitlements:278-286`), so a personal scope on `SessionField 'IDUser'` sees the persona, and after a tenant switch (persona reset to 0, `Membership:427`) the next request is re-enriched before the facet route runs. When entitlements are on and `R[IdentityUserField]` is falsy (an in-process caller with a session no HTTP request enriched — a job, a fresh Account-row session — or a server without tenancy, whose gate never runs), `_principalForSession` does **exactly what the pre-handler does**: `R[IdentityUserField] = Entitlements.resolveIDUser(pServer, config, session)` with RAFS's own exported function (the module's; a module without `resolveIDUser` enriches nothing), before the principal is built. The guard reads the same `UserRecord`, so principal and predicate stay in step; a resolution error is `FACET_INTERNAL`. **No other fallback** for `IDUser` (entitlements off: design 06 §2.2 is not followed here — a lookup the guard does not make would desynchronize the principal from the predicate the behavior appends). An unset owner value is a 401 where the entity needs it (§75.5).
+
+### 76.3 Unset values and the PrincipalResolver
+
+Per entity (§71.2, §75.5): the tenancy column on every route, the root's own required columns for that root, the Authorizer for every other reference; column names logged only. On a host whose `authenticationRequired()` is true (RAFS with `EnableAuthentication` or orator-authentication mounted), an Anonymous principal is 401 even without a policy (unless the root is in `Catalog.AllowAnonymous`; Describe without an entity only when that list is non-empty), and the Authorizer gives it only `Catalog.AllowAnonymous` entities — `ExcludeEntities` need `Kind 'User'` (§77.2).
+
+### 76.4 Writes (`buildPrincipal`, the intake Actor)
+
+Synchronous, from `pRequest.UserSession` with the §76.1 sources (never the meadow `SessionData`; no session lookup or enrichment — a write's request was resolved and enriched by RAFS's pre-handlers), without `Actions` (`RoleSetHash ''`). Read-your-writes and `Actor.PrincipalKey` use `Util.principalIdentityKey` (§71.2), so a write and the same session's reads match whatever their role set; hosts that `notify({ PrincipalKey })` must compute it with `principalIdentityKey` (or pass `{ Principal }`).
+
+### 76.5 Open change streams (`revalidatePrincipal(pRequest, cb)`)
+
+The SSE service calls it at each stream's revalidation time (`SSE.RevalidateMS`, 60 s on RAFS through `FOUNDATION_DEFAULTS`, jittered) and whenever `SSE.revalidateAll(pTenants)` is called. The session is read **again** from the source the tenancy pre-handler uses — `tenancyConfig().resolveSession`, else `OratorAuthentication.resolveSessionForRequest` — never from the snapshot the stream opened with, then built exactly as §76.1–§76.2 (so the role set is re-resolved). A cookie session's `LastAccess` is restored after the read (a revalidation is not user activity; a sliding session still lapses). A logged-out or expired session is Anonymous, a role change changes `RoleSetHash`: the SSE service closes the stream (`closed { Reason: 'Revalidate' }`) on either, keeps it (caches dropped) otherwise; an error closes it. The host calls `SSE.revalidateAll(tenants)` on every role-table write (§79.3; every stream when the tenants are unknown or the tenancy getValue is the app's own), so a revocation reaches open streams at once; a logout reaches them within `RevalidateMS`.
+
+---
+
+## 77. Authorization: the entitlements mapping
+
+### 77.1 Strategy (`Authorization.Strategy`)
+
+| Value | With `entitlementsConfig()` | Without |
+|---|---|---|
+| `'Auto'` (default) | the Retold-Entitlements authorizer | none (`getAuthorizer() === null`, facetable = readable) |
+| a function `(pEntity, pPrincipal) → boolean` | **narrows** the Retold-Entitlements authorizer: `canRead = entitlementCanRead(E, P) && fn(E, P) === true && RequireAction` (Strategy `'EntitlementsAndFunction'`; the function is asked only for entities the principal can read, so `() => true` cannot make facets more permissive than RAFS's gate) | used as `canRead` (Strategy `'Function'`) |
+| `'None'` | **boot refusal** (§73.5) | none |
+
+### 77.2 `canRead(E, Principal)` (synchronous; the existing `Authorizer.canRead` consults it, fails closed on a throw, §19.6 applies it to root, hops, scope entities, join targets, label and selected-zero targets)
+
+| `E` (rows in order) | Rule |
+|---|---|
+| not in `pServer.Endpoints` (Controllerless) | false (a future Controllerless declaration uses its `AuthorizeAs`) |
+| in `ExcludeEntities` (ungated) | `Principal.Kind === 'User'` (mirrors `requiredActionFor` → null → pass for an authenticated caller; an anonymous principal never, whatever the tenancy setting) |
+| otherwise (gated: in `pServer.Endpoints`, read live as RAFS does, and not excluded) | `can(Principal.Actions, E + '.read')`; no `Actions` → false |
+| and, when `Authorization.RequireAction` is a string | additionally `can(Actions, RequireAction)` for every entity (literal grant; it must be in `DeclaredActions` for `'*'` to expand to it) |
+
+Global (Excluded / Unguarded) entities are gated like any other: a platform or global entity needs `<E>.read` when it is gated; there is no bypass for global data. Root failures stay `404 FACET_UNKNOWN_ENTITY`, hop failures `403 FACET_FORBIDDEN`, label targets unlabeled (§19.6) — never a distinguishable "forbidden" for an unknown entity.
+
+### 77.3 Resolution, cache, invalidation
+
+`resolvePrincipal` resolves the action set **once per request** with `Entitlements.resolveActions(pServer, config, IDUser, R[TenantField] || 0)` (IDUser = the enriched persona; 0 → the empty set) — the arguments RAFS's gate uses. Cache: `Authorization.EntitlementCacheMS`, **0 by default** (resolved on every request, as RAFS's own gate does, which never caches); a positive value caches per **persona** `IDUser|tenant` (never the session: a tenant switch cannot reuse the old tenant's set), at most `ENTITLEMENT_CACHE_MAX_ENTRIES` (oldest dropped), and is warned at bind as per-process. Invalidation (independent of facetability): the bind wraps the write methods (`doCreate` / `doUpdate` / `doDelete` / `doUndelete`) of the `RoleTable`, `RoleActionTable`, `UserRoleTable` and `UserActionTable` DALs (`pServer.DAL[T]`, the object their route-bound controllers write through), so **every** write in this process — RAFS's CRUD routes, `grantRole`, `provisionDefaultRoles`, app code; armed or not; NeverFacet, DeniedPrefixes, Excluded or NoAutoCRUD role tables included — moves the epoch when it starts (a racing resolution is not stored) and, when it calls back (error or not), drops the entries of the write's tenants and revalidates those tenants' open streams (§76.5). The tenants come from the FoxHound query: a create's records (each must carry a scalar tenant), an update's / delete's top-level `'='` stanza on the role table's tenant column (the tenancy column, else `IDCustomer`) in a filter with no top-level `OR` — exactly what RAFS's guard appends after its outer group — plus an update's stamped record tenant; anything unprovable is `'*'` (every entry, every stream). Intake events and `notify()` events on the role tables do the same through the `'RAFSEntitlements'` subscriber. Residuals (documented): writes by **other processes** and raw SQL are not seen — keep `EntitlementCacheMS` at 0 unless this process is the only writer (the stream revalidation still runs every `RevalidateMS`). A resolution error is `FACET_INTERNAL` (RAFS answers its own gate's failure with 500 too, `Entitlements:294-298`).
+
+### 77.4 Admin routes and the platform principal
+
+`Principal.Platform` = `MembershipConfig` present and `R[SystemAdminField] === SystemAdminValue` (strict equality on the session `UserRecord`). When the app supplies no `Admin.authorize`, the installer sets `Admin.authorize = (pRequest, pPrincipal) => pPrincipal.Platform === true` (`Admin.Routes` stays `false` by default, §60.5). Platform never bypasses tenancy, the ScopeGuard, the tenant-0 rule or entitlements for queries, Records, Count, Keys, Describe or SSE.
+
+### 77.5 The facet routes vs the RAFS action gate
+
+`/1.0/Facet/…` is never gated by RAFS (segment `Facet`; D-17 keeps an entity from being named `Facet`). A custom `RoutePrefix` whose first segment after the entitlements `APIPrefix` equals an entity or entity + `s` would be mapped to `<E>.create` / `<E>.read` by the RAFS gate: boot refusal (§73.5; pinned).
+
+---
+
+## 78. `isFacetable(E)` on RAFS (all must hold; principal-independent)
+
+1. `E` is a plain identifier, not in `NEVER_FACETABLE` (`Account`, `ApiKey`, `LoginChallenge`, `RetoldFacetChangeLog`) nor `Catalog.NeverFacet`.
+2. `E` has a DAL and a model table; a route-bound controller with connected Reads routes; a supported dialect (inherited).
+2b. `E` is not named by an **array** `NoAutoCRUDTables` (RAFS ignored the array and mounted public routes — a boot warning — but the app meant to hide the table: fail closed on the intent). The object form needs no rule: those tables have no endpoint, unless the app mounted one itself later (a deliberate late mount, classified as §75.2).
+3. `!deniedByPrefixes(E, Tenancy.DeniedPrefixes, EndpointVersion, EndpointPrefix)` — any of `'/<v>/E'`, `'/<v>/Es'`, the captured endpoint's own `EndpointPrefix` (`'/<v>/<DAL.scope>'`, where meadow-endpoints really mounted the routes) or its plural starts with a denied prefix (same `indexOf === 0` semantics as `Tenancy:524-532`, so `'/1.0/Customer'` also hides `CustomerNote`; a scope that differs from the model key is warned at bind).
+4. Coverage (§75.2): `Installed` → yes; `Misconfigured` → no; `Excluded` / `Unguarded`-without-column → only when `E ∈ Catalog.GlobalEntities`; `Unguarded`-with-column, `Controllerless` → no; `None` (no tenancy) → as plain RDS (yes, `ScopeAssurance 'Unscoped'`).
+5. Root and identity tables are **never facetable while Global** (Excluded / Unguarded), and a `Catalog.GlobalEntities` entry naming one that is Global here is a **boot refusal** (§73.5). With tenancy, always: the table whose primary key is the tenancy column (the tenant root), the `'Customer'` and `'User'` tables when the model has them, `tenancyConfig().RootTable` / `.IdentityTable`; plus manifest `Tenancy.RootTable || 'Customer'` and `IdentityTable || 'User'` (only when the class came from `fromManifest` and `ScopeRootAndIdentity` is not set), `MembershipConfig.CustomerTable` / `AccountTable` / `PersonaTable`, `entitlementsConfig().IdentityTable`, `authConfig().Local.UserTable` / `.MembershipTable`. When tenancy guards them (Kit: `Customer`, `User` are Installed) they are ordinary scoped entities.
+
+`canRead` (§77.2) is applied on top by the Authorizer; unknown, hidden, denied and unreadable entities are indistinguishable (§19.6).
+
+---
+
+## 79. Change capture on RAFS
+
+### 79.1 Interim intake
+
+Unchanged (§40): it wraps each Installed / Global facetable entity's route-bound controller dispatcher (`runBehavior`, an own property — independent of RAFS's patched `setBehavior`) and its DAL write methods. Every CRUD write through RAFS's routes passes the tenancy guards inside the dispatcher, so the captured rows carry the stamped tenant and owner. `Actor` from §76.4.
+
+### 79.2 Chassis raw writers (`Host.rawWriterEntities()`)
+
+The union of: `MembershipConfig.CustomerTable`, `.AccountTable`, `.PersonaTable`; the entitlement `RoleTable`, `RoleActionTable`, `UserRoleTable`, `UserActionTable`; `RecordLevelConfig.GrantTable`; `CommsConfig` `OutboxTable`, `DevInboxTable`, `TemplateTable`, `ChallengeTable`, `NotificationPrefTable`, `AccountTable`, `PersonaTable`; the Profile persona table when `profileConfig()` is non-null (`PersonaTable || Auth.Local.MembershipTable`); `Reconcile.RawWriterEntities`. `ChangeIntake.covers(E)` is false for them unless `ChangeCapture.NotifyManaged` names `E` (answers depending on them are never cached, `'NoChangeSource'`); the app may `notify()` after its own DAL-direct writes as on RDS.
+
+### 79.3 `installChangeIntake(pIntake)`
+
+Re-checks the role-table DAL wraps installed at bind (idempotent: a method whose wrapper chain — ours, the intake's `Original` — already holds this host's wrapper is left alone; the wrap goes on at bind, before the intake wraps, so the intake's wrapper stays outermost on a facetable role table and its own integrity check holds), and subscribes `'RAFSEntitlements'` (after `'Generations'` and `'ReadYourWrites'`) for intake and `notify()` events on the role tables (§77.3); returns true when entitlements are on.
+
+---
+
+## 80. Tests: gate, harness, fixtures, cases, ports
+
+### 80.1 The gate
+
+`test/support/Facet-RAFS-Harness.js` `resolveRAFS()`: `RFS_TEST_RAFS_PATH` (used exactly; an invalid path is reported, never replaced) else the monorepo checkout `<retold>/modules/private/retold-application-foundation-server` (resolved relative to the harness file). Available = a `package.json` named `retold-application-foundation-server` with its `main` present; it never `require`s the package (`load()` does). Unavailable → layers 2–3 of `test/Facet-Host-RAFS_tests.js` are **one pending test whose title is the reason** (e.g. `skipped: retold-application-foundation-server not found at … (set RFS_TEST_RAFS_PATH …)`). No new npm script: RAFS-gated tests run inside `npm test` whenever RAFS resolves (they need no docker); the PostgreSQL rows additionally need the PG gate, and run under `npm run test:pg`.
+
+### 80.2 Harness API
+
+The contract in the header of `test/support/Facet-RAFS-Harness.js` is binding: `start(pOptions, cb)` with `Port`, `Fixture`, `Provider`, `Session: 'Header' | 'Login'`, `Overlay`, `Faceting`, `Tenancy`, `Entitlements`, `LateMounts`, `Installers: 'Both' | 'RouteOnly' | 'None'`, `BeforeListen`, `Seed`, `Scale`, `LogLevel`; the harness object `server, fable, service, host, rafs, port, baseURL, fixture, seed, principals, traps, as, sessionFor, request, facet, query, reference, compare, listCount, assertTenantIsolation, login, switchTenant, stop`. Build notes: subclass the loaded RAFS class; `DataDirectory` / `SQLite.SQLiteFilePath` / `ClientBundlePath` under a fresh `os.tmpdir()` directory (removed by `stop`); `APIServerPort: 0` and an overridden `_startOrator` that listens on `127.0.0.1` and reads the bound port back from `fable.OratorServiceServer.server.address()`; the model is `seed.model()` (a deep clone: `_ensureIndexes` mutates it) plus the overlay; seed rows in `seedSteps()` (after `_loadMeadowEndpoints`, through `fable.MeadowSQLiteProvider` / the PG pool, using the fixture's `generate().Rows` and the shared insert helpers); `Installers: 'Both'` puts `foundationHookInstaller(this, Faceting)` last in `hookInstallers()` and `foundationRouteInstaller(this, Faceting)` last in `routeInstallers()` (after the `LateMounts` installer and `BeforeListen`).
+
+### 80.3 Fixture app shapes
+
+- **Header mode** (port tag 19138): `tenancyConfig()` = LabTrack `{ Column: 'IDCustomer', Exclude: [ 'LabFormType', 'ProbeExcluded', 'ProbeGlobal' ], PersonalScopes: { LabForm: { Column: 'OwnerIDUser', SessionField: 'IDUser' } }, DeniedPrefixes: [ '/1.0/ProbeDenied' ], resolveSession }` over `SESSION_HEADERS` (`x-rfs-test-tenant`, `x-rfs-test-user`; no tenant header → `{}`; `'0'` → an authenticated tenant-0 session). `NoAutoCRUDTables: { ProbeHidden: true, RFSAccount: true, RFSMembership: true, UserAction: true }`; `Faceting: { Catalog: { GlobalEntities: [ 'LabFormType', 'ProbeGlobal', 'Customer' ] }, Definitions: { Path: false, Files: [ LabTrack DEFINITIONS_PATH ] } }` (`Customer` is listed to prove rule 5 does not hide an Installed root). ProjectTrack is the same with its own `Exclude: [ 'FormType', … ]`.
+- **Probe overlay** (`test/fixtures/RAFS-Overlay-Model.json`, Stricture extended, merged into a clone of the fixture model; never edits the fixture files): `ProbeHidden` (NoAutoCRUD, `IDCustomer`), `ProbeDenied` (mounted, denied by prefix), `ProbeExcluded` (excluded, has `IDCustomer`), `ProbeGlobal` (excluded, no `IDCustomer`, in GlobalEntities), `ProbeLate` (late mount, has `IDCustomer`), `ProbeLateGlobal` (late mount, no `IDCustomer`, in GlobalEntities); each has `IDLabForm` / `IDMaterialIntake` FKs and a `Name` so it can be a root, a hop and a label target.
+- **Login mode** (port tag 19139), the Kit identity shape over overlay tables: `RFSAccount` (`IDRFSAccount`, `LoginID`, `Password`, `SystemRole`; the global login) and `RFSMembership` (`IDRFSMembership`, `IDRFSAccount`, `IDCustomer`, `IDUser` = the fixture persona; one row per principal per tenant), both NoAutoCRUD; `Role` / `RoleAction` / `UserRole` (mounted, tenancy-scoped) and `UserAction` (NoAutoCRUD) in the Kit DDL shape. `EnableAuthentication`; `Auth.Local = { UserTable: 'RFSAccount', LoginField: 'LoginID', PasswordField: 'Password', IDField: 'IDRFSAccount', TenantField: 'IDCustomer', MembershipTable: 'RFSMembership', MembershipUserField: 'IDRFSAccount', MembershipTenantField: 'IDCustomer' }`; entitlements `{ IdentityTable: 'RFSMembership', IdentityAccountField: 'IDRFSAccount', IdentityUserField: 'IDUser', TenantField: 'IDCustomer', RoleTable: 'Role', RoleActionTable: 'RoleAction', UserRoleTable: 'UserRole', UserActionTable: 'UserAction', ExcludeEntities: [ 'LabFormType' ], DefaultRoles }`, so the enrichment writes the fixture persona into `UserRecord.IDUser` (the LabForm owner scope); `membershipConfig() = { AccountTable: 'RFSAccount', AccountIDField: 'IDRFSAccount', PersonaTable: 'RFSMembership', PersonaAccountField: 'IDRFSAccount', PersonaIDField: 'IDUser', TenantField: 'IDCustomer' }` for the switch route (which resets `IDUser` to 0, re-enriched next request). Passwords (`AuthLocal.hashPassword`), memberships and role grants are seeded in `seedSteps()`. Principals log in through `POST /1.0/Authenticate` and carry the `RetoldSessionID` cookie.
+
+### 80.4 Cases
+
+| Row | Layer | Assertion |
+|---|---|---|
+| M1–M6 | module surface (passing) | skeleton fails closed; `isApplicationServer`; `deniedByPrefixes`; the step convention (async callback, raw-step usage error, Anticipate boot failure); option precedence; the gate's reason |
+| P1–P5 | RAFS pins (passing when RAFS resolves) | boot order + statics; tenancy marker + bare outer group + `setBehavior` stays inside; the fence refuses `IS` (400) and admits `=` + null; `requiredActionFor` ignores `/1.0/Facet/…` and maps a colliding prefix; anonymous `{}` and the tenant-0 default |
+| R1 | Header | both installers mount before listen; `getHostKind()`; the coverage table classifies every model table as §75.2 |
+| R2 | Header | E3 A and B as Tech / OtherTech: Live == Reference == the hand SQL of §31.5; O2 round trips counted through the stock RAFS Count route |
+| R3 | Header | `assertTenantIsolation` on every Installed entity, both tenants; a client clause naming the other tenant's `IDCustomer` (inside the fence) matches nothing |
+| R4 | Header | tenant 0 and anonymous → 401 before any SQL; the RAFS list for the tenant-0 session → 200; owner 0 → 401 only on the owner-scoped root (`LabForm`), 200 equal to the RAFS list on `MaterialIntake`, `LabForm` absent from its Describe |
+| R5 | Header | `LabForm` facets as Tech count only Tech's forms; the `TenantOnly` E3 hop sees Colleague's; owner 0 → 401 |
+| R6 | Header | every probe as root (404), hop (403) and label target (unlabeled); `Customer` (Installed root) facetable; `ProbeLate` 404 + boot warning; `ProbeLateGlobal` Global |
+| R7 | Header | the capture of an Installed entity: `HostWraps: 1`, `Appended` = exactly the policy entries, not Opaque; a later non-chaining `setBehavior` stays scoped; a direct `_BehaviorFunctions` write → 500 under Strict; `Scope.Guard 'Repair'` fails the boot |
+| R8 | Header | a Missing / `IS NULL` clause on SQLite passes through the swap and equals the Reference |
+| R9 | Header | a CRUD write by tenant 1 bumps only tenant-1 keys; raw-writer tables are uncovered; read-your-writes upgrades on the identity key |
+| R10 | Header | `fable.Orator.stopService` closes SSE streams; nothing keeps Mocha alive |
+| L1 | Login | two tenants by cookie; a tenant switch re-scopes facets and changes the principal key |
+| L2 | Login | a role without `MaterialIntake.read`: root 404, hop 403, unlabeled keys; `ExcludeEntities` readable; a `UserAction` deny wins; `EntitlementCacheMS: 0` reflects a grant immediately |
+| L3 | Login | different role sets → different `RoleSetHash` → separate cache entries (no label leak with `Cache.Enabled`) |
+| L4 | Login | `Admin.Routes: true`: tenant owner 403, `SystemRole` root 202; root's queries stay tenant-scoped |
+| L5 | Login | enrichment drives `OwnerIDUser`; after a switch the next request is re-enriched |
+| PG1 | PG gate | R2–R4 with `DatabaseProvider: 'PostgreSQL'` on `rfs-test-postgres` (a fresh `rfs_<pid>_<n>` database) |
+| V1 / V5 | Login | role tables `NeverFacet`, `EntitlementCacheMS: 60000`: Tech deletes Colleague's `UserRole` rows through `DELETE /1.0/UserRole/:id` → Colleague's RAFS list 403 and facet 404 at once; Colleague's open stream closes `{ Reason: 'Revalidate' }` |
+| V2 | Login | a DAL-direct `Entitlements.grantRole` re-grants: the next facet is 200 (cache dropped); Tech's open stream is revalidated and stays open |
+| V3 | Login | an in-process query with an Account-row session without `IDUser`: enriched through `Entitlements.resolveIDUser` (the session now carries the persona), owner scope = Tech's |
+| V4 | Login, `Tenancy: false` | the cookie session resolved through `OratorAuthentication`: Tech facets `MaterialIntake` = its RAFS list; anonymous → 401 on Query, Keys, Describe and an `ExcludeEntities` root |
+| V6 | Header, `LateMounts: []` | an app route installer puts RAFS's tenancy layer on `ProbeExcluded` between the phases: Installed, in the catalog, covered by the intake, each tenant's facet = its now-guarded RAFS list |
+
+### 80.5 Ports
+
+| Port | File |
+|---|---|
+| 19138 | `test/Facet-Host-RAFS_tests.js` (Header-mode harnesses) |
+| 19139 | `test/Facet-Host-RAFS_tests.js` (Login-mode harnesses) |
+| 19194 | `debug/rafs-smoke.js` (binds it: harness `FixedPort: true`, `SMOKE_PORT`) |
+
+Registry tags only: every harness binds `127.0.0.1:0` and reads the port back.
+
+---
+
+## 81. Ambiguities resolved (Part V decisions)
+
+1. **Required set = what RAFS installed**, read from the controller marker (or RAFS-1's export), not from `Endpoints − Exclude` and not from "has the column" alone (F3, §75).
+2. **Late mounts** are classified at the route phase; with the tenancy column they are never facetable (their list leaks); without it they are Global by opt-in. Endpoints must be registered in `pServer.Endpoints` (RAFS's own map) to be seen at all; the route installer goes last.
+3. **Fence compatibility is the service's job**, done on its own side (peeling F1, the `IS` swap F2), and the Guard still asserts the result; RAFS is not asked to change.
+4. **Principal from `pRequest.UserSession`, never from meadow `SessionData`** (no `LoggedIn` in RAFS sessions, F4), through the tenancy `getValue` functions themselves.
+5. **No lookup of our own for `IDUser`** (deviation from design 06 §2.2): only RAFS's own `Entitlements.resolveIDUser`, written into the same `UserRecord` the guard reads (exactly the pre-handler's enrichment, §76.2); with entitlements off, nothing — unset → 401 where the entity needs it.
+6. **Tenant 0 → 401** on every route, even for a platform principal; **owner 0 / an unset `Required` value → 401 only where the root needs it**, denied as any other reference (§75.5).
+7. **Entitlements are resolved in `resolvePrincipal`** (async) and asserted synchronously through `canRead`; `RoleSetHash` keys the cache Gate; identity keys (`principalIdentityKey`) key read-your-writes (F5, F6).
+8. **Global data is not an entitlement bypass**: a gated global entity needs `<E>.read`; ungated (`ExcludeEntities`) entities need only authentication, mirroring the RAFS gate.
+9. **Root / identity tables** are refused only while Global; scoped ones (Kit's `Customer`, `User`) are ordinary.
+10. **Options**: first source wins whole; the tenancy policy never comes from `Faceting`; `Scope.Policy` objects are a boot refusal.
+11. **Install failures fail the boot**; the installers call back asynchronously, exactly once.
+12. **One host class**, extending the DataService host (shared meadow-endpoints half), registered in `SUB_SERVICES`; the private package is duck-typed and only the tests load it.
+13. **Chassis DAL-direct writers** are uncovered for the cache rather than guessed (F7).
+14. **Platform principal** = Membership `SystemAdminField/Value`; Admin routes only.
+15. **Sluice is out of scope**: no Sluice shim; `Compat.SluiceAggregate`, the ILIKE precondition (SL-1) and Sluice's ScopeBag mapper stay with Sluice.
+
+---
+
+### As built (Part V integration; items continue the numbering)
+
+16. **The end-to-end O2 on RAFS** counts a bucket through the stock RAFS Count route as the same session wherever the list syntax carries the body (column clauses, FilterStrings); bodies with Scopes, join clauses or declared facets (E1, E2, E3A, E3B) are counted through the Reference, which reads each entity through its own route-bound list waterfall (RAFS's tenancy guards included) as the same session. On SQLite a NULL filter cannot go through the stock list (FoxHound renders `IS NULL :p`, FH-2), so R8 counts it through the Reference and the seed.
+17. **An ad-hoc path FacetID into an entity the principal cannot facet** (`E.IDX>X.c`) answers the per-facet `FACET_UNKNOWN_FACET` of a path into an entity that does not exist (no schema disclosure); a declared facet's own hop is `403 FACET_FORBIDDEN`, a join clause naming it fails the request with 403 (§19.6 unchanged).
+18. **Policy columns are not auto-facetable** (`LabForm.OwnerIDUser` is an unknown facet), so the owner scope is asserted through Totals, Keys and the capture, not a facet on the column.
+19. **A host 400 from a behavior** stays `FACET_INTERNAL` through `fromBehaviorError` (logged with its status); the swap removes the one faceting-rendered shape RAFS's fence refuses.
+20. **`covers(E)`**: the raw-writer rule applies to the `Interim` and `None` sources (not `Bus`, which sees DAL-direct writes); a throwing `rawWriterEntities()` fails closed (uncovered).
+21. **The harness** creates the fixture tables from the fixture's nullable DDL before RAFS's schema step (RAFS's generated DDL is NOT NULL with defaults); in Login mode the tenant-0 account has no roles, so its stock list is 403 at the entitlements gate (the "list answers 200" half of §75.5 is asserted on Header sessions).
+
+### Host review decisions (items continue the numbering; §83 has the finding-by-finding record)
+
+22. **Strict only with tenancy** (`'Repair'` refused): faceting never fills in a displaced RAFS guard (§73.5).
+23. **Header sessions are refused outright on RAFS** (`Scope.AllowHeaderSession` is not accepted): the lists would follow the header while the principal follows the pre-handler.
+24. **Facets are never more permissive than RAFS's own gate**: the action set is resolved per request by default and for RAFS's own (IDUser, TenantField) pair, a Strategy function only narrows it, every role-table write in the process invalidates whatever cache is configured, the persona field is RAFS's own (no default), anonymous principals are refused on any authenticating host, and options handed to the second installer must equal the running ones.
+25. **Without tenancy the host resolves the session itself, with RAFS's own function** (`OratorAuthentication.resolveSessionForRequest`, the one the tenancy pre-handler would call) and enriches it with RAFS's `Entitlements.resolveIDUser`: no reimplementation, and the alternative (every principal anonymous) would make an authenticating single-tenant app unusable. Facets can then be stricter than RAFS's own lists, which nothing gates in that shape (warned at bind).
+26. **Scope requirements are per entity** beyond the tenancy column: an owner-scope value is needed only where an entity needs it (RAFS evaluates a personal spec only on that entity's routes).
+
+## 82. Seams (not in Part V)
+
+| Seam | Part V behavior |
+|---|---|
+| `Catalog.Controllerless` declarations (`06 §3.4`: NoAutoCRUD hops with `AuthorizeAs` and declared scope) | refused / not facetable, warned at bind (as §12.1) |
+| **[UPSTREAM RAFS-1]** `tenancyScopedEntities()`, tenancy on `addBehavior` | used when exported; the marker otherwise |
+| **[UPSTREAM RAFS-2]** tenancy 401 on scope value 0 | the service already refuses (§75.5) |
+| **[UPSTREAM RAFS-3]** `Entitlements.RouteActions` | the facet routes self-gate; the RoutePrefix refusal (§77.5) |
+| **[UPSTREAM RAFS-4]** `options.Faceting` → a `_mountFaceting` step; top-level manifest `Faceting` | the subclass installers; `Options.Faceting` in the manifest; the top-level block is already read (§73.2) |
+| **[UPSTREAM RAFS-5]** documented `NoAutoCRUDTables` map / `Options.Indexes` | warning on an array; index advice (IndexPlan) is later |
+| **[UPSTREAM RAFS-6]** cross-tenant FK validation | Live routes such rows to Missing (§4.3 of 06) |
+| Role `'Agent'` on RAFS (Hybrid, ScopeEcho, service auth) | refused (§73.5) |
+| Durable change log (`RetoldFacetChangeLog` must not be in `pServer.Endpoints`) | not present |
+| A `MeadowChangeBus` on RAFS | `'Auto'` picks it when present (§40.1) |
+| Cross-process entitlement invalidation | not present: writes by other processes are not seen (keep `EntitlementCacheMS` 0 there, the default); an app bridge may `notify({ Entity: '<RoleTable>', Tenants })` |
+| Per-entity session values (two PersonalScopes on one column through different app getValues) | the first entry's function is used for the column; a disagreement is a ScopeGuard 500 on the other entity (§73.5 warning) |
+
+## 83. Host review fixes (after the Part V build; F<n> = finding n of the host review, in its order)
+
+| # | Finding | Decision | Where | Regression |
+|---|---|---|---|---|
+| F1, F11 | the entitlement cache was invalidated only by intake events, i.e. only when the role tables were facetable (NeverFacet / DeniedPrefixes / Exclude / NoAutoCRUD role tables, DAL-direct grants, other processes) | **Fixed**: the bind wraps the role tables' DAL write methods (invalidation only, any writer in the process, tenant-scoped from the query, `'*'` when unprovable) and revalidates open streams; `EntitlementCacheMS` defaults to 0 (RAFS never caches); a positive value is warned as per-process | §77.3, §79.3 | unit "invalidation does not depend on facetability"; RAFS V1 (the probe of the finding: NeverFacet role tables, `DELETE /1.0/UserRole/:id`, 60 s cache → 404 at once), V2 |
+| F2 | an authenticating app without `tenancyConfig()` produced an always-anonymous principal (nothing resolves sessions) | **Fixed**: without tenancy the host resolves the HTTP session with RAFS's own `OratorAuthentication.resolveSessionForRequest` and enriches it with `Entitlements.resolveIDUser`; a loud bind warning explains that RAFS's own gate never runs in that shape | §76.1, §73.5 | unit "an authenticating app without tenancyConfig()"; RAFS V4 |
+| F3 | owner-scope values were required on every request; a throwing personal getValue failed every request | **Fixed**: tenancy column on every route, the root's own requirements for that root, the Authorizer for every other reference; personal values computed per column in isolation (`UnresolvedScopeColumns` → 500 only where needed) | §75.5, §76.3 | unit "tenant 0 and anonymous are 401 … owner 0 only where …"; RAFS R4 |
+| F4 | `captureLateMounts` notified only when a new controller was captured | **Fixed**: also when any entity's class changed | §73.4 | unit "captureLateMounts follows coverage that changed"; RAFS V6 (the finding's probe) |
+| F5 | a hook installer placed before `_mountTenancy` / `_mountMembership` bound silently | **Fixed**: boot refusal when tenancy is set but no mounted, non-excluded endpoint carries the marker, or `membershipConfig()` is set without `pServer.MembershipConfig` (the alternative "re-run `_captureConfiguration` in the route phase" was not needed once the bind refuses) | §73.5 | unit "bind refusals … a hook that ran too early" |
+| F6, F18 | the route installer's own options were ignored silently | **Fixed**: explicit options handed to the second installer are compared with the running service's (`optionDifferences`); a difference fails the boot naming the paths; omitting them reuses the first | §73.1 | unit "the second installer refuses options that differ" |
+| F7 | the PersonalScopes conflict refusal compared getValue functions by identity and covered entries RAFS never evaluates | **Fixed**: checked only over entities RAFS put a layer on (re-checked at the route phase); two default getValues with different SessionFields still refuse; app functions are accepted with a warning (they must agree; the guard fails closed when they do not) — keying ScopeValues per entity was rejected as a wide change to the guard, the intake and the cache key for a case the guard already fails closed | §73.5 | unit "bind refusals … personal-scope column conflicts on guarded entities only" |
+| F8 | the shutdown hook was installed only by the route phase | **Fixed**: installed by the hook phase too (idempotent), with an info line that the routes mount only with `foundationRouteInstaller` | §73.3 | unit "the shutdown hook is installed by the hook phase" |
+| F9 | under `AllowHeaderSession` the principal and the guard read different sessions | **Fixed**: header sessions are refused outright on RAFS (also for a controller mounted between the phases) | §73.5 | unit "bind refusals: header sessions …", "captureLateMounts … header sessions refuses the route phase" |
+| F10 | in-process principals were never persona-enriched | **Fixed**: `Entitlements.resolveIDUser` written into the same `UserRecord` (what the pre-handler does) | §76.2 | unit "the persona is written onto a session …"; RAFS V3 |
+| F12 | SSE streams were never re-authorized while open | **Fixed**: `Host.revalidatePrincipal` (fresh session read through the app's own resolver, re-resolved roles), `SSE.revalidateAll(pTenants)` on every role-table write, `SSE.RevalidateMS` 60 s on RAFS (`FOUNDATION_DEFAULTS`) | §76.5, §73.2 | unit "… revalidatePrincipal re-reads the session …"; RAFS V1 (the revoked stream closes), V2 |
+| F13 | a function `Authorization.Strategy` replaced the entitlements check | **Fixed**: with entitlements it only narrows (`'EntitlementsAndFunction'`); the module is required with a function too. No opt-in to replace (nothing needs it) | §77.1 | unit "entitlements (§77.2) …" |
+| F14 | anonymous principals were not refused on an authenticating app without tenancy; `ExcludeEntities` passed anonymous principals | **Fixed**: `Host.authenticationRequired()`; the resolver and the Authorizer refuse anonymous principals on such a host (AllowAnonymous aside); `ExcludeEntities` need `Kind 'User'`; README corrected | §76.3, §77.2 | unit "an authenticating app without tenancyConfig()"; RAFS V4 |
+| F15 | an array `NoAutoCRUDTables` only warned | **Fixed** for the array form (never facetable). **Rejected** for the object form's "any truthy key": those tables have no endpoint unless the app mounts one itself after `_loadMeadowEndpoints` — the documented late-mount pattern (the harness's `ProbeLate*` are exactly that), which §75.2 already classifies | §78 rule 2b | unit "isFacetable (§78) …" |
+| F16 | `deniedByPrefixes` used the model key, not the mounted route | **Fixed**: the captured endpoint's `EndpointPrefix` (and plural) is checked too; a scope ≠ key is warned | §78 rule 3 | unit "isFacetable (§78) …" |
+| F17 | the persona field defaulted to `'IDUser'` where RAFS reads the config raw | **Fixed**: a config without `IdentityUserField`, `IdentityAccountField` or `TenantField` is a boot refusal; the field is the config's; the action set is resolved for `R[TenantField]` exactly as RAFS's gate | §73.5, §76.1 | unit "bind refusals: … without the fields RAFS reads raw" |
+| F19 | root / identity tables were protected only through manifest / membership / auth names | **Fixed**: with tenancy the tenancy-keyed root, `Customer` / `User` when present and `tenancyConfig().RootTable / IdentityTable` always count; naming a Global one in `GlobalEntities` refuses the boot | §78 rule 5 | unit "root and identity tables …" |
+| F20 | `Scope.Guard 'Repair'` was accepted with tenancy | **Fixed**: refused (Strict only), and `Scope.Behavior` / `BehaviorOverrides` must be a read hash Retold-Tenancy guards for every Installed entity; no acknowledgement option | §73.5 | unit "bind refusals …"; RAFS "R7 Repair: … fails the RAFS boot" |

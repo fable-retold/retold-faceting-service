@@ -1,0 +1,10 @@
+graph LR
+    C1["c1: Language = eng"] --> GenreF["Genre facet<br/>counts c1 and c3"]
+    C1 --> YearF["Year facet<br/>counts c1 and c2"]
+    C1 --> Total["Total<br/>counts c1, c2 and c3"]
+    C2["c2: Genre = Fantasy"] --> LangF["Language facet<br/>counts c2 and c3"]
+    C2 --> YearF
+    C2 --> Total
+    C3["c3: PublicationYear in 1950 to 1999"] --> LangF
+    C3 --> GenreF
+    C3 --> Total
