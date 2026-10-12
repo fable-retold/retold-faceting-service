@@ -1,13 +1,13 @@
 {
-	"Generated": "2026-10-10T17:21:17.553Z",
+	"Generated": "2026-10-12T05:06:51.748Z",
 	"Mode": "module",
 	"GitHubOrg": "fable-retold",
-	"DefaultBranch": "master",
+	"DefaultBranch": "main",
 	"Module": {
 		"Name": "retold-faceting-service",
 		"Repo": "retold-faceting-service",
 		"Group": "",
-		"Branch": "master",
+		"Branch": "main",
 		"HasDocs": true,
 		"HasCover": true,
 		"Sidebar": [

@@ -2,6 +2,6 @@
 	"Name": "retold-faceting-service",
 	"Version": "0.0.1",
 	"Description": "Facets (terms, histograms, stats, pivots) over any retold-data-service, computed from scoped meadow queries.",
-	"GeneratedAt": "2026-10-10T17:21:18.009Z",
-	"GitCommit": "c4dae1a"
+	"GeneratedAt": "2026-10-12T05:06:52.156Z",
+	"GitCommit": "cd73869"
 }
